@@ -8,6 +8,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
+	"github.com/liuscraft/orion-x/internal/text"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 
@@ -59,6 +60,7 @@ type orchestratorImpl struct {
 	audioOutPipe audio.AudioOutPipe
 	audioInPipe  audio.AudioInPipe
 	toolExecutor tools.ToolExecutor
+	segmenter    *text.Segmenter
 
 	currentEmotion string
 	ctx            context.Context
@@ -81,6 +83,7 @@ func NewOrchestrator(
 		audioOutPipe: audioOutPipe,
 		audioInPipe:  audioInPipe,
 		toolExecutor: toolExecutor,
+		segmenter:    text.NewSegmenter(120),
 	}
 }
 
@@ -267,13 +270,32 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 	case *agent.TextChunkEvent:
 		o.OnLLMTextChunk(e.Chunk)
 		if e.Emotion != "" && e.Emotion != o.currentEmotion {
+			o.currentEmotion = e.Emotion
 			o.eventBus.Publish(NewLLMEmotionChangedEvent(e.Emotion))
 		}
+
+		for _, sentence := range o.segmenter.Feed(e.Chunk) {
+			if sentence != "" {
+				err := o.audioOutPipe.PlayTTS(sentence, o.currentEmotion)
+				if err != nil {
+					log.Printf("PlayTTS error: %v", err)
+				}
+				o.transitionTo(StateSpeaking)
+			}
+		}
 	case *agent.EmotionChangedEvent:
+		o.currentEmotion = e.Emotion
 		o.eventBus.Publish(NewLLMEmotionChangedEvent(e.Emotion))
 	case *agent.ToolCallRequestedEvent:
 		o.OnToolCall(e.Tool, e.Args)
 	case *agent.FinishedEvent:
+		if last := o.segmenter.Flush(); last != "" {
+			err := o.audioOutPipe.PlayTTS(last, o.currentEmotion)
+			if err != nil {
+				log.Printf("PlayTTS error: %v", err)
+			}
+			o.transitionTo(StateSpeaking)
+		}
 		o.transitionTo(StateIdle)
 	}
 }

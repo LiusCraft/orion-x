@@ -48,6 +48,13 @@ internal/
 - `OnLLMTextChunk(chunk string)`
 - `OnLLMFinished()`
 
+**实现细节**：
+- 集成 `text.Segmenter` 进行流式文本分句
+- 接收 `VoiceAgent` 的 `TextChunkEvent` 进行分句处理
+- 对每个完整句子调用 `AudioOutPipe.PlayTTS()` 生成和播放音频
+- 在 `FinishedEvent` 时调用 `Segmenter.Flush()` 处理剩余文本
+- 状态转换：`Processing` → `Speaking`（开始播放时）→ `Idle`（完成时）
+
 #### EventBus (接口)
 - `Publish(event Event)`
 - `Subscribe(eventType EventType, handler EventHandler)`
@@ -111,10 +118,24 @@ internal/
 #### AudioOutPipe (接口)
 - `Start(ctx context.Context) error`
 - `Stop() error`
-- `PlayTTS(audio io.Reader, emotion string) error`
+- `PlayTTS(text string, emotion string) error`
 - `PlayResource(audio io.Reader) error`
 - `Interrupt() error`
 - `SetMixer(mixer AudioMixer)`
+
+**实现细节**：
+- 集成 `tts.DashScopeProvider` 进行文本到音频的转换
+- 根据情绪映射到不同的音色
+- 音色映射表：
+  - `happy` → `longanyang`
+  - `sad` → `zhichu`
+  - `angry` → `zhimeng`
+  - `calm` → `longxiaochun`
+  - `excited` → `longanyang`
+  - `default` → `longanyang`
+- 使用 `AudioMixer` 管理音频流播放
+- 支持中断功能（清空 TTS 流和资源音频）
+- 并发安全（使用 `sync.Mutex`）
 
 #### AudioInPipe (接口)
 - `Start(ctx context.Context) error`
@@ -198,28 +219,30 @@ Idle ─────→ Processing ───→ Speaking
 
 ## 下一步工作
 
-### 需要实现的功能
+### 已完成功能
 
 1. **voicebot 包**
-   - `Orchestrator` 完整实现
-   - 事件总线和状态机集成
+    - [x] `Orchestrator` 完整实现
+    - [x] 事件总线和状态机集成
+    - [x] 集成 `text.Segmenter` 分句器和 TTS 生成
 
 2. **agent 包**
-   - `VoiceAgent` 完整实现
-   - 集成现有 `internal/ai/llm.go` 的工具调用逻辑
-   - 启用流式LLM输出
+    - [x] `VoiceAgent` 完整实现
+    - [x] 集成现有 `internal/ai/llm.go` 的工具调用逻辑
+    - [x] 启用流式LLM输出
+    - [x] 集成 `EmotionExtractor` 和 `MarkdownFilter`
 
 3. **audio 包**
-   - `AudioMixer` 实现（音频混音）
-   - `AudioOutPipe` 实现（基于现有TTS）
-   - `AudioInPipe` 实现（基于现有ASR）
+    - [x] `AudioMixer` 实现（音频混音）
+    - [x] `AudioOutPipe` 实现（基于现有TTS）
+    - [ ] `AudioInPipe` 实现（基于现有ASR）
 
 4. **text 包**
-   - `MarkdownFilter` 完整实现
+    - [ ] `MarkdownFilter` 完整实现
 
 5. **tools 包**
-   - 实现真实工具（如天气API调用）
-   - 工具注册和发现机制
+    - 实现真实工具（如天气API调用）
+    - 工具注册和发现机制
 
 ### 需要集成的现有模块
 

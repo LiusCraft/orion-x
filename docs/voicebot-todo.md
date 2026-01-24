@@ -9,6 +9,7 @@
 - [x] 实现组件协调（启动/停止）
 - [x] 实现中断处理逻辑
 - [x] 集成各模块接口（先使用mock验证流程）
+- [x] 集成 `text.Segmenter` 分句器和 TTS 生成
 
 ### 2. VoiceAgent 实现 (优先级: 高)
 - [x] 实现 `VoiceAgent.Process()` 方法
@@ -18,7 +19,7 @@
 - [x] 区分查询类工具和动作类工具的流程
 - [x] 实现情绪标签注入到Prompt（优化为标签在句子开头）
 - [x] 集成 `EmotionExtractor` 和 `MarkdownFilter`
-- [ ] 集成 `text.Segmenter` 分句器
+- [x] 集成 `text.Segmenter` 分句器
 
 ### 3. AudioMixer 实现 (优先级: 高)
 - [x] 实现双通道音频混合逻辑
@@ -27,12 +28,12 @@
 - [x] 集成音频播放器（PortAudio或其他）
 
 ### 4. AudioOutPipe 实现 (优先级: 高)
-- [ ] 实现 `PlayTTS()` 方法
-- [ ] 实现 `PlayResource()` 方法
-- [ ] 实现 `Interrupt()` 方法（立即停止播放）
-- [ ] 集成 `AudioMixer`
-- [ ] 集成 `internal/tts/dashscope.go` 的TTS服务
-- [ ] 实现音色切换逻辑（基于情绪）
+- [x] 实现 `PlayTTS()` 方法
+- [x] 实现 `PlayResource()` 方法
+- [x] 实现 `Interrupt()` 方法（立即停止播放）
+- [x] 集成 `AudioMixer`
+- [x] 集成 `internal/tts/dashscope.go` 的TTS服务
+- [x] 实现音色切换逻辑（基于情绪）
 
 ### 5. AudioInPipe 实现 (优先级: 高)
 - [ ] 实现完整的状态机逻辑

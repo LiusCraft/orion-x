@@ -9,7 +9,7 @@ import (
 type AudioOutPipe interface {
 	Start(ctx context.Context) error
 	Stop() error
-	PlayTTS(audio io.Reader, emotion string) error
+	PlayTTS(text string, emotion string) error
 	PlayResource(audio io.Reader) error
 	Interrupt() error
 	SetMixer(mixer AudioMixer)
