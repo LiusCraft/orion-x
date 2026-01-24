@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -387,6 +388,7 @@ type eventMessage struct {
 }
 
 func mapDashScopeError(code, message string) error {
+	log.Printf("TTS error: code=%s, message=%s", code, message)
 	lower := strings.ToLower(code + " " + message)
 	switch {
 	case strings.Contains(lower, "unauthorized"), strings.Contains(lower, "authentication"):

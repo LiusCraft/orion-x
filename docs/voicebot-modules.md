@@ -235,7 +235,7 @@ Idle ─────→ Processing ───→ Speaking
 3. **audio 包**
     - [x] `AudioMixer` 实现（音频混音）
     - [x] `AudioOutPipe` 实现（基于现有TTS）
-    - [ ] `AudioInPipe` 实现（基于现有ASR）
+    - [x] `AudioInPipe` 实现（基于现有ASR）
 
 4. **text 包**
     - [ ] `MarkdownFilter` 完整实现

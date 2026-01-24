@@ -19,6 +19,7 @@ type mixerImpl struct {
 	ctx                   context.Context
 	cancel                context.CancelFunc
 	player                *portaudio.Stream
+	started               bool
 }
 
 func NewMixer(config *MixerConfig) (AudioMixer, error) {
@@ -98,12 +99,22 @@ func (m *mixerImpl) OnTTSFinished() {
 
 func (m *mixerImpl) Start() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.player != nil {
-		if err := m.player.Start(); err != nil {
-			log.Printf("AudioMixer: failed to start stream: %v", err)
-		}
+	if m.player == nil || m.started {
+		m.mu.Unlock()
+		return
 	}
+	player := m.player
+	m.started = true
+	m.mu.Unlock()
+
+	go func() {
+		if err := player.Start(); err != nil {
+			log.Printf("AudioMixer: failed to start stream: %v", err)
+			m.mu.Lock()
+			m.started = false
+			m.mu.Unlock()
+		}
+	}()
 }
 
 func (m *mixerImpl) Stop() {
@@ -111,14 +122,23 @@ func (m *mixerImpl) Stop() {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	if m.player != nil {
-		if err := m.player.Stop(); err != nil {
+	player := m.player
+	m.player = nil
+	m.started = false
+	m.mu.Unlock()
+
+	if player != nil {
+		if err := player.Abort(); err != nil {
+			log.Printf("AudioMixer: failed to abort stream: %v", err)
+		}
+		if err := player.Stop(); err != nil {
 			log.Printf("AudioMixer: failed to stop stream: %v", err)
 		}
-		m.player.Close()
-		m.player = nil
+		if err := player.Close(); err != nil {
+			log.Printf("AudioMixer: failed to close stream: %v", err)
+		}
 	}
-	m.mu.Unlock()
+
 	portaudio.Terminate()
 }
 

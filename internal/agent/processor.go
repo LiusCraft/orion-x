@@ -46,6 +46,7 @@ func (e *emotionExtractor) Extract(text string) string {
 // MarkdownFilter Markdown过滤器
 type MarkdownFilter interface {
 	Filter(text string) string
+	RemoveEmotionTags(text string) string
 }
 
 // markdownFilter Markdown过滤器实现
@@ -74,6 +75,10 @@ func (f *markdownFilter) Filter(text string) string {
 	result = removeEmotionTags(result)
 	// TODO: 实现完整的Markdown过滤
 	return result
+}
+
+func (f *markdownFilter) RemoveEmotionTags(text string) string {
+	return removeEmotionTags(text)
 }
 
 func removeEmotionTags(text string) string {

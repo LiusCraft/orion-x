@@ -2,6 +2,13 @@
 
 ## 阶段一：核心功能实现
 
+### 0. 模块串联 (优先级: 高) ⭐️ 已完成
+- [x] 创建主程序 `cmd/voicebot/main.go`
+- [x] 集成 Orchestrator、VoiceAgent、AudioOutPipe、AudioInPipe
+- [x] 集成 ToolExecutor 和工具
+- [x] 验证各模块能够正确协作
+- [x] 添加集成测试
+
 ### 1. Orchestrator 实现 (优先级: 高) ⭐️ 优先
 - [x] 搭建基础框架和事件总线
 - [x] 实现状态机（Idle/Listening/Processing/Speaking）
@@ -34,20 +41,30 @@
 - [x] 集成 `AudioMixer`
 - [x] 集成 `internal/tts/dashscope.go` 的TTS服务
 - [x] 实现音色切换逻辑（基于情绪）
+- [x] 修复 TTS 播放阻塞/不出声问题
 
 ### 5. AudioInPipe 实现 (优先级: 高)
-- [ ] 实现完整的状态机逻辑
-- [ ] 实现事件路由
-- [ ] 集成 `EventBus`
-- [ ] 协调各组件启动/停止
-- [ ] 处理中断逻辑
+- [x] 实现完整的状态机逻辑
+- [x] 实现事件路由
+- [x] 集成 `EventBus`
+- [x] 协调各组件启动/停止
+- [x] 处理中断逻辑
+- [x] 实现音频采集（从麦克风读取数据）
+- [x] 设计 AudioSource 接口支持多种输入源
+- [x] 修复 Ctrl+C 退出卡住问题
+- [x] 实现 MicrophoneSource 麦克风音频源
+- [x] 修复 AudioInPipe.Stop() 等待卡住问题
+- [x] 修复 MicrophoneSource 关闭时阻塞问题
+- [x] 集成 VAD 检测（可选）
+- [x] 修复 TTS DNS 查询被取消问题
+- [x] 修复 Mixer.Start() 可能阻塞问题
 
 ## 阶段二：工具集成
 
 ### 6. 工具实现 (优先级: 中)
 - [ ] 实现真实的天气查询工具（调用天气API）
 - [ ] 实现真实的音乐播放工具（集成音乐服务）
-- [ ] 实现时间获取工具
+- [x] 实现时间获取工具
 - [ ] 实现搜索工具
 - [ ] 添加更多实用工具
 

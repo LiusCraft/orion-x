@@ -1,6 +1,13 @@
 package asr
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var (
+	ErrAPIKeyRequired = errors.New("DASHSCOPE_API_KEY is required")
+)
 
 type Config struct {
 	APIKey                     string

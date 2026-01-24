@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
+	"os"
 	"sync"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -20,7 +22,13 @@ type voiceAgentImpl struct {
 }
 
 func NewVoiceAgent(ctx context.Context) (VoiceAgent, error) {
-	key := "b69a4b0f05124a59835be2adf1ac84a5.yvFfw6QQNJDXT7IP"
+	key := os.Getenv("ZHIPU_API_KEY")
+	if key == "" {
+		key = os.Getenv("DASHSCOPE_API_KEY")
+	}
+	if key == "" {
+		return nil, errors.New("ZHIPU_API_KEY or DASHSCOPE_API_KEY environment variable is required")
+	}
 	baseURL := "https://open.bigmodel.cn/api/coding/paas/v4"
 
 	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
@@ -42,6 +50,7 @@ func NewVoiceAgent(ctx context.Context) (VoiceAgent, error) {
 }
 
 func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan AgentEvent, error) {
+	log.Printf("VoiceAgent: processing input: %s", input)
 	eventChan := make(chan AgentEvent)
 	var wg sync.WaitGroup
 
@@ -51,27 +60,41 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 		defer close(eventChan)
 
 		messages := []*schema.Message{
-			schema.SystemMessage("你是一个语音助手。在每个句子的开头包含情绪标签，格式为 [EMO:emotion]，可选值：happy, sad, angry, calm, excited。例如：[EMO:happy] 你好啊！[EMO:calm] 今天有什么可以帮你？"),
+			schema.SystemMessage(`你是一个语音助手。
+
+规则：
+1. 当用户询问时间时，请使用 getTime 工具获取准确时间。
+
+2. 当用户询问天气时，请使用 getWeather 工具。
+
+工具定义：
+- getTime: 获取当前时间，返回日期、时间、星期、时区等信息
+- getWeather: 获取指定城市的天气信息，需要参数 city（城市名称）`),
 			schema.UserMessage(input),
 		}
 
+		log.Printf("VoiceAgent: starting LLM stream...")
 		stream, err := v.chatModel.Stream(ctx, messages)
 		if err != nil {
+			log.Printf("VoiceAgent: LLM stream error: %v", err)
 			eventChan <- &FinishedEvent{Error: err}
 			return
 		}
 		defer stream.Close()
 
-		currentEmotion := ""
+		currentEmotion := "default"
 		fullText := ""
 		bufferedContent := ""
+		lastFilteredLength := 0
 
 		for {
 			msg, err := stream.Recv()
 			if err == io.EOF {
+				log.Printf("VoiceAgent: LLM stream completed, total text length: %d", len(fullText))
 				break
 			}
 			if err != nil {
+				log.Printf("VoiceAgent: stream receive error: %v", err)
 				eventChan <- &FinishedEvent{Error: err}
 				return
 			}
@@ -79,16 +102,26 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 			if msg.Content != "" {
 				bufferedContent += msg.Content
 
-				emotion := v.emotionExtractor.Extract(bufferedContent)
-				if emotion != "" && emotion != currentEmotion {
-					currentEmotion = emotion
-					eventChan <- &EmotionChangedEvent{Emotion: emotion}
-				}
+				// emotion := v.emotionExtractor.Extract(bufferedContent)
+				// if emotion != "" && emotion != currentEmotion {
+				// 	currentEmotion = emotion
+				// 	log.Printf("VoiceAgent: emotion changed to: %s", emotion)
+				// 	eventChan <- &EmotionChangedEvent{Emotion: emotion}
+				// }
 
-				filtered := v.markdownFilter.Filter(msg.Content)
-				if filtered != "" {
-					eventChan <- &TextChunkEvent{Chunk: filtered, Emotion: currentEmotion}
-					fullText += filtered
+				// 移除缓冲内容中的情绪标签
+				// cleanBufferedContent := v.markdownFilter.RemoveEmotionTags(bufferedContent)
+				cleanBufferedContent := bufferedContent
+
+				// 只发送新增的内容
+				if len(cleanBufferedContent) > lastFilteredLength {
+					newContent := cleanBufferedContent[lastFilteredLength:]
+					if newContent != "" {
+						log.Printf("VoiceAgent: text chunk: %s (emotion: %s)", newContent, currentEmotion)
+						eventChan <- &TextChunkEvent{Chunk: newContent, Emotion: currentEmotion}
+						fullText += newContent
+						lastFilteredLength = 0
+					}
 				}
 			}
 
@@ -96,6 +129,7 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 				toolType := v.toolClassifier.GetToolType(toolCall.Function.Name)
 				args := parseToolArgs(toolCall.Function.Arguments)
 
+				log.Printf("VoiceAgent: tool call requested: %s (type: %s), args: %v", toolCall.Function.Name, toolType, args)
 				eventChan <- &ToolCallRequestedEvent{
 					Tool:     toolCall.Function.Name,
 					Args:     args,
@@ -109,16 +143,19 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 
 					if emotion != "" && emotion != currentEmotion {
 						currentEmotion = emotion
+						log.Printf("VoiceAgent: emotion changed to: %s (from action response)", emotion)
 						eventChan <- &EmotionChangedEvent{Emotion: emotion}
 					}
 
 					if filtered != "" {
+						log.Printf("VoiceAgent: action response: %s", filtered)
 						eventChan <- &TextChunkEvent{Chunk: filtered, Emotion: currentEmotion}
 					}
 				}
 			}
 		}
 
+		log.Printf("VoiceAgent: processing finished")
 		eventChan <- &FinishedEvent{Error: nil}
 	}()
 

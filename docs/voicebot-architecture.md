@@ -109,6 +109,11 @@ type ToolExecutor interface {
   - 无TTS时: 正常音量 (100%)
   - 有TTS时: 降低音量 (50%)
 
+**TTS播放流程（关键）**:
+- `AudioOutPipe.PlayTTS()` 先将 `AudioReader` 接入 `AudioMixer`，再写入文本并 `Close()`
+- `AudioReader` 读到 EOF 后再触发 `RemoveTTSStream()` 与音量恢复，避免提前移除导致不出声
+- TTS输出格式使用 `pcm`，采样率与 Mixer 一致（当前 16000），避免解码不一致导致阻塞
+
 ### 5. TTSManager（TTS管理器）
 **职责**: TTS连接管理、音色切换
 
@@ -131,6 +136,10 @@ type AudioMixer interface {
     Stop()
 }
 ```
+
+**启动约束**:
+- `Start()` 采用异步启动，避免底层设备初始化阻塞主流程
+- 启动失败会记录日志，不阻塞 Orchestrator 启动
 
 **音量控制**:
 ```go
