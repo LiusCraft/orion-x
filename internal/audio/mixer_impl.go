@@ -1,0 +1,168 @@
+package audio
+
+import (
+	"context"
+	"io"
+	"log"
+	"sync"
+
+	"github.com/gordonklaus/portaudio"
+)
+
+type mixerImpl struct {
+	config                *MixerConfig
+	ttsStream             io.Reader
+	resourceStream        io.Reader
+	currentTTSVolume      float64
+	currentResourceVolume float64
+	mu                    sync.Mutex
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	player                *portaudio.Stream
+}
+
+func NewMixer(config *MixerConfig) (AudioMixer, error) {
+	if config == nil {
+		config = DefaultMixerConfig()
+	}
+	if err := portaudio.Initialize(); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m := &mixerImpl{
+		config:                config,
+		currentTTSVolume:      config.TTSVolume,
+		currentResourceVolume: config.ResourceVolume,
+		ctx:                   ctx,
+		cancel:                cancel,
+	}
+	stream, err := portaudio.OpenDefaultStream(0, 2, 16000, 1024, m.audioCallback)
+	if err != nil {
+		portaudio.Terminate()
+		cancel()
+		return nil, err
+	}
+	m.player = stream
+	return m, nil
+}
+
+func (m *mixerImpl) AddTTSStream(audio io.Reader) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ttsStream = audio
+}
+
+func (m *mixerImpl) AddResourceStream(audio io.Reader) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resourceStream = audio
+}
+
+func (m *mixerImpl) RemoveTTSStream() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ttsStream = nil
+}
+
+func (m *mixerImpl) RemoveResourceStream() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resourceStream = nil
+}
+
+func (m *mixerImpl) SetTTSVolume(volume float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.currentTTSVolume = volume
+}
+
+func (m *mixerImpl) SetResourceVolume(volume float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.currentResourceVolume = volume
+}
+
+func (m *mixerImpl) OnTTSStarted() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	log.Printf("AudioMixer: TTS started, reducing resource volume to 50%%")
+	m.currentResourceVolume = m.config.ResourceVolume * 0.5
+}
+
+func (m *mixerImpl) OnTTSFinished() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	log.Printf("AudioMixer: TTS finished, restoring resource volume to 100%%")
+	m.currentResourceVolume = m.config.ResourceVolume
+}
+
+func (m *mixerImpl) Start() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.player != nil {
+		if err := m.player.Start(); err != nil {
+			log.Printf("AudioMixer: failed to start stream: %v", err)
+		}
+	}
+}
+
+func (m *mixerImpl) Stop() {
+	m.mu.Lock()
+	if m.cancel != nil {
+		m.cancel()
+	}
+	if m.player != nil {
+		if err := m.player.Stop(); err != nil {
+			log.Printf("AudioMixer: failed to stop stream: %v", err)
+		}
+		m.player.Close()
+		m.player = nil
+	}
+	m.mu.Unlock()
+	portaudio.Terminate()
+}
+
+func (m *mixerImpl) audioCallback(out [][]float32) {
+	for i := range out[0] {
+		out[0][i] = 0
+		out[1][i] = 0
+	}
+	m.mu.Lock()
+	ttsStream := m.ttsStream
+	resourceStream := m.resourceStream
+	ttsVolume := m.currentTTSVolume
+	resourceVolume := m.currentResourceVolume
+	m.mu.Unlock()
+	mixFromStream(ttsStream, out, float32(ttsVolume))
+	mixFromStream(resourceStream, out, float32(resourceVolume))
+}
+
+func mixFromStream(stream io.Reader, buf [][]float32, volume float32) {
+	if stream == nil {
+		return
+	}
+	samples := make([]byte, len(buf[0])*4)
+	n, err := io.ReadFull(stream, samples)
+	if err != nil {
+		return
+	}
+	for i := 0; i < n/4; i++ {
+		sample := int16(samples[i*2]) | int16(samples[i*2+1])<<8
+		normalized := float32(sample) / 32768.0
+
+		buf[0][i] += normalized * volume
+		buf[1][i] += normalized * volume
+
+		if buf[0][i] > 1.0 {
+			buf[0][i] = 1.0
+		} else if buf[0][i] < -1.0 {
+			buf[0][i] = -1.0
+		}
+
+		if buf[1][i] > 1.0 {
+			buf[1][i] = 1.0
+		} else if buf[1][i] < -1.0 {
+			buf[1][i] = -1.0
+		}
+	}
+}

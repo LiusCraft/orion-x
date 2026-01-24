@@ -26,6 +26,10 @@ type MixerConfig struct {
 }
 
 // DefaultMixerConfig 默认配置
+// 参考 Python 实现：
+// - TTS 音量：100%
+// - Resource 音量：15%（Ducking 效果，避免掩盖 TTS）
+// - TTS 播放时：Resource 音量降为 7.5%（15% * 0.5）
 func DefaultMixerConfig() *MixerConfig {
 	return &MixerConfig{
 		TTSVolume:      1.0,
