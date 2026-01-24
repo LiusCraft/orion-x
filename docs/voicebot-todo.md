@@ -3,12 +3,12 @@
 ## 阶段一：核心功能实现
 
 ### 1. Orchestrator 实现 (优先级: 高) ⭐️ 优先
-- [ ] 搭建基础框架和事件总线
-- [ ] 实现状态机（Idle/Listening/Processing/Speaking）
-- [ ] 实现事件路由逻辑
-- [ ] 实现组件协调（启动/停止）
-- [ ] 实现中断处理逻辑
-- [ ] 集成各模块接口（先使用mock验证流程）
+- [x] 搭建基础框架和事件总线
+- [x] 实现状态机（Idle/Listening/Processing/Speaking）
+- [x] 实现事件路由逻辑
+- [x] 实现组件协调（启动/停止）
+- [x] 实现中断处理逻辑
+- [x] 集成各模块接口（先使用mock验证流程）
 
 ### 2. VoiceAgent 实现 (优先级: 高)
 - [ ] 实现 `VoiceAgent.Process()` 方法
