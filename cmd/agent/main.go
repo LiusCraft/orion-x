@@ -2,15 +2,33 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 
 	"github.com/liuscraft/orion-x/internal/agent"
+	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 func main() {
-	if err := logging.InitFromEnv(); err != nil {
+	configPath := flag.String("config", config.DefaultPath, "config file path")
+	flag.Parse()
+
+	appConfig, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	if err := appConfig.ValidateKeys(false, false, true); err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := logging.Init(logging.Config{
+		Level:  appConfig.Logging.Level,
+		Format: appConfig.Logging.Format,
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to init logger: %v\n", err)
 		os.Exit(1)
 	}
@@ -19,8 +37,19 @@ func main() {
 
 	ctx := context.Background()
 
+	toolTypes, err := agent.ParseToolTypes(appConfig.Tools.Types)
+	if err != nil {
+		logging.Fatalf("Invalid tool types: %v", err)
+	}
+
 	// 创建 VoiceAgent
-	voiceAgent, err := agent.NewVoiceAgent(ctx)
+	voiceAgent, err := agent.NewVoiceAgentWithConfig(ctx, agent.Config{
+		APIKey:          appConfig.LLM.APIKey,
+		BaseURL:         appConfig.LLM.BaseURL,
+		Model:           appConfig.LLM.Model,
+		ToolTypes:       toolTypes,
+		ActionResponses: appConfig.Tools.ActionResponses,
+	})
 	if err != nil {
 		logging.Fatalf("NewVoiceAgent failed: %v", err)
 	}

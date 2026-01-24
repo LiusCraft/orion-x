@@ -35,3 +35,12 @@ type ToolInfo struct {
 	Description string
 	Type        ToolType
 }
+
+// Config VoiceAgent配置
+type Config struct {
+	APIKey          string
+	BaseURL         string
+	Model           string
+	ToolTypes       map[string]ToolType
+	ActionResponses map[string]string
+}

@@ -15,8 +15,8 @@ func TestVoiceBotIntegration(t *testing.T) {
 
 	voiceAgent, err := agent.NewVoiceAgent(ctx)
 	if err != nil {
-		if err.Error() == "DASHSCOPE_API_KEY environment variable is required" {
-			t.Skip("Skipping integration test: DASHSCOPE_API_KEY not set")
+		if err.Error() == "llm api_key is required" {
+			t.Skip("Skipping integration test: LLM API key not set")
 		}
 		t.Fatalf("Failed to create VoiceAgent: %v", err)
 	}

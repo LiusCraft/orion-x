@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,13 +10,31 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
+	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/tools"
+	"github.com/liuscraft/orion-x/internal/tts"
 	"github.com/liuscraft/orion-x/internal/voicebot"
 )
 
 func main() {
-	if err := logging.InitFromEnv(); err != nil {
+	configPath := flag.String("config", config.DefaultPath, "config file path")
+	flag.Parse()
+
+	appConfig, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	if err := appConfig.ValidateKeys(true, true, true); err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := logging.Init(logging.Config{
+		Level:  appConfig.Logging.Level,
+		Format: appConfig.Logging.Format,
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to init logger: %v\n", err)
 		os.Exit(1)
 	}
@@ -27,21 +46,32 @@ func main() {
 	logging.Infof("        VoiceBot Starting...           ")
 	logging.Infof("========================================")
 
-	apiKey := os.Getenv("DASHSCOPE_API_KEY")
-	if apiKey == "" {
-		logging.Fatalf("DASHSCOPE_API_KEY environment variable is required")
+	logging.Infof("Config loaded successfully")
+
+	toolTypes, err := agent.ParseToolTypes(appConfig.Tools.Types)
+	if err != nil {
+		logging.Fatalf("Invalid tool types: %v", err)
 	}
-	logging.Infof("API key loaded successfully")
 
 	logging.Infof("Creating VoiceAgent...")
-	voiceAgent, err := agent.NewVoiceAgent(context.Background())
+	voiceAgent, err := agent.NewVoiceAgentWithConfig(context.Background(), agent.Config{
+		APIKey:          appConfig.LLM.APIKey,
+		BaseURL:         appConfig.LLM.BaseURL,
+		Model:           appConfig.LLM.Model,
+		ToolTypes:       toolTypes,
+		ActionResponses: appConfig.Tools.ActionResponses,
+	})
 	if err != nil {
 		logging.Fatalf("Failed to create VoiceAgent: %v", err)
 	}
 	logging.Infof("VoiceAgent created successfully")
 
 	logging.Infof("Creating AudioMixer...")
-	mixer, err := audio.NewMixer(audio.DefaultMixerConfig())
+	mixerCfg := &audio.MixerConfig{
+		TTSVolume:      appConfig.Audio.Mixer.TTSVolume,
+		ResourceVolume: appConfig.Audio.Mixer.ResourceVolume,
+	}
+	mixer, err := audio.NewMixer(mixerCfg)
 	if err != nil {
 		logging.Fatalf("Failed to create Mixer: %v", err)
 	}
@@ -52,21 +82,48 @@ func main() {
 	logging.Infof("AudioMixer started")
 
 	logging.Infof("Creating AudioOutPipe...")
-	audioOutPipe := audio.NewOutPipe(apiKey)
+	outPipeCfg := audio.DefaultOutPipeConfig()
+	outPipeCfg.Mixer = mixerCfg
+	outPipeCfg.TTS = tts.Config{
+		APIKey:               appConfig.TTS.APIKey,
+		Endpoint:             appConfig.TTS.Endpoint,
+		Workspace:            appConfig.TTS.Workspace,
+		Model:                appConfig.TTS.Model,
+		Voice:                appConfig.TTS.Voice,
+		Format:               appConfig.TTS.Format,
+		SampleRate:           appConfig.TTS.SampleRate,
+		Volume:               appConfig.TTS.Volume,
+		Rate:                 appConfig.TTS.Rate,
+		Pitch:                appConfig.TTS.Pitch,
+		EnableSSML:           appConfig.TTS.EnableSSML,
+		TextType:             appConfig.TTS.TextType,
+		EnableDataInspection: appConfig.TTS.EnableDataInspection,
+	}
+	if len(appConfig.TTS.VoiceMap) > 0 {
+		outPipeCfg.VoiceMap = appConfig.TTS.VoiceMap
+	}
+	audioOutPipe := audio.NewOutPipeWithConfig(outPipeCfg)
 	audioOutPipe.SetMixer(mixer)
 	logging.Infof("AudioOutPipe created successfully")
 
 	logging.Infof("Creating AudioInPipe...")
-	config := audio.DefaultInPipeConfig()
+	inPipeCfg := &audio.InPipeConfig{
+		SampleRate:   appConfig.Audio.InPipe.SampleRate,
+		Channels:     appConfig.Audio.InPipe.Channels,
+		EnableVAD:    appConfig.Audio.InPipe.EnableVAD,
+		VADThreshold: appConfig.Audio.InPipe.VADThreshold,
+		ASRModel:     appConfig.ASR.Model,
+		ASREndpoint:  appConfig.ASR.Endpoint,
+	}
 
 	logging.Infof("Creating Microphone source...")
-	micSource, err := audio.NewMicrophoneSource(config.SampleRate, config.Channels, 3200)
+	micSource, err := audio.NewMicrophoneSource(inPipeCfg.SampleRate, inPipeCfg.Channels, 3200)
 	if err != nil {
 		logging.Fatalf("Failed to create Microphone source: %v", err)
 	}
 	logging.Infof("Microphone source created successfully")
 
-	audioInPipe, err := audio.NewInPipeWithAudioSource(apiKey, config, micSource)
+	audioInPipe, err := audio.NewInPipeWithAudioSource(appConfig.ASR.APIKey, inPipeCfg, micSource)
 	if err != nil {
 		logging.Fatalf("Failed to create AudioInPipe: %v", err)
 	}

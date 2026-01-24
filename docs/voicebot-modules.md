@@ -25,6 +25,8 @@ internal/
 │   ├── executor.go    # ToolExecutor接口
 │   ├── music.go       # 音乐工具示例
 │   └── weather.go     # 天气工具示例
+├── config/            # 配置管理模块
+│   ├── config.go       # 配置结构与加载
 ├── asr/               # ASR模块（已存在）
 │   ├── recognizer.go
 │   └── dashscope.go
@@ -161,6 +163,12 @@ internal/
 - `GetWeatherTool` - 获取天气信息
 - `GetTimeTool` - 获取当前时间
 - `SearchTool` - 搜索
+
+### 6. config 包
+
+#### AppConfig
+- 统一管理日志、ASR、TTS、LLM、音频与工具配置
+- 支持从配置文件加载并与环境变量合并
 
 ## 关键设计点
 

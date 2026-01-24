@@ -223,6 +223,12 @@ func (p *inPipeImpl) readAudioFromSource(ctx context.Context) {
 
 		p.handleVAD(audio)
 
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		if err := p.SendAudio(audio); err != nil {
 			if err == context.Canceled {
 				return

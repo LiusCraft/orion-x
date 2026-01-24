@@ -90,15 +90,30 @@ func (r *DashScopeRecognizer) SendAudio(ctx context.Context, data []byte) error 
 	if r.conn == nil {
 		return errors.New("recognizer not started")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
+
+	result := make(chan error, 1)
 	r.writeMu.Lock()
-	err := r.conn.WriteMessage(websocket.BinaryMessage, data)
-	r.writeMu.Unlock()
-	return err
+	go func() {
+		err := r.conn.WriteMessage(websocket.BinaryMessage, data)
+		r.writeMu.Unlock()
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		_ = r.conn.Close()
+		return ctx.Err()
+	}
 }
 
 func (r *DashScopeRecognizer) Finish(ctx context.Context) error {

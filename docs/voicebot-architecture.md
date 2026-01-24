@@ -41,6 +41,10 @@ type Orchestrator interface {
 ### 2. VoiceAgent（语音Agent）
 **职责**: LLM流式调用、工具调用、情绪标注、Markdown过滤
 
+**流式约定**:
+- LLM流式输出必须只发送新增的增量文本（delta）
+- `text.Segmenter` 只消费增量文本并在成句时 flush 缓冲
+
 **两种工具调用流程**:
 
 #### 流程1: 直接播放类工具（如播放音乐）
@@ -217,6 +221,12 @@ if isTTSPlaying {
 ```
 
 ## 关键实现细节
+
+### 0. 配置管理
+
+- 配置文件统一管理日志、ASR、TTS、LLM、音频与工具参数。
+- 默认路径 `config/voicebot.json`，支持命令行 `-config` 覆盖。
+- 加载顺序：默认值 → 配置文件 → 环境变量（`LOG_LEVEL`/`LOG_FORMAT`/`DASHSCOPE_API_KEY`/`ZHIPU_API_KEY`）。
 
 ### 1. 工具分类
 ```go

@@ -18,6 +18,12 @@ type mockRecognizer struct {
 	onResult     func(asr.Result)
 }
 
+type blockingRecognizer struct {
+	startCalled bool
+	sendStarted chan struct{}
+	sendOnce    sync.Once
+}
+
 type blockingAudioSource struct {
 	readCh    chan []byte
 	closeCh   chan struct{}
@@ -58,6 +64,29 @@ func (m *mockRecognizer) SendAudio(ctx context.Context, data []byte) error {
 	m.sendCalled = true
 	return nil
 }
+
+func (b *blockingRecognizer) Start(ctx context.Context) error {
+	b.startCalled = true
+	return nil
+}
+
+func (b *blockingRecognizer) SendAudio(ctx context.Context, data []byte) error {
+	b.sendOnce.Do(func() {
+		close(b.sendStarted)
+	})
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (b *blockingRecognizer) Finish(ctx context.Context) error {
+	return nil
+}
+
+func (b *blockingRecognizer) Close() error {
+	return nil
+}
+
+func (b *blockingRecognizer) OnResult(handler func(asr.Result)) {}
 
 func (m *mockRecognizer) Finish(ctx context.Context) error {
 	m.finishCalled = true
@@ -313,6 +342,46 @@ func TestInPipeStopDoesNotDeadlock(t *testing.T) {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Stop should not block when audio source is closed")
+	}
+}
+
+func TestInPipeStopUnblocksSendAudio(t *testing.T) {
+	config := DefaultInPipeConfig()
+	recognizer := &blockingRecognizer{sendStarted: make(chan struct{})}
+	pipe := NewInPipeWithRecognizer(config, recognizer)
+
+	impl, ok := pipe.(*inPipeImpl)
+	if !ok {
+		t.Fatal("expected inPipeImpl")
+	}
+
+	source := newBlockingAudioSource()
+	impl.SetAudioSource(source)
+
+	if err := pipe.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	go func() {
+		source.readCh <- makePCM(12000, 160)
+	}()
+
+	select {
+	case <-recognizer.sendStarted:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("SendAudio should start before Stop")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_ = pipe.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Stop should not block when SendAudio waits on context cancel")
 	}
 }
 

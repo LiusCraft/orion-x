@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -21,31 +22,45 @@ type voiceAgentImpl struct {
 	actionResponseGen *ActionResponseGenerator
 }
 
+const (
+	defaultLLMBaseURL = "https://open.bigmodel.cn/api/coding/paas/v4"
+	defaultLLMModel   = "glm-4-flash"
+)
+
 func NewVoiceAgent(ctx context.Context) (VoiceAgent, error) {
 	key := os.Getenv("ZHIPU_API_KEY")
 	if key == "" {
 		key = os.Getenv("DASHSCOPE_API_KEY")
 	}
-	if key == "" {
-		return nil, errors.New("ZHIPU_API_KEY or DASHSCOPE_API_KEY environment variable is required")
+	return NewVoiceAgentWithConfig(ctx, Config{
+		APIKey: key,
+	})
+}
+
+func NewVoiceAgentWithConfig(ctx context.Context, cfg Config) (VoiceAgent, error) {
+	normalized, err := normalizeConfig(cfg)
+	if err != nil {
+		return nil, err
 	}
-	baseURL := "https://open.bigmodel.cn/api/coding/paas/v4"
 
 	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
-		BaseURL: baseURL,
-		Model:   "glm-4-flash",
-		APIKey:  key,
+		BaseURL: normalized.BaseURL,
+		Model:   normalized.Model,
+		APIKey:  normalized.APIKey,
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	classifier := NewToolClassifierWithTypes(normalized.ToolTypes)
+	responseGen := NewActionResponseGeneratorWithTemplates(normalized.ActionResponses)
+
 	return &voiceAgentImpl{
 		chatModel:         chatModel,
 		emotionExtractor:  NewEmotionExtractor(),
 		markdownFilter:    NewMarkdownFilter(),
-		toolClassifier:    NewToolClassifier(),
-		actionResponseGen: NewActionResponseGenerator(),
+		toolClassifier:    classifier,
+		actionResponseGen: responseGen,
 	}, nil
 }
 
@@ -113,16 +128,13 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 				// cleanBufferedContent := v.markdownFilter.RemoveEmotionTags(bufferedContent)
 				cleanBufferedContent := bufferedContent
 
-				// 只发送新增的内容
-				if len(cleanBufferedContent) > lastFilteredLength {
-					newContent := cleanBufferedContent[lastFilteredLength:]
-					if newContent != "" {
-						logging.Infof("VoiceAgent: text chunk: %s (emotion: %s)", newContent, currentEmotion)
-						eventChan <- &TextChunkEvent{Chunk: newContent, Emotion: currentEmotion}
-						fullText += newContent
-						lastFilteredLength = 0
-					}
+				newContent, nextLength := deltaFromBufferedContent(cleanBufferedContent, lastFilteredLength)
+				if newContent != "" {
+					logging.Infof("VoiceAgent: text chunk: %s (emotion: %s)", newContent, currentEmotion)
+					eventChan <- &TextChunkEvent{Chunk: newContent, Emotion: currentEmotion}
+					fullText += newContent
 				}
+				lastFilteredLength = nextLength
 			}
 
 			for _, toolCall := range msg.ToolCalls {
@@ -164,6 +176,29 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 
 func (v *voiceAgentImpl) GetToolType(tool string) ToolType {
 	return v.toolClassifier.GetToolType(tool)
+}
+
+func deltaFromBufferedContent(content string, lastLength int) (string, int) {
+	if lastLength < 0 {
+		lastLength = 0
+	}
+	if lastLength > len(content) {
+		lastLength = len(content)
+	}
+	return content[lastLength:], len(content)
+}
+
+func normalizeConfig(cfg Config) (Config, error) {
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return Config{}, errors.New("llm api_key is required")
+	}
+	if strings.TrimSpace(cfg.BaseURL) == "" {
+		cfg.BaseURL = defaultLLMBaseURL
+	}
+	if strings.TrimSpace(cfg.Model) == "" {
+		cfg.Model = defaultLLMModel
+	}
+	return cfg, nil
 }
 
 func parseToolArgs(argsJSON string) map[string]interface{} {

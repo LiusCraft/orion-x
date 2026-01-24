@@ -18,6 +18,7 @@ type outPipeImpl struct {
 	tts        tts.Provider
 	ttsStreams []tts.Stream
 	voiceMap   map[string]string
+	ttsConfig  tts.Config
 	apiKey     string
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -47,17 +48,29 @@ func (r *ttsStreamReader) done() {
 }
 
 func NewOutPipe(apiKey string) AudioOutPipe {
+	cfg := DefaultOutPipeConfig()
+	cfg.TTS.APIKey = apiKey
+	return NewOutPipeWithConfig(cfg)
+}
+
+func NewOutPipeWithConfig(cfg *OutPipeConfig) AudioOutPipe {
+	if cfg == nil {
+		cfg = DefaultOutPipeConfig()
+	}
+	if len(cfg.VoiceMap) == 0 {
+		cfg.VoiceMap = DefaultOutPipeConfig().VoiceMap
+	}
+
+	voiceMap := make(map[string]string)
+	for key, value := range cfg.VoiceMap {
+		voiceMap[key] = value
+	}
+
 	return &outPipeImpl{
-		voiceMap: map[string]string{
-			"happy":   "longanyang",
-			"sad":     "zhichu",
-			"angry":   "zhimeng",
-			"calm":    "longxiaochun",
-			"excited": "longanyang",
-			"default": "longanyang",
-		},
-		apiKey: apiKey,
-		tts:    tts.NewDashScopeProvider(),
+		voiceMap:  voiceMap,
+		ttsConfig: cfg.TTS,
+		apiKey:    cfg.TTS.APIKey,
+		tts:       tts.NewDashScopeProvider(),
 	}
 }
 
@@ -110,17 +123,14 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 	ttsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	cfg := tts.Config{
-		APIKey:     p.apiKey,
-		Model:      "cosyvoice-v3-flash",
-		Voice:      voice,
-		Format:     "pcm",
-		SampleRate: 16000,
-		Volume:     50,
-		Rate:       1.0,
-		Pitch:      1.0,
-		TextType:   "PlainText",
+	cfg := p.ttsConfig
+	if cfg.APIKey == "" {
+		cfg.APIKey = p.apiKey
 	}
+	if cfg.APIKey == "" {
+		return errors.New("tts api key is required")
+	}
+	cfg.Voice = voice
 
 	logging.Infof("AudioOutPipe: starting TTS stream...")
 	stream, err := p.tts.Start(ttsCtx, cfg)

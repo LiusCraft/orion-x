@@ -208,6 +208,38 @@ func TestActionResponseGenerator(t *testing.T) {
 	}
 }
 
+func TestActionResponseGeneratorWithTemplates(t *testing.T) {
+	generator := NewActionResponseGeneratorWithTemplates(map[string]string{
+		"playMusic": "正在播放{{song}}",
+	})
+
+	result := generator.GenerateResponse("playMusic", map[string]interface{}{"song": "稻香"})
+	if result != "正在播放稻香" {
+		t.Fatalf("template response = %q, want %q", result, "正在播放稻香")
+	}
+}
+
+func TestParseToolType(t *testing.T) {
+	if toolType, err := ParseToolType("query"); err != nil || toolType != ToolTypeQuery {
+		t.Fatalf("ParseToolType(query) = %v, %v", toolType, err)
+	}
+	if toolType, err := ParseToolType("action"); err != nil || toolType != ToolTypeAction {
+		t.Fatalf("ParseToolType(action) = %v, %v", toolType, err)
+	}
+	if _, err := ParseToolType("unknown"); err == nil {
+		t.Fatalf("expected error for unknown tool type")
+	}
+}
+
+func TestNewToolClassifierWithTypes(t *testing.T) {
+	classifier := NewToolClassifierWithTypes(map[string]ToolType{
+		"custom": ToolTypeAction,
+	})
+	if classifier.GetToolType("custom") != ToolTypeAction {
+		t.Fatalf("expected custom tool type to be Action")
+	}
+}
+
 func TestVoiceAgentGetToolType(t *testing.T) {
 	ctx := context.Background()
 	agent, err := NewVoiceAgent(ctx)

@@ -33,6 +33,7 @@
 - [x] 实现情绪标签注入到Prompt（优化为标签在句子开头）
 - [x] 集成 `EmotionExtractor` 和 `MarkdownFilter`
 - [x] 集成 `text.Segmenter` 分句器
+- [x] 修复 LLM 流式增量输出，避免重复前缀
 
 ### 3. AudioMixer 实现 (优先级: 高)
 - [x] 实现双通道音频混合逻辑
@@ -61,6 +62,8 @@
 - [x] 实现 MicrophoneSource 麦克风音频源
 - [x] 修复 AudioInPipe.Stop() 等待卡住问题
 - [x] 修复 MicrophoneSource 关闭时阻塞问题
+- [x] MicrophoneSource.Read 支持 context 取消并主动 Abort
+- [x] ASR SendAudio 支持 context 取消，避免 Stop 卡住
 - [x] 集成 VAD 检测（可选）
 - [x] 修复 TTS DNS 查询被取消问题
 - [x] 修复 Mixer.Start() 可能阻塞问题
@@ -92,10 +95,10 @@
 - [ ] 测试各种Markdown格式
 
 ### 10. 配置管理 (优先级: 低)
-- [ ] 实现配置文件支持（YAML/JSON）
-- [ ] API密钥管理
-- [ ] 音频参数配置
-- [ ] 工具配置
+- [x] 实现配置文件支持（JSON）
+- [x] API密钥管理
+- [x] 音频参数配置
+- [x] 工具配置
 
 ## 阶段四：测试和优化
 

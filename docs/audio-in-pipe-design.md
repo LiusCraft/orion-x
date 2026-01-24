@@ -110,6 +110,7 @@ type AudioSource interface {
 - 采样率：16000 Hz
 - 声道数：1（单声道）
 - 帧长：3200 samples（约 200ms）
+- 读取支持 `context` 取消：当 `ctx.Done()` 或 `Close()` 触发时，主动 `Abort()` 打断 `Read()` 的阻塞
 - 关闭流程：先 `Abort()` 强制中断阻塞读，再 `Stop()`/`Close()`，避免退出时卡住
 
 #### 其他可能的音频源
@@ -183,6 +184,11 @@ cfg := asr.Config{
 
 recognizer, _ := asr.NewDashScopeRecognizer(cfg)
 ```
+
+#### 发送取消
+
+- `SendAudio` 使用 `context` 进行取消控制
+- 在 `Stop()` 触发取消时，ASR 写入会被打断，避免阻塞退出
 
 ### 事件发布
 

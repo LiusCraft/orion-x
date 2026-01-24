@@ -124,6 +124,22 @@ func TestNewOutPipe(t *testing.T) {
 	}
 }
 
+func TestNewOutPipeWithConfig(t *testing.T) {
+	cfg := DefaultOutPipeConfig()
+	cfg.TTS.APIKey = "config-key"
+	cfg.VoiceMap = map[string]string{
+		"default": "voice-x",
+	}
+
+	pipe := NewOutPipeWithConfig(cfg).(*outPipeImpl)
+	if pipe.ttsConfig.APIKey != "config-key" {
+		t.Fatalf("expected API key to be set from config")
+	}
+	if pipe.getVoice("unknown") != "voice-x" {
+		t.Fatalf("expected custom default voice to be used")
+	}
+}
+
 func TestOutPipe_GetVoice(t *testing.T) {
 	tests := []struct {
 		name     string
