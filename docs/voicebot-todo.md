@@ -11,13 +11,13 @@
 - [x] 集成各模块接口（先使用mock验证流程）
 
 ### 2. VoiceAgent 实现 (优先级: 高)
-- [ ] 实现 `VoiceAgent.Process()` 方法
-- [ ] 集成 `internal/ai/llm.go` 的工具调用逻辑
-- [ ] 启用流式LLM输出（当前被注释）
-- [ ] 实现工具识别和调用逻辑
-- [ ] 区分查询类工具和动作类工具的流程
-- [ ] 实现情绪标签注入到Prompt
-- [ ] 集成 `EmotionExtractor` 和 `MarkdownFilter`
+- [x] 实现 `VoiceAgent.Process()` 方法
+- [x] 集成 `internal/ai/llm.go` 的工具调用逻辑
+- [x] 启用流式LLM输出（当前被注释）
+- [x] 实现工具识别和调用逻辑
+- [x] 区分查询类工具和动作类工具的流程
+- [x] 实现情绪标签注入到Prompt（优化为标签在句子开头）
+- [x] 集成 `EmotionExtractor` 和 `MarkdownFilter`
 - [ ] 集成 `text.Segmenter` 分句器
 
 ### 3. AudioMixer 实现 (优先级: 高)

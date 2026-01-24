@@ -4,51 +4,49 @@ import (
 	"context"
 	"log"
 
-	"github.com/cloudwego/eino/schema"
-	"github.com/liuscraft/orion-x/internal/ai"
+	"github.com/liuscraft/orion-x/internal/agent"
 )
 
 func main() {
 	ctx := context.Background()
 
-	// 创建 ReAct Agent
-	agent, err := ai.CreateToolCallGraph(ctx)
+	// 创建 VoiceAgent
+	voiceAgent, err := agent.NewVoiceAgent(ctx)
 	if err != nil {
-		log.Printf("Create ReAct Agent failed: %v\n", err)
-		return
+		log.Fatalf("NewVoiceAgent failed: %v\n", err)
 	}
 
-	// 准备测试消息
-	messages := []*schema.Message{
-		schema.UserMessage("现在几点？生成个代码，天气怎么样，提醒我明天上班"),
-	}
+	// 准备测试输入
+	input := "北京天气怎么样,用生气的语气告诉我"
 
-	log.Println("=== 开始 ReAct Agent 测试 ===")
+	log.Println("=== 开始 VoiceAgent 测试 ===")
+	log.Printf("输入: %s\n", input)
 
-	// 使用 Generate 方法（同步）
-	result, err := agent.Invoke(ctx, messages)
+	// 处理输入，获取事件流
+	eventChan, err := voiceAgent.Process(ctx, input)
 	if err != nil {
-		log.Printf("Error: %v\n", err)
-		return
+		log.Fatalf("Process failed: %v\n", err)
 	}
 
-	log.Println("=== 最终回复 ===")
-	log.Println(result.Content)
+	log.Println("=== 流式输出 ===")
 
-	// sreader, err := llm.Stream(ctx, messages)
-	// if err != nil {
-	// 	log.Printf("Error: %v\n", err)
-	// 	return
-	// }
-	// for {
-	// 	message, err := sreader.Recv()
-	// 	if err == io.EOF {
-	// 		break
-	// 	}
-	// 	if err != nil {
-	// 		log.Printf("Error: %v\n", err)
-	// 		return
-	// 	}
-	// 	log.Printf("Message: %+v\n", message)
-	// }
+	// 处理事件流
+	for event := range eventChan {
+		switch e := event.(type) {
+		case *agent.TextChunkEvent:
+			log.Printf("[TextChunk] %s (Emotion: %s)", e.Chunk, e.Emotion)
+		case *agent.EmotionChangedEvent:
+			log.Printf("[EmotionChanged] %s", e.Emotion)
+		case *agent.ToolCallRequestedEvent:
+			log.Printf("[ToolCall] Tool: %s, Type: %s, Args: %v", e.Tool, e.ToolType, e.Args)
+		case *agent.FinishedEvent:
+			if e.Error != nil {
+				log.Printf("[Finished] Error: %v", e.Error)
+			} else {
+				log.Println("[Finished] Successfully")
+			}
+		}
+	}
+
+	log.Println("=== 测试完成 ===")
 }

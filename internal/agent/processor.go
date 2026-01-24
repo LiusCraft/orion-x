@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // LLMProcessor LLM流处理器
@@ -35,16 +36,11 @@ func NewEmotionExtractor() EmotionExtractor {
 // Extract 从文本中提取情绪标签
 func (e *emotionExtractor) Extract(text string) string {
 	for pattern, emotion := range e.emotionPatterns {
-		// 简单的字符串匹配
-		if contains(text, pattern) {
+		if strings.Contains(text, pattern) {
 			return emotion
 		}
 	}
 	return "default"
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr
 }
 
 // MarkdownFilter Markdown过滤器
