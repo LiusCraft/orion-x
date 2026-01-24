@@ -126,11 +126,15 @@ func (o *orchestratorImpl) handleEvent(...) { ... }
 - Context 传递贯穿调用链
 
 ### 日志规范
-```go
-import "log"
+- 统一使用 `internal/logging` 封装，不直接使用标准库 `log`
+- 日志字段包含 `trace_id`、`turn_id` 与 `log_id=traceId-turnId`
+- `traceId` 在单客户端运行时进程级固定，`turnId` 每轮完整交互自增
 
-log.Printf("State changed: %s -> %s", oldState, newState)
-log.Printf("Tool execution error: %v", err)
+```go
+import "github.com/liuscraft/orion-x/internal/logging"
+
+logging.Infof("State changed: %s -> %s", oldState, newState)
+logging.Errorf("Tool execution error: %v", err)
 ```
 
 ## 开发流程

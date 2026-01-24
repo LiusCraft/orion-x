@@ -8,12 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 const defaultDashScopeEndpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
@@ -388,7 +388,7 @@ type eventMessage struct {
 }
 
 func mapDashScopeError(code, message string) error {
-	log.Printf("TTS error: code=%s, message=%s", code, message)
+	logging.Errorf("TTS error: code=%s, message=%s", code, message)
 	lower := strings.ToLower(code + " " + message)
 	switch {
 	case strings.Contains(lower, "unauthorized"), strings.Contains(lower, "authentication"):

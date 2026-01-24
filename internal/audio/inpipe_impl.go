@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"sync"
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/asr"
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 type InPipeState int
@@ -97,12 +97,12 @@ func (p *inPipeImpl) Start(ctx context.Context) error {
 	p.state = InPipeStateListening
 
 	if p.audioSource != nil {
-		log.Printf("AudioInPipe: starting audio source...")
+		logging.Infof("AudioInPipe: starting audio source...")
 		p.wg.Add(1)
 		go p.readAudioFromSource(p.ctx)
 	}
 
-	log.Printf("AudioInPipe: started, state: %s", p.state)
+	logging.Infof("AudioInPipe: started, state: %s", p.state)
 	return nil
 }
 
@@ -125,38 +125,38 @@ func (p *inPipeImpl) Stop() error {
 	ctx := p.ctx
 	p.mu.Unlock()
 
-	log.Printf("AudioInPipe: stopping...")
+	logging.Infof("AudioInPipe: stopping...")
 
 	if cancel != nil {
-		log.Printf("AudioInPipe: canceling context...")
+		logging.Infof("AudioInPipe: canceling context...")
 		cancel()
 	}
 
 	if audioSource != nil {
-		log.Printf("AudioInPipe: closing audio source (should unblock read)...")
+		logging.Infof("AudioInPipe: closing audio source (should unblock read)...")
 		if err := audioSource.Close(); err != nil {
-			log.Printf("AudioInPipe: error closing audio source: %v", err)
+			logging.Errorf("AudioInPipe: error closing audio source: %v", err)
 		}
-		log.Printf("AudioInPipe: audio source closed")
+		logging.Infof("AudioInPipe: audio source closed")
 	}
 
 	if recognizer != nil {
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		log.Printf("AudioInPipe: finishing ASR...")
+		logging.Infof("AudioInPipe: finishing ASR...")
 		_ = recognizer.Finish(ctx)
 		_ = recognizer.Close()
-		log.Printf("AudioInPipe: ASR finished")
+		logging.Infof("AudioInPipe: ASR finished")
 	}
 
-	log.Printf("AudioInPipe: waiting for goroutines to finish...")
+	logging.Infof("AudioInPipe: waiting for goroutines to finish...")
 	p.wg.Wait()
-	log.Printf("AudioInPipe: all goroutines finished")
+	logging.Infof("AudioInPipe: all goroutines finished")
 
 	p.mu.Lock()
 	p.state = InPipeStateIdle
-	log.Printf("AudioInPipe: stopped, state: %s", p.state)
+	logging.Infof("AudioInPipe: stopped, state: %s", p.state)
 	p.mu.Unlock()
 	return nil
 }
@@ -202,8 +202,8 @@ func (p *inPipeImpl) OnUserSpeakingDetected(handler func()) {
 func (p *inPipeImpl) readAudioFromSource(ctx context.Context) {
 	defer p.wg.Done()
 
-	log.Printf("AudioInPipe: audio reader goroutine started")
-	defer log.Printf("AudioInPipe: audio reader goroutine stopped")
+	logging.Infof("AudioInPipe: audio reader goroutine started")
+	defer logging.Infof("AudioInPipe: audio reader goroutine stopped")
 
 	for {
 		select {
@@ -217,7 +217,7 @@ func (p *inPipeImpl) readAudioFromSource(ctx context.Context) {
 			if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, io.EOF) {
 				return
 			}
-			log.Printf("AudioInPipe: error reading from audio source: %v", err)
+			logging.Errorf("AudioInPipe: error reading from audio source: %v", err)
 			return
 		}
 
@@ -227,7 +227,7 @@ func (p *inPipeImpl) readAudioFromSource(ctx context.Context) {
 			if err == context.Canceled {
 				return
 			}
-			log.Printf("AudioInPipe: error sending audio to ASR: %v", err)
+			logging.Errorf("AudioInPipe: error sending audio to ASR: %v", err)
 		}
 	}
 }
@@ -294,6 +294,6 @@ func (p *inPipeImpl) GetState() InPipeState {
 
 func logError(format string, args ...interface{}) error {
 	msg := fmt.Sprintf(format, args...)
-	log.Print(msg)
+	logging.Errorf("%s", msg)
 	return fmt.Errorf("%s", msg)
 }

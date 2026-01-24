@@ -3,11 +3,11 @@ package voicebot
 import (
 	"context"
 	"io"
-	"log"
 	"sync"
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
+	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/text"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
@@ -92,7 +92,7 @@ func (o *orchestratorImpl) Start(ctx context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	log.Printf("Orchestrator: starting...")
+	logging.Infof("Orchestrator: starting...")
 	o.ctx, o.cancel = context.WithCancel(ctx)
 
 	o.eventBus.Subscribe(EventTypeStateChanged, o.handleStateChanged)
@@ -102,42 +102,42 @@ func (o *orchestratorImpl) Start(ctx context.Context) error {
 	o.eventBus.Subscribe(EventTypeToolAudioReady, o.handleToolAudioReady)
 	o.eventBus.Subscribe(EventTypeLLMEmotionChanged, o.handleLLMEmotionChanged)
 
-	log.Printf("Orchestrator: event handlers registered")
+	logging.Infof("Orchestrator: event handlers registered")
 
 	if o.audioInPipe != nil {
-		log.Printf("Orchestrator: starting AudioInPipe...")
+		logging.Infof("Orchestrator: starting AudioInPipe...")
 		if err := o.audioInPipe.Start(o.ctx); err != nil {
-			log.Printf("Orchestrator: failed to start AudioInPipe: %v", err)
+			logging.Errorf("Orchestrator: failed to start AudioInPipe: %v", err)
 			return err
 		}
-		log.Printf("Orchestrator: AudioInPipe started")
+		logging.Infof("Orchestrator: AudioInPipe started")
 
 		o.audioInPipe.OnASRResult(func(text string, isFinal bool) {
 			if text != "" {
-				log.Printf("Orchestrator: user speaking detected: %s", text)
+				logging.Infof("Orchestrator: user speaking detected: %s", text)
 				o.OnUserSpeakingDetected()
 			}
 			if isFinal {
-				log.Printf("Orchestrator: ASR final result: %s", text)
+				logging.Infof("Orchestrator: ASR final result: %s", text)
 				o.OnASRFinal(text)
 			}
 		})
 		o.audioInPipe.OnUserSpeakingDetected(func() {
-			log.Printf("Orchestrator: VAD user speaking detected")
+			logging.Infof("Orchestrator: VAD user speaking detected")
 			o.OnUserSpeakingDetected()
 		})
 	}
 
 	if o.audioOutPipe != nil {
-		log.Printf("Orchestrator: starting AudioOutPipe...")
+		logging.Infof("Orchestrator: starting AudioOutPipe...")
 		if err := o.audioOutPipe.Start(o.ctx); err != nil {
-			log.Printf("Orchestrator: failed to start AudioOutPipe: %v", err)
+			logging.Errorf("Orchestrator: failed to start AudioOutPipe: %v", err)
 			return err
 		}
-		log.Printf("Orchestrator: AudioOutPipe started")
+		logging.Infof("Orchestrator: AudioOutPipe started")
 	}
 
-	log.Printf("Orchestrator: started successfully, current state: %s", o.stateMachine.GetCurrentState())
+	logging.Infof("Orchestrator: started successfully, current state: %s", o.stateMachine.GetCurrentState())
 	return nil
 }
 
@@ -146,26 +146,26 @@ func (o *orchestratorImpl) Stop() error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	log.Printf("Orchestrator: stopping...")
+	logging.Infof("Orchestrator: stopping...")
 
 	if o.cancel != nil {
 		o.cancel()
 	}
 
 	if o.audioInPipe != nil {
-		log.Printf("Orchestrator: stopping AudioInPipe...")
+		logging.Infof("Orchestrator: stopping AudioInPipe...")
 		o.audioInPipe.Stop()
 	}
 
 	if o.audioOutPipe != nil {
-		log.Printf("Orchestrator: stopping AudioOutPipe...")
+		logging.Infof("Orchestrator: stopping AudioOutPipe...")
 		o.audioOutPipe.Stop()
 	}
 
-	log.Printf("Orchestrator: waiting for goroutines to finish...")
+	logging.Infof("Orchestrator: waiting for goroutines to finish...")
 	o.wg.Wait()
 
-	log.Printf("Orchestrator: stopped, final state: %s", o.stateMachine.GetCurrentState())
+	logging.Infof("Orchestrator: stopped, final state: %s", o.stateMachine.GetCurrentState())
 	return nil
 }
 
@@ -196,12 +196,12 @@ func (o *orchestratorImpl) OnToolAudioReady(audio io.Reader) {
 
 // OnLLMTextChunk 处理LLM文本流
 func (o *orchestratorImpl) OnLLMTextChunk(chunk string) {
-	log.Printf("LLM chunk: %s", chunk)
+	logging.Infof("LLM chunk: %s", chunk)
 }
 
 // OnLLMFinished 处理LLM完成
 func (o *orchestratorImpl) OnLLMFinished() {
-	log.Printf("LLM finished")
+	logging.Infof("LLM finished")
 }
 
 func (o *orchestratorImpl) handleStateChanged(event Event) {
@@ -209,13 +209,13 @@ func (o *orchestratorImpl) handleStateChanged(event Event) {
 	if !ok {
 		return
 	}
-	log.Printf("State changed: %s -> %s", stateChangedEvent.OldState, stateChangedEvent.NewState)
+	logging.Infof("State changed: %s -> %s", stateChangedEvent.OldState, stateChangedEvent.NewState)
 }
 
 func (o *orchestratorImpl) handleUserSpeakingDetected(event Event) {
-	log.Printf("Orchestrator: UserSpeakingDetected received, current state: %s", o.stateMachine.GetCurrentState())
+	logging.Infof("Orchestrator: UserSpeakingDetected received, current state: %s", o.stateMachine.GetCurrentState())
 	if o.stateMachine.GetCurrentState() == StateSpeaking {
-		log.Printf("Orchestrator: interrupting current playback...")
+		logging.Infof("Orchestrator: interrupting current playback...")
 		o.transitionTo(StateListening)
 		o.audioOutPipe.Interrupt()
 	}
@@ -227,7 +227,8 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 		return
 	}
 
-	log.Printf("Orchestrator: ASR final event received: %s", asrEvent.Text)
+	logging.StartTurn()
+	logging.Infof("Orchestrator: ASR final event received: %s", asrEvent.Text)
 	o.transitionTo(StateProcessing)
 
 	o.wg.Add(1)
@@ -236,7 +237,7 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 
 		eventChan, err := o.voiceAgent.Process(o.ctx, asrEvent.Text)
 		if err != nil {
-			log.Printf("Orchestrator: VoiceAgent process error: %v", err)
+			logging.Errorf("Orchestrator: VoiceAgent process error: %v", err)
 			o.transitionTo(StateIdle)
 			return
 		}
@@ -253,7 +254,7 @@ func (o *orchestratorImpl) handleToolCallRequested(event Event) {
 		return
 	}
 
-	log.Printf("Orchestrator: ToolCallRequested event - tool: %s, args: %v", toolEvent.Tool, toolEvent.Args)
+	logging.Infof("Orchestrator: ToolCallRequested event - tool: %s, args: %v", toolEvent.Tool, toolEvent.Args)
 
 	o.wg.Add(1)
 	go func() {
@@ -261,16 +262,16 @@ func (o *orchestratorImpl) handleToolCallRequested(event Event) {
 
 		result, audioReader, err := o.toolExecutor.Execute(toolEvent.Tool, toolEvent.Args)
 		if err != nil {
-			log.Printf("Orchestrator: Tool execution error: %v", err)
+			logging.Errorf("Orchestrator: Tool execution error: %v", err)
 			return
 		}
 
 		if audioReader != nil {
-			log.Printf("Orchestrator: tool returned audio, playing...")
+			logging.Infof("Orchestrator: tool returned audio, playing...")
 			o.OnToolAudioReady(audioReader)
 		}
 
-		log.Printf("Orchestrator: Tool execution result: %v", result)
+		logging.Infof("Orchestrator: Tool execution result: %v", result)
 	}()
 }
 
@@ -280,10 +281,10 @@ func (o *orchestratorImpl) handleToolAudioReady(event Event) {
 		return
 	}
 
-	log.Printf("Orchestrator: ToolAudioReady event, playing resource audio...")
+	logging.Infof("Orchestrator: ToolAudioReady event, playing resource audio...")
 	err := o.audioOutPipe.PlayResource(audioEvent.Audio)
 	if err != nil {
-		log.Printf("Orchestrator: Play resource error: %v", err)
+		logging.Errorf("Orchestrator: Play resource error: %v", err)
 	}
 }
 
@@ -294,7 +295,7 @@ func (o *orchestratorImpl) handleLLMEmotionChanged(event Event) {
 	}
 
 	o.currentEmotion = emotionEvent.Emotion
-	log.Printf("Orchestrator: LLM emotion changed to: %s", emotionEvent.Emotion)
+	logging.Infof("Orchestrator: LLM emotion changed to: %s", emotionEvent.Emotion)
 }
 
 func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
@@ -309,10 +310,10 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 		sentences := o.segmenter.Feed(e.Chunk)
 		for _, sentence := range sentences {
 			if sentence != "" {
-				log.Printf("Orchestrator: playing TTS for sentence: %s", sentence)
+				logging.Infof("Orchestrator: playing TTS for sentence: %s", sentence)
 				err := o.audioOutPipe.PlayTTS(sentence, o.currentEmotion)
 				if err != nil {
-					log.Printf("Orchestrator: PlayTTS error: %v", err)
+					logging.Errorf("Orchestrator: PlayTTS error: %v", err)
 				}
 				o.transitionTo(StateSpeaking)
 			}
@@ -324,14 +325,14 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 		o.OnToolCall(e.Tool, e.Args)
 	case *agent.FinishedEvent:
 		if last := o.segmenter.Flush(); last != "" {
-			log.Printf("Orchestrator: playing final TTS sentence: %s", last)
+			logging.Infof("Orchestrator: playing final TTS sentence: %s", last)
 			err := o.audioOutPipe.PlayTTS(last, o.currentEmotion)
 			if err != nil {
-				log.Printf("Orchestrator: PlayTTS error: %v", err)
+				logging.Errorf("Orchestrator: PlayTTS error: %v", err)
 			}
 			o.transitionTo(StateSpeaking)
 		}
-		log.Printf("Orchestrator: VoiceAgent finished")
+		logging.Infof("Orchestrator: VoiceAgent finished")
 		o.transitionTo(StateIdle)
 	}
 }

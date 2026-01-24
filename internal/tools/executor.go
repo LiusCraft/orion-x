@@ -3,7 +3,8 @@ package tools
 import (
 	"fmt"
 	"io"
-	"log"
+
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 // ToolExecutor 工具执行器接口
@@ -57,12 +58,12 @@ func NewToolExecutor() ToolExecutor {
 }
 
 func (e *toolExecutor) Execute(tool string, args map[string]interface{}) (interface{}, io.Reader, error) {
-	log.Printf("ToolExecutor: executing tool: %s, args: %v", tool, args)
+	logging.Infof("ToolExecutor: executing tool: %s, args: %v", tool, args)
 	return e.registry.Execute(tool, args)
 }
 
 func (e *toolExecutor) RegisterTool(name string, executor ToolExecutorFunc) {
-	log.Printf("ToolExecutor: registered tool: %s", name)
+	logging.Infof("ToolExecutor: registered tool: %s", name)
 	e.registry.RegisterTool(name, executor)
 }
 

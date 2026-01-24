@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"testing"
 
 	"github.com/liuscraft/orion-x/internal/agent"
@@ -46,7 +45,7 @@ func TestVoiceBotIntegration(t *testing.T) {
 	}
 	defer orchestrator.Stop()
 
-	log.Println("Orchestrator started successfully")
+	t.Log("Orchestrator started successfully")
 
 	state := orchestrator.GetState()
 	if state != voicebot.StateIdle {

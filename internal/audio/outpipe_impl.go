@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/tts"
 )
 
@@ -65,7 +65,7 @@ func (p *outPipeImpl) Start(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.ctx, p.cancel = context.WithCancel(ctx)
-	log.Printf("AudioOutPipe: started")
+	logging.Infof("AudioOutPipe: started")
 	return nil
 }
 
@@ -82,7 +82,7 @@ func (p *outPipeImpl) Stop() error {
 	}
 	p.ttsStreams = nil
 
-	log.Printf("AudioOutPipe: stopped")
+	logging.Infof("AudioOutPipe: stopped")
 	return nil
 }
 
@@ -98,7 +98,7 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 	}
 
 	voice := p.getVoice(emotion)
-	log.Printf("AudioOutPipe: PlayTTS - text: %s, emotion: %s, voice: %s", text, emotion, voice)
+	logging.Infof("AudioOutPipe: PlayTTS - text: %s, emotion: %s, voice: %s", text, emotion, voice)
 
 	p.mu.Lock()
 	ctx := p.ctx
@@ -122,17 +122,17 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 		TextType:   "PlainText",
 	}
 
-	log.Printf("AudioOutPipe: starting TTS stream...")
+	logging.Infof("AudioOutPipe: starting TTS stream...")
 	stream, err := p.tts.Start(ttsCtx, cfg)
 	if err != nil {
-		log.Printf("AudioOutPipe: TTS start error: %v (ctx=%v)", err, ttsCtx.Err())
+		logging.Errorf("AudioOutPipe: TTS start error: %v (ctx=%v)", err, ttsCtx.Err())
 		if isRetryableTTSError(err) {
-			log.Printf("AudioOutPipe: retrying TTS start...")
+			logging.Warnf("AudioOutPipe: retrying TTS start...")
 			time.Sleep(300 * time.Millisecond)
 			stream, err = p.tts.Start(ttsCtx, cfg)
 		}
 		if err != nil {
-			log.Printf("AudioOutPipe: TTS start retry failed: %v (ctx=%v)", err, ttsCtx.Err())
+			logging.Errorf("AudioOutPipe: TTS start retry failed: %v (ctx=%v)", err, ttsCtx.Err())
 			return fmt.Errorf("TTS start error: %w", err)
 		}
 	}
@@ -154,28 +154,28 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 	}
 
 	if mixer != nil {
-		log.Printf("AudioOutPipe: adding TTS stream to mixer...")
+		logging.Infof("AudioOutPipe: adding TTS stream to mixer...")
 		mixer.OnTTSStarted()
 		mixer.AddTTSStream(wrappedReader)
 	} else {
 		go p.drainAudio(wrappedReader)
 	}
 
-	log.Printf("AudioOutPipe: writing text chunk to TTS...")
+	logging.Infof("AudioOutPipe: writing text chunk to TTS...")
 	if err := stream.WriteTextChunk(ttsCtx, text); err != nil {
-		log.Printf("AudioOutPipe: TTS write error: %v", err)
+		logging.Errorf("AudioOutPipe: TTS write error: %v", err)
 		wrappedReader.done()
 		return fmt.Errorf("TTS write error: %w", err)
 	}
 
-	log.Printf("AudioOutPipe: closing TTS stream...")
+	logging.Infof("AudioOutPipe: closing TTS stream...")
 	if err := stream.Close(ttsCtx); err != nil {
-		log.Printf("AudioOutPipe: TTS close error: %v", err)
+		logging.Errorf("AudioOutPipe: TTS close error: %v", err)
 		wrappedReader.done()
 		return fmt.Errorf("TTS close error: %w", err)
 	}
 
-	log.Printf("AudioOutPipe: PlayTTS completed")
+	logging.Infof("AudioOutPipe: PlayTTS completed")
 	return nil
 }
 
@@ -187,7 +187,7 @@ func (p *outPipeImpl) PlayResource(audio io.Reader) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	log.Printf("AudioOutPipe: adding resource stream to mixer...")
+	logging.Infof("AudioOutPipe: adding resource stream to mixer...")
 	p.mixer.AddResourceStream(audio)
 	return nil
 }
@@ -206,7 +206,7 @@ func (p *outPipeImpl) Interrupt() error {
 		p.mixer.RemoveResourceStream()
 	}
 
-	log.Printf("AudioOutPipe: interrupted")
+	logging.Infof("AudioOutPipe: interrupted")
 	return nil
 }
 

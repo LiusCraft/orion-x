@@ -3,9 +3,9 @@ package audio
 import (
 	"context"
 	"encoding/binary"
-	"log"
 
 	"github.com/gordonklaus/portaudio"
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 // MicrophoneSource 麦克风音频源
@@ -19,7 +19,7 @@ type MicrophoneSource struct {
 
 // NewMicrophoneSource 创建新的麦克风音频源
 func NewMicrophoneSource(sampleRate, channels, bufferSize int) (*MicrophoneSource, error) {
-	log.Printf("MicrophoneSource: initializing portaudio...")
+	logging.Infof("MicrophoneSource: initializing portaudio...")
 	if err := portaudio.Initialize(); err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func NewMicrophoneSource(sampleRate, channels, bufferSize int) (*MicrophoneSourc
 		return nil, err
 	}
 
-	log.Printf("MicrophoneSource: created with sampleRate=%d, channels=%d, bufferSize=%d", sampleRate, channels, bufferSize)
+	logging.Infof("MicrophoneSource: created with sampleRate=%d, channels=%d, bufferSize=%d", sampleRate, channels, bufferSize)
 
 	if err := stream.Start(); err != nil {
 		stream.Close()
@@ -39,7 +39,7 @@ func NewMicrophoneSource(sampleRate, channels, bufferSize int) (*MicrophoneSourc
 		return nil, err
 	}
 
-	log.Printf("MicrophoneSource: stream started")
+	logging.Infof("MicrophoneSource: stream started")
 
 	return &MicrophoneSource{
 		stream:     stream,
@@ -66,21 +66,21 @@ func (m *MicrophoneSource) Read(ctx context.Context) ([]byte, error) {
 
 // Close 关闭音频源
 func (m *MicrophoneSource) Close() error {
-	log.Printf("MicrophoneSource: closing...")
+	logging.Infof("MicrophoneSource: closing...")
 
 	if err := m.stream.Abort(); err != nil {
-		log.Printf("MicrophoneSource: error aborting stream: %v", err)
+		logging.Errorf("MicrophoneSource: error aborting stream: %v", err)
 	}
 
 	if err := m.stream.Stop(); err != nil {
-		log.Printf("MicrophoneSource: error stopping stream: %v", err)
+		logging.Errorf("MicrophoneSource: error stopping stream: %v", err)
 	}
 
 	if err := m.stream.Close(); err != nil {
-		log.Printf("MicrophoneSource: error closing stream: %v", err)
+		logging.Errorf("MicrophoneSource: error closing stream: %v", err)
 	}
 
-	log.Printf("MicrophoneSource: stream closed successfully")
+	logging.Infof("MicrophoneSource: stream closed successfully")
 
 	// Note: We don't terminate portaudio here as it may be used by other components
 	// The program will terminate portaudio when it exits

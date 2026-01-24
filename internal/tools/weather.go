@@ -3,15 +3,16 @@ package tools
 import (
 	"fmt"
 	"io"
-	"log"
 	"time"
+
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 // GetWeatherTool 获取天气工具
 func GetWeatherTool(args map[string]interface{}) (interface{}, io.Reader, error) {
 	city := args["city"].(string)
 
-	log.Printf("GetWeatherTool: querying weather for city: %s", city)
+	logging.Infof("GetWeatherTool: querying weather for city: %s", city)
 
 	// TODO: 实际调用天气API
 	// 这里模拟天气数据
@@ -23,13 +24,13 @@ func GetWeatherTool(args map[string]interface{}) (interface{}, io.Reader, error)
 		"wind":        "东风3级",
 	}
 
-	log.Printf("GetWeatherTool: weather result: %v", weather)
+	logging.Infof("GetWeatherTool: weather result: %v", weather)
 	return weather, nil, nil
 }
 
 // GetTimeTool 获取时间工具
 func GetTimeTool(args map[string]interface{}) (interface{}, io.Reader, error) {
-	log.Printf("GetTimeTool: getting current time")
+	logging.Infof("GetTimeTool: getting current time")
 
 	now := map[string]interface{}{
 		"current":   getCurrentTimeFormatted(),
@@ -44,7 +45,7 @@ func GetTimeTool(args map[string]interface{}) (interface{}, io.Reader, error) {
 		"timestamp": getCurrentTimestamp(),
 	}
 
-	log.Printf("GetTimeTool: time result: %v", now)
+	logging.Infof("GetTimeTool: time result: %v", now)
 	return now, nil, nil
 }
 

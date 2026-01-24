@@ -2,119 +2,129 @@ package main
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
+	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/tools"
 	"github.com/liuscraft/orion-x/internal/voicebot"
 )
 
 func main() {
-	log.Println("========================================")
-	log.Println("        VoiceBot Starting...           ")
-	log.Println("========================================")
+	if err := logging.InitFromEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer logging.Sync()
+
+	logging.SetTraceID(logging.NewTraceID())
+
+	logging.Infof("========================================")
+	logging.Infof("        VoiceBot Starting...           ")
+	logging.Infof("========================================")
 
 	apiKey := os.Getenv("DASHSCOPE_API_KEY")
 	if apiKey == "" {
-		log.Fatal("DASHSCOPE_API_KEY environment variable is required")
+		logging.Fatalf("DASHSCOPE_API_KEY environment variable is required")
 	}
-	log.Println("API key loaded successfully")
+	logging.Infof("API key loaded successfully")
 
-	log.Println("Creating VoiceAgent...")
+	logging.Infof("Creating VoiceAgent...")
 	voiceAgent, err := agent.NewVoiceAgent(context.Background())
 	if err != nil {
-		log.Fatalf("Failed to create VoiceAgent: %v", err)
+		logging.Fatalf("Failed to create VoiceAgent: %v", err)
 	}
-	log.Println("VoiceAgent created successfully")
+	logging.Infof("VoiceAgent created successfully")
 
-	log.Println("Creating AudioMixer...")
+	logging.Infof("Creating AudioMixer...")
 	mixer, err := audio.NewMixer(audio.DefaultMixerConfig())
 	if err != nil {
-		log.Fatalf("Failed to create Mixer: %v", err)
+		logging.Fatalf("Failed to create Mixer: %v", err)
 	}
-	log.Println("AudioMixer created successfully")
+	logging.Infof("AudioMixer created successfully")
 
-	log.Println("Starting AudioMixer...")
+	logging.Infof("Starting AudioMixer...")
 	mixer.Start()
-	log.Println("AudioMixer started")
+	logging.Infof("AudioMixer started")
 
-	log.Println("Creating AudioOutPipe...")
+	logging.Infof("Creating AudioOutPipe...")
 	audioOutPipe := audio.NewOutPipe(apiKey)
 	audioOutPipe.SetMixer(mixer)
-	log.Println("AudioOutPipe created successfully")
+	logging.Infof("AudioOutPipe created successfully")
 
-	log.Println("Creating AudioInPipe...")
+	logging.Infof("Creating AudioInPipe...")
 	config := audio.DefaultInPipeConfig()
 
-	log.Println("Creating Microphone source...")
+	logging.Infof("Creating Microphone source...")
 	micSource, err := audio.NewMicrophoneSource(config.SampleRate, config.Channels, 3200)
 	if err != nil {
-		log.Fatalf("Failed to create Microphone source: %v", err)
+		logging.Fatalf("Failed to create Microphone source: %v", err)
 	}
-	log.Println("Microphone source created successfully")
+	logging.Infof("Microphone source created successfully")
 
 	audioInPipe, err := audio.NewInPipeWithAudioSource(apiKey, config, micSource)
 	if err != nil {
-		log.Fatalf("Failed to create AudioInPipe: %v", err)
+		logging.Fatalf("Failed to create AudioInPipe: %v", err)
 	}
-	log.Println("AudioInPipe created successfully")
+	logging.Infof("AudioInPipe created successfully")
 
-	log.Println("Creating ToolExecutor and registering tools...")
+	logging.Infof("Creating ToolExecutor and registering tools...")
 	toolExecutor := tools.NewToolExecutor()
 	toolExecutor.RegisterTool("getTime", tools.GetTimeTool)
 	toolExecutor.RegisterTool("getWeather", tools.GetWeatherTool)
-	log.Println("Tools registered successfully")
+	logging.Infof("Tools registered successfully")
 
-	log.Println("Creating Orchestrator...")
+	logging.Infof("Creating Orchestrator...")
 	orchestrator := voicebot.NewOrchestrator(voiceAgent, audioOutPipe, audioInPipe, toolExecutor)
-	log.Println("Orchestrator created successfully")
+	logging.Infof("Orchestrator created successfully")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	log.Println("Setting up signal handler...")
+	logging.Infof("Setting up signal handler...")
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-sigCh
-		log.Println("\n========================================")
-		log.Println("     Received interrupt signal...       ")
-		log.Println("========================================")
+		logging.Infof("\n========================================")
+		logging.Infof("     Received interrupt signal...       ")
+		logging.Infof("========================================")
 
-		log.Println("Stopping Mixer...")
+		logging.Infof("Stopping Mixer...")
 		mixer.Stop()
 
-		log.Println("Stopping Orchestrator...")
+		logging.Infof("Stopping Orchestrator...")
 		if err := orchestrator.Stop(); err != nil {
-			log.Printf("Error stopping orchestrator: %v", err)
+			logging.Errorf("Error stopping orchestrator: %v", err)
 		}
 
 		cancel()
-		log.Println("Exiting...")
+		logging.Infof("Exiting...")
+		logging.Sync()
 		os.Exit(0)
 	}()
 
-	log.Println("Starting Orchestrator...")
+	logging.Infof("Starting Orchestrator...")
 	if err := orchestrator.Start(ctx); err != nil {
-		log.Fatalf("Failed to start orchestrator: %v", err)
+		logging.Fatalf("Failed to start orchestrator: %v", err)
 	}
 
-	log.Println("========================================")
-	log.Println("     VoiceBot is Running! 🎤          ")
-	log.Println("     Press Ctrl+C to stop.             ")
-	log.Println("========================================")
+	logging.Infof("========================================")
+	logging.Infof("     VoiceBot is Running! 🎤          ")
+	logging.Infof("     Press Ctrl+C to stop.             ")
+	logging.Infof("========================================")
 
 	// Wait for signal
 	<-ctx.Done()
 
-	log.Println("\n========================================")
-	log.Println("     VoiceBot Shutting Down...          ")
-	log.Println("========================================")
+	logging.Infof("\n========================================")
+	logging.Infof("     VoiceBot Shutting Down...          ")
+	logging.Infof("========================================")
 
-	log.Println("VoiceBot stopped.")
+	logging.Infof("VoiceBot stopped.")
 }

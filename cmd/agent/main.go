@@ -2,51 +2,60 @@ package main
 
 import (
 	"context"
-	"log"
+	"fmt"
+	"os"
 
 	"github.com/liuscraft/orion-x/internal/agent"
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 func main() {
+	if err := logging.InitFromEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer logging.Sync()
+	logging.SetTraceID(logging.NewTraceID())
+
 	ctx := context.Background()
 
 	// 创建 VoiceAgent
 	voiceAgent, err := agent.NewVoiceAgent(ctx)
 	if err != nil {
-		log.Fatalf("NewVoiceAgent failed: %v\n", err)
+		logging.Fatalf("NewVoiceAgent failed: %v", err)
 	}
 
 	// 准备测试输入
 	input := "北京天气怎么样,用生气的语气告诉我"
 
-	log.Println("=== 开始 VoiceAgent 测试 ===")
-	log.Printf("输入: %s\n", input)
+	logging.Infof("=== 开始 VoiceAgent 测试 ===")
+	logging.Infof("输入: %s", input)
 
 	// 处理输入，获取事件流
 	eventChan, err := voiceAgent.Process(ctx, input)
 	if err != nil {
-		log.Fatalf("Process failed: %v\n", err)
+		logging.Fatalf("Process failed: %v", err)
 	}
 
-	log.Println("=== 流式输出 ===")
+	logging.Infof("=== 流式输出 ===")
 
 	// 处理事件流
 	for event := range eventChan {
 		switch e := event.(type) {
 		case *agent.TextChunkEvent:
-			log.Printf("[TextChunk] %s (Emotion: %s)", e.Chunk, e.Emotion)
+			logging.Infof("[TextChunk] %s (Emotion: %s)", e.Chunk, e.Emotion)
 		case *agent.EmotionChangedEvent:
-			log.Printf("[EmotionChanged] %s", e.Emotion)
+			logging.Infof("[EmotionChanged] %s", e.Emotion)
 		case *agent.ToolCallRequestedEvent:
-			log.Printf("[ToolCall] Tool: %s, Type: %s, Args: %v", e.Tool, e.ToolType, e.Args)
+			logging.Infof("[ToolCall] Tool: %s, Type: %s, Args: %v", e.Tool, e.ToolType, e.Args)
 		case *agent.FinishedEvent:
 			if e.Error != nil {
-				log.Printf("[Finished] Error: %v", e.Error)
+				logging.Errorf("[Finished] Error: %v", e.Error)
 			} else {
-				log.Println("[Finished] Successfully")
+				logging.Infof("[Finished] Successfully")
 			}
 		}
 	}
 
-	log.Println("=== 测试完成 ===")
+	logging.Infof("=== 测试完成 ===")
 }

@@ -1,5 +1,25 @@
 # 日志更新说明
 
+## 日志库
+
+采用 `zap` 作为统一日志库，提供结构化日志与可配置日志级别/格式。
+
+**环境变量**:
+- `LOG_LEVEL`: `debug|info|warn|error`，默认 `info`
+- `LOG_FORMAT`: `console|json`，默认 `console`
+
+## 日志 ID 方案
+
+当前单客户端运行模式下，整个进程使用一个固定 `traceId`，每一轮完整交互生成一个新的 `turnId`。
+
+**完整周期**:
+用户说话检测/ASR Final 触发处理 → LLM/工具处理 → TTS 播放 → 回到 Idle
+
+日志中同时注入:
+- `trace_id`
+- `turn_id`
+- `log_id`: `traceId-turnId`
+
 ## 添加的日志
 
 ### AudioInPipe

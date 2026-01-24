@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/text"
 	"github.com/liuscraft/orion-x/internal/tts"
 )
@@ -35,10 +36,16 @@ func main() {
 	player := flag.String("player", "ffplay", "Player executable for streaming playback")
 	dataInspection := flag.Bool("data-inspection", true, "Enable X-DashScope-DataInspection header")
 	flag.Parse()
+	if err := logging.InitFromEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer logging.Sync()
+	logging.SetTraceID(logging.NewTraceID())
 
 	apiKey := os.Getenv("DASHSCOPE_API_KEY")
 	if apiKey == "" {
-		log.Fatal("DASHSCOPE_API_KEY is not set")
+		logging.Fatalf("DASHSCOPE_API_KEY is not set")
 	}
 
 	cfg := tts.Config{
@@ -62,7 +69,7 @@ func main() {
 
 	stream, err := provider.Start(ctx, cfg)
 	if err != nil {
-		log.Fatalf("start tts stream failed: %v", err)
+		logging.Fatalf("start tts stream failed: %v", err)
 	}
 
 	var wg sync.WaitGroup
@@ -81,12 +88,12 @@ func main() {
 	for _, chunk := range chunkText(*inputText, *chunkSize) {
 		if seg == nil {
 			if err := stream.WriteTextChunk(ctx, chunk); err != nil {
-				log.Fatalf("send text chunk failed: %v", err)
+				logging.Fatalf("send text chunk failed: %v", err)
 			}
 		} else {
 			for _, sentence := range seg.Feed(chunk) {
 				if err := stream.WriteTextChunk(ctx, sentence); err != nil {
-					log.Fatalf("send text chunk failed: %v", err)
+					logging.Fatalf("send text chunk failed: %v", err)
 				}
 			}
 		}
@@ -98,7 +105,7 @@ func main() {
 	if seg != nil {
 		if sentence := seg.Flush(); sentence != "" {
 			if err := stream.WriteTextChunk(ctx, sentence); err != nil {
-				log.Fatalf("send text chunk failed: %v", err)
+				logging.Fatalf("send text chunk failed: %v", err)
 			}
 		}
 	}
@@ -106,12 +113,12 @@ func main() {
 	finishCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if err := stream.Close(finishCtx); err != nil {
-		log.Printf("finish task failed: %v", err)
+		logging.Errorf("finish task failed: %v", err)
 	}
 
 	wg.Wait()
 	if err := <-playErrCh; err != nil {
-		log.Printf("playback error: %v", err)
+		logging.Errorf("playback error: %v", err)
 	}
 }
 

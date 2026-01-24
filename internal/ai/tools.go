@@ -3,10 +3,10 @@ package ai
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool/utils"
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 // MockTools 返回 100 个 mock 工具
@@ -158,61 +158,61 @@ func CreateMockTools() ([]interface{}, error) {
 		case "getCurrentTime":
 			t, _ = utils.InferTool(cfg.name, cfg.desc, func(context.Context, struct{}) (string, error) {
 				result := now.Format("2006-01-02 15:04:05")
-				log.Printf("[Tool] %s -> %s", cfg.name, result)
+				logging.Infof("[Tool] %s -> %s", cfg.name, result)
 				return result, nil
 			})
 		case "getCurrentDate":
 			t, _ = utils.InferTool(cfg.name, cfg.desc, func(context.Context, struct{}) (string, error) {
 				result := now.Format("2006-01-02")
-				log.Printf("[Tool] %s -> %s", cfg.name, result)
+				logging.Infof("[Tool] %s -> %s", cfg.name, result)
 				return result, nil
 			})
 		case "getTimestamp":
 			t, _ = utils.InferTool(cfg.name, cfg.desc, func(context.Context, struct{}) (string, error) {
 				result := fmt.Sprintf("%d", now.Unix())
-				log.Printf("[Tool] %s -> %s", cfg.name, result)
+				logging.Infof("[Tool] %s -> %s", cfg.name, result)
 				return result, nil
 			})
 		case "getWeekday":
 			t, _ = utils.InferTool(cfg.name, cfg.desc, func(context.Context, struct{}) (string, error) {
 				result := now.Weekday().String()
-				log.Printf("[Tool] %s -> %s", cfg.name, result)
+				logging.Infof("[Tool] %s -> %s", cfg.name, result)
 				return result, nil
 			})
 		case "getTimezone":
 			t, _ = utils.InferTool(cfg.name, cfg.desc, func(context.Context, struct{}) (string, error) {
 				result := now.Location().String()
-				log.Printf("[Tool] %s -> %s", cfg.name, result)
+				logging.Infof("[Tool] %s -> %s", cfg.name, result)
 				return result, nil
 			})
 		case "getUTCNow":
 			t, _ = utils.InferTool(cfg.name, cfg.desc, func(context.Context, struct{}) (string, error) {
 				result := now.UTC().Format("2006-01-02 15:04:05 UTC")
-				log.Printf("[Tool] %s -> %s", cfg.name, result)
+				logging.Infof("[Tool] %s -> %s", cfg.name, result)
 				return result, nil
 			})
 		case "getYear":
 			t, _ = utils.InferTool(cfg.name, cfg.desc, func(context.Context, struct{}) (string, error) {
 				result := fmt.Sprintf("%d", now.Year())
-				log.Printf("[Tool] %s -> %s", cfg.name, result)
+				logging.Infof("[Tool] %s -> %s", cfg.name, result)
 				return result, nil
 			})
 		case "getMonth":
 			t, _ = utils.InferTool(cfg.name, cfg.desc, func(context.Context, struct{}) (string, error) {
 				result := now.Format("01")
-				log.Printf("[Tool] %s -> %s", cfg.name, result)
+				logging.Infof("[Tool] %s -> %s", cfg.name, result)
 				return result, nil
 			})
 		case "getDay":
 			t, _ = utils.InferTool(cfg.name, cfg.desc, func(context.Context, struct{}) (string, error) {
 				result := fmt.Sprintf("%d", now.Day())
-				log.Printf("[Tool] %s -> %s", cfg.name, result)
+				logging.Infof("[Tool] %s -> %s", cfg.name, result)
 				return result, nil
 			})
 		case "isWeekend":
 			t, _ = utils.InferTool(cfg.name, cfg.desc, func(context.Context, struct{}) (string, error) {
 				result := fmt.Sprintf("%v", now.Weekday() == time.Saturday || now.Weekday() == time.Sunday)
-				log.Printf("[Tool] %s -> %s", cfg.name, result)
+				logging.Infof("[Tool] %s -> %s", cfg.name, result)
 				return result, nil
 			})
 
@@ -236,7 +236,7 @@ func CreateMockTools() ([]interface{}, error) {
 // createGenericMockTool 创建通用 mock 工具
 func createGenericMockTool(cfg toolConfig) (interface{}, error) {
 	t, _ := utils.InferTool(cfg.name, cfg.desc, func(ctx context.Context, args map[string]interface{}) (string, error) {
-		log.Printf("[Tool] %s called with args: %v", cfg.name, args)
+		logging.Infof("[Tool] %s called with args: %v", cfg.name, args)
 
 		// 根据工具名称返回模拟结果
 		switch {

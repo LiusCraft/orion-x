@@ -9,6 +9,12 @@
 - [x] 验证各模块能够正确协作
 - [x] 添加集成测试
 
+### 0.1 日志库接入 (优先级: 高)
+- [x] 引入 zap 日志库
+- [x] 统一封装 `internal/logging`
+- [x] 支持 `traceId-turnId` 日志标识
+- [x] 替换全项目 `log.*` 调用
+
 ### 1. Orchestrator 实现 (优先级: 高) ⭐️ 优先
 - [x] 搭建基础框架和事件总线
 - [x] 实现状态机（Idle/Listening/Processing/Speaking）

@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"os"
 	"sync"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/schema"
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 type voiceAgentImpl struct {
@@ -50,7 +50,7 @@ func NewVoiceAgent(ctx context.Context) (VoiceAgent, error) {
 }
 
 func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan AgentEvent, error) {
-	log.Printf("VoiceAgent: processing input: %s", input)
+	logging.Infof("VoiceAgent: processing input: %s", input)
 	eventChan := make(chan AgentEvent)
 	var wg sync.WaitGroup
 
@@ -73,10 +73,10 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 			schema.UserMessage(input),
 		}
 
-		log.Printf("VoiceAgent: starting LLM stream...")
+		logging.Infof("VoiceAgent: starting LLM stream...")
 		stream, err := v.chatModel.Stream(ctx, messages)
 		if err != nil {
-			log.Printf("VoiceAgent: LLM stream error: %v", err)
+			logging.Errorf("VoiceAgent: LLM stream error: %v", err)
 			eventChan <- &FinishedEvent{Error: err}
 			return
 		}
@@ -90,11 +90,11 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 		for {
 			msg, err := stream.Recv()
 			if err == io.EOF {
-				log.Printf("VoiceAgent: LLM stream completed, total text length: %d", len(fullText))
+				logging.Infof("VoiceAgent: LLM stream completed, total text length: %d", len(fullText))
 				break
 			}
 			if err != nil {
-				log.Printf("VoiceAgent: stream receive error: %v", err)
+				logging.Errorf("VoiceAgent: stream receive error: %v", err)
 				eventChan <- &FinishedEvent{Error: err}
 				return
 			}
@@ -117,7 +117,7 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 				if len(cleanBufferedContent) > lastFilteredLength {
 					newContent := cleanBufferedContent[lastFilteredLength:]
 					if newContent != "" {
-						log.Printf("VoiceAgent: text chunk: %s (emotion: %s)", newContent, currentEmotion)
+						logging.Infof("VoiceAgent: text chunk: %s (emotion: %s)", newContent, currentEmotion)
 						eventChan <- &TextChunkEvent{Chunk: newContent, Emotion: currentEmotion}
 						fullText += newContent
 						lastFilteredLength = 0
@@ -129,7 +129,7 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 				toolType := v.toolClassifier.GetToolType(toolCall.Function.Name)
 				args := parseToolArgs(toolCall.Function.Arguments)
 
-				log.Printf("VoiceAgent: tool call requested: %s (type: %s), args: %v", toolCall.Function.Name, toolType, args)
+				logging.Infof("VoiceAgent: tool call requested: %s (type: %s), args: %v", toolCall.Function.Name, toolType, args)
 				eventChan <- &ToolCallRequestedEvent{
 					Tool:     toolCall.Function.Name,
 					Args:     args,
@@ -143,19 +143,19 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 
 					if emotion != "" && emotion != currentEmotion {
 						currentEmotion = emotion
-						log.Printf("VoiceAgent: emotion changed to: %s (from action response)", emotion)
+						logging.Infof("VoiceAgent: emotion changed to: %s (from action response)", emotion)
 						eventChan <- &EmotionChangedEvent{Emotion: emotion}
 					}
 
 					if filtered != "" {
-						log.Printf("VoiceAgent: action response: %s", filtered)
+						logging.Infof("VoiceAgent: action response: %s", filtered)
 						eventChan <- &TextChunkEvent{Chunk: filtered, Emotion: currentEmotion}
 					}
 				}
 			}
 		}
 
-		log.Printf("VoiceAgent: processing finished")
+		logging.Infof("VoiceAgent: processing finished")
 		eventChan <- &FinishedEvent{Error: nil}
 	}()
 
@@ -174,7 +174,7 @@ func parseToolArgs(argsJSON string) map[string]interface{} {
 
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		log.Printf("Failed to parse tool args: %v", err)
+		logging.Errorf("Failed to parse tool args: %v", err)
 		return result
 	}
 

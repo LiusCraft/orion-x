@@ -3,10 +3,10 @@ package audio
 import (
 	"context"
 	"io"
-	"log"
 	"sync"
 
 	"github.com/gordonklaus/portaudio"
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 type mixerImpl struct {
@@ -86,14 +86,14 @@ func (m *mixerImpl) SetResourceVolume(volume float64) {
 func (m *mixerImpl) OnTTSStarted() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	log.Printf("AudioMixer: TTS started, reducing resource volume to 50%%")
+	logging.Infof("AudioMixer: TTS started, reducing resource volume to 50%%")
 	m.currentResourceVolume = m.config.ResourceVolume * 0.5
 }
 
 func (m *mixerImpl) OnTTSFinished() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	log.Printf("AudioMixer: TTS finished, restoring resource volume to 100%%")
+	logging.Infof("AudioMixer: TTS finished, restoring resource volume to 100%%")
 	m.currentResourceVolume = m.config.ResourceVolume
 }
 
@@ -109,7 +109,7 @@ func (m *mixerImpl) Start() {
 
 	go func() {
 		if err := player.Start(); err != nil {
-			log.Printf("AudioMixer: failed to start stream: %v", err)
+			logging.Errorf("AudioMixer: failed to start stream: %v", err)
 			m.mu.Lock()
 			m.started = false
 			m.mu.Unlock()
@@ -129,13 +129,13 @@ func (m *mixerImpl) Stop() {
 
 	if player != nil {
 		if err := player.Abort(); err != nil {
-			log.Printf("AudioMixer: failed to abort stream: %v", err)
+			logging.Errorf("AudioMixer: failed to abort stream: %v", err)
 		}
 		if err := player.Stop(); err != nil {
-			log.Printf("AudioMixer: failed to stop stream: %v", err)
+			logging.Errorf("AudioMixer: failed to stop stream: %v", err)
 		}
 		if err := player.Close(); err != nil {
-			log.Printf("AudioMixer: failed to close stream: %v", err)
+			logging.Errorf("AudioMixer: failed to close stream: %v", err)
 		}
 	}
 

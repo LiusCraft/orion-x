@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/gordonklaus/portaudio"
 	"github.com/liuscraft/orion-x/internal/asr"
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 const (
@@ -28,10 +28,16 @@ func main() {
 	semanticPunc := flag.Bool("semantic-punctuation", false, "Enable semantic punctuation")
 	languageHints := flag.String("language-hints", "", "Comma-separated language hints (e.g. zh,en)")
 	flag.Parse()
+	if err := logging.InitFromEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer logging.Sync()
+	logging.SetTraceID(logging.NewTraceID())
 
 	apiKey := os.Getenv("DASHSCOPE_API_KEY")
 	if apiKey == "" {
-		log.Fatal("DASHSCOPE_API_KEY is not set")
+		logging.Fatalf("DASHSCOPE_API_KEY is not set")
 	}
 
 	cfg := asr.Config{
@@ -51,7 +57,7 @@ func main() {
 
 	recognizer, err := asr.NewDashScopeRecognizer(cfg)
 	if err != nil {
-		log.Fatalf("init recognizer failed: %v", err)
+		logging.Fatalf("init recognizer failed: %v", err)
 	}
 	recognizer.OnResult(func(result asr.Result) {
 		label := "partial"
@@ -65,21 +71,21 @@ func main() {
 	defer stop()
 
 	if err := recognizer.Start(ctx); err != nil {
-		log.Fatalf("start recognizer failed: %v", err)
+		logging.Fatalf("start recognizer failed: %v", err)
 	}
 	defer func() {
 		finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := recognizer.Finish(finishCtx); err != nil {
-			log.Printf("finish task failed: %v", err)
+			logging.Errorf("finish task failed: %v", err)
 		}
 		if err := recognizer.Close(); err != nil {
-			log.Printf("close recognizer failed: %v", err)
+			logging.Errorf("close recognizer failed: %v", err)
 		}
 	}()
 
 	if err := portaudio.Initialize(); err != nil {
-		log.Fatalf("portaudio init failed: %v", err)
+		logging.Fatalf("portaudio init failed: %v", err)
 	}
 	defer portaudio.Terminate()
 
@@ -87,15 +93,15 @@ func main() {
 	byteBuffer := make([]byte, len(buffer)*2)
 	stream, err := portaudio.OpenDefaultStream(1, 0, float64(*sampleRate), len(buffer), &buffer)
 	if err != nil {
-		log.Fatalf("open audio stream failed: %v", err)
+		logging.Fatalf("open audio stream failed: %v", err)
 	}
 	defer stream.Close()
 	if err := stream.Start(); err != nil {
-		log.Fatalf("start audio stream failed: %v", err)
+		logging.Fatalf("start audio stream failed: %v", err)
 	}
 	defer stream.Stop()
 
-	log.Println("listening... press Ctrl+C to stop")
+	logging.Infof("listening... press Ctrl+C to stop")
 
 	for {
 		select {
@@ -104,12 +110,12 @@ func main() {
 		default:
 		}
 		if err := stream.Read(); err != nil {
-			log.Printf("audio read error: %v", err)
+			logging.Errorf("audio read error: %v", err)
 			return
 		}
 		encodeInt16LE(byteBuffer, buffer)
 		if err := recognizer.SendAudio(ctx, byteBuffer); err != nil {
-			log.Printf("send audio error: %v", err)
+			logging.Errorf("send audio error: %v", err)
 			return
 		}
 	}

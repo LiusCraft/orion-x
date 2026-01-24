@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 // CreateToolCallGraph 创建工具调用 Agent (线性流程)
@@ -67,7 +67,7 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 	}
 	getTimeTool, _ := utils.InferTool("getTime", "获取当前时间", func(_ context.Context, _ struct{}) (string, error) {
 		result := time.Now().Format("2006-01-02 15:04:05")
-		log.Printf("[Tool] getTime 执行完成，结果: %s", result)
+		logging.Infof("[Tool] getTime 执行完成，结果: %s", result)
 		return result, nil
 	})
 
@@ -75,7 +75,7 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 		func(ctx context.Context, args struct {
 			City string `json:"city"`
 		}) (string, error) {
-			log.Printf("[ReAct Tool] getWeather 执行，城市: %s", args.City)
+			logging.Infof("[ReAct Tool] getWeather 执行，城市: %s", args.City)
 			// 模拟天气数据
 			return fmt.Sprintf("%s的天气：晴天，温度25°C", args.City), nil
 		})
@@ -90,7 +90,7 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 		toolMap[info.Name] = t
 	}
 
-	log.Printf("[Init] 已加载 %d 个工具，工具映射大小: %d", len(allTools), len(toolMap))
+	logging.Infof("[Init] 已加载 %d 个工具，工具映射大小: %d", len(allTools), len(toolMap))
 
 	// 5. 创建 isMuiltTool 工具（小模型专用，用于识别多工具场景）
 	isMuiltTool, _ := utils.InferTool("isMuiltTool", "当用户问题涉及多个工具时，调用此工具。参数 Ids 是需要调用的工具名称列表，用逗号分隔。例如：{\"Ids\": [\"getTime\", \"getWeather\"]}", func(_ context.Context, toolInfos struct {
@@ -118,22 +118,22 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 
 	// 7. 用 Lambda 封装整个流程
 	agentLambda := compose.InvokableLambda(func(ctx context.Context, messages []*schema.Message) (*schema.Message, error) {
-		log.Println("=== [Agent] 开始执行 ===")
-		log.Printf("[Agent] 输入消息数: %d", len(messages))
+		logging.Infof("=== [Agent] 开始执行 ===")
+		logging.Infof("[Agent] 输入消息数: %d", len(messages))
 
 		// 1. 小模型意图识别
-		log.Println("[IntentModel] 小模型开始分析...")
+		logging.Infof("[IntentModel] 小模型开始分析...")
 		intentResp, err := intentModel.Generate(ctx, append(messages, schema.SystemMessage("分析用户问题：如果是单个问题直接调用对应工具；如果是多个问题，必须调用 isMuiltTool 工具，传入需要调用的工具名称列表。不是则直接调用")))
 		if err != nil {
-			log.Printf("[IntentModel] 调用失败: %v", err)
+			logging.Infof("[IntentModel] 调用失败: %v", err)
 			return nil, err
 		}
-		log.Printf("[IntentModel] 响应: %s", intentResp.Content)
-		log.Printf("[IntentModel] ToolCalls 数量: %d", len(intentResp.ToolCalls))
+		logging.Infof("[IntentModel] 响应: %s", intentResp.Content)
+		logging.Infof("[IntentModel] ToolCalls 数量: %d", len(intentResp.ToolCalls))
 
 		// 2. 如果没有工具调用，直接返回
 		if len(intentResp.ToolCalls) == 0 {
-			log.Println("[Agent] 无工具调用，直接返回")
+			logging.Infof("[Agent] 无工具调用，直接返回")
 			return intentResp, nil
 		}
 
@@ -147,7 +147,7 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 				Ids []string `json:"Ids"`
 			}
 			if err := json.Unmarshal([]byte(intentResp.ToolCalls[0].Function.Arguments), &toolIds); err != nil {
-				log.Printf("[Agent] 解析工具ID失败: %v", err)
+				logging.Infof("[Agent] 解析工具ID失败: %v", err)
 				// 降级：从参数字符串中提取
 				argStr := intentResp.ToolCalls[0].Function.Arguments
 				toolIds.Ids = strings.FieldsFunc(argStr, func(c rune) bool {
@@ -155,21 +155,21 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 				})
 			}
 
-			log.Printf("[Agent] 检测到多工具调用，工具列表: %v", toolIds.Ids)
+			logging.Infof("[Agent] 检测到多工具调用，工具列表: %v", toolIds.Ids)
 
 			// 根据 ID 找到对应的工具
 			for _, toolId := range toolIds.Ids {
 				toolId = strings.TrimSpace(toolId)
 				if tool, ok := toolMap[toolId]; ok {
 					selectedTools = append(selectedTools, tool)
-					log.Printf("[Agent]   找到工具: %s", toolId)
+					logging.Infof("[Agent]   找到工具: %s", toolId)
 				} else {
-					log.Printf("[Agent]   未找到工具: %s", toolId)
+					logging.Infof("[Agent]   未找到工具: %s", toolId)
 				}
 			}
 
 			if len(selectedTools) == 0 {
-				log.Println("[Agent] 没有找到有效工具，使用默认工具")
+				logging.Infof("[Agent] 没有找到有效工具，使用默认工具")
 				selectedTools = allTools[:10] // 降级：使用前10个工具
 			}
 
@@ -180,7 +180,7 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 				selectedToolInfos = append(selectedToolInfos, toolInfo)
 			}
 			largeModel.BindTools(selectedToolInfos)
-			log.Printf("[Agent] 已绑定 %d 个工具到大模型", len(selectedTools))
+			logging.Infof("[Agent] 已绑定 %d 个工具到大模型", len(selectedTools))
 
 			// 构建消息让大模型调用工具
 			finalMessages = append([]*schema.Message{}, messages...)
@@ -189,15 +189,15 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 			// 大模型生成工具调用
 			largeResp, err := largeModel.Generate(ctx, finalMessages)
 			if err != nil {
-				log.Printf("[LargeModel] 调用失败: %v", err)
+				logging.Infof("[LargeModel] 调用失败: %v", err)
 				return nil, err
 			}
 
-			log.Printf("[LargeModel] ToolCalls 数量: %d", len(largeResp.ToolCalls))
+			logging.Infof("[LargeModel] ToolCalls 数量: %d", len(largeResp.ToolCalls))
 
 			// 如果大模型没有调用工具，直接返回
 			if len(largeResp.ToolCalls) == 0 {
-				log.Println("[LargeModel] 无工具调用，直接返回回复")
+				logging.Infof("[LargeModel] 无工具调用，直接返回回复")
 				return largeResp, nil
 			}
 
@@ -205,20 +205,20 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 			intentResp = largeResp
 		} else {
 			// 单工具调用，直接使用小模型的响应
-			log.Println("[Agent] 单工具调用场景")
+			logging.Infof("[Agent] 单工具调用场景")
 		}
 
 		// 4. 执行工具
-		log.Printf("[ToolsNode] 开始执行工具，数量: %d", len(intentResp.ToolCalls))
+		logging.Infof("[ToolsNode] 开始执行工具，数量: %d", len(intentResp.ToolCalls))
 		for i, tc := range intentResp.ToolCalls {
-			log.Printf("[ToolsNode]   [%d] 工具: %s, 参数: %s", i, tc.Function.Name, tc.Function.Arguments)
+			logging.Infof("[ToolsNode]   [%d] 工具: %s, 参数: %s", i, tc.Function.Name, tc.Function.Arguments)
 		}
 		toolResults, err := toolsNode.Invoke(ctx, intentResp)
 		if err != nil {
-			log.Printf("[ToolsNode] 执行失败: %v", err)
+			logging.Infof("[ToolsNode] 执行失败: %v", err)
 			return nil, err
 		}
-		log.Printf("[ToolsNode] 工具执行完成，结果数: %d", len(toolResults))
+		logging.Infof("[ToolsNode] 工具执行完成，结果数: %d", len(toolResults))
 
 		// 5. 合并消息生成最终回复
 		finalMessages = make([]*schema.Message, 0, len(messages)+1+len(toolResults))
@@ -227,14 +227,14 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 		finalMessages = append(finalMessages, toolResults...)
 
 		// 6. 大模型生成最终回复
-		log.Println("[FinalModel] 生成最终回复...")
+		logging.Infof("[FinalModel] 生成最终回复...")
 		finalResp, err := finalModel.Generate(ctx, finalMessages)
 		if err != nil {
-			log.Printf("[FinalModel] 调用失败: %v", err)
+			logging.Infof("[FinalModel] 调用失败: %v", err)
 			return nil, err
 		}
-		log.Printf("[FinalModel] 最终回复: %s", finalResp.Content)
-		log.Println("=== [Agent] 执行完成 ===")
+		logging.Infof("[FinalModel] 最终回复: %s", finalResp.Content)
+		logging.Infof("=== [Agent] 执行完成 ===")
 
 		return finalResp, nil
 	})
@@ -270,7 +270,7 @@ func CreateReActAgent(ctx context.Context) (*react.Agent, error) {
 	// 2. 创建工具
 	getTimeTool, _ := utils.InferTool("getTime", "获取当前时间", func(ctx context.Context, _ struct{}) (string, error) {
 		result := time.Now().Format("2006-01-02 15:04:05")
-		log.Printf("[ReAct Tool] getTime 执行，结果: %s", result)
+		logging.Infof("[ReAct Tool] getTime 执行，结果: %s", result)
 		return result, nil
 	})
 
@@ -278,7 +278,7 @@ func CreateReActAgent(ctx context.Context) (*react.Agent, error) {
 		func(ctx context.Context, args struct {
 			City string `json:"city"`
 		}) (string, error) {
-			log.Printf("[ReAct Tool] getWeather 执行，城市: %s", args.City)
+			logging.Infof("[ReAct Tool] getWeather 执行，城市: %s", args.City)
 			// 模拟天气数据
 			return fmt.Sprintf("%s的天气：晴天，温度25°C", args.City), nil
 		})
