@@ -64,10 +64,19 @@ type MixerConfig struct {
 }
 
 type InPipeConfig struct {
-	SampleRate   int     `json:"sample_rate"`
-	Channels     int     `json:"channels"`
-	EnableVAD    bool    `json:"enable_vad"`
-	VADThreshold float64 `json:"vad_threshold"`
+	SampleRate   int       `json:"sample_rate"`
+	Channels     int       `json:"channels"`
+	EnableVAD    bool      `json:"enable_vad"`
+	VADThreshold float64   `json:"vad_threshold"`
+	AEC          AECConfig `json:"aec"`
+}
+
+type AECConfig struct {
+	Enable                  bool   `json:"enable"`
+	Mode                    string `json:"mode"`
+	FrameMs                 int    `json:"frame_ms"`
+	FarEndDelayMs           int    `json:"far_end_delay_ms"`
+	ReferenceActiveWindowMs int    `json:"reference_active_window_ms"`
 }
 
 type ToolsConfig struct {
@@ -116,6 +125,13 @@ func DefaultConfig() *AppConfig {
 				Channels:     1,
 				EnableVAD:    true,
 				VADThreshold: 0.5,
+				AEC: AECConfig{
+					Enable:                  true,
+					Mode:                    "gate",
+					FrameMs:                 10,
+					FarEndDelayMs:           50,
+					ReferenceActiveWindowMs: 200,
+				},
 			},
 		},
 		Tools: ToolsConfig{
@@ -197,6 +213,16 @@ func (c *AppConfig) Validate() error {
 		default:
 			return fmt.Errorf("invalid tool type for %s: %s", name, value)
 		}
+	}
+
+	if c.Audio.InPipe.AEC.FrameMs < 0 {
+		return errors.New("audio.in_pipe.aec.frame_ms must be non-negative")
+	}
+	if c.Audio.InPipe.AEC.FarEndDelayMs < 0 {
+		return errors.New("audio.in_pipe.aec.far_end_delay_ms must be non-negative")
+	}
+	if c.Audio.InPipe.AEC.ReferenceActiveWindowMs < 0 {
+		return errors.New("audio.in_pipe.aec.reference_active_window_ms must be non-negative")
 	}
 
 	return nil

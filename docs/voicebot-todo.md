@@ -67,6 +67,8 @@
 - [x] 集成 VAD 检测（可选）
 - [x] 修复 TTS DNS 查询被取消问题
 - [x] 修复 Mixer.Start() 可能阻塞问题
+- [x] 在音频采集源层加入回声消除管线（ReferenceBuffer + EchoCancellingSource）
+- [ ] 接入 WebRTC AEC3（或系统级 AEC）实现真正回声消除
 
 ## 阶段二：工具集成
 

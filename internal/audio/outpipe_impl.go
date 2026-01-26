@@ -20,6 +20,7 @@ type outPipeImpl struct {
 	voiceMap   map[string]string
 	ttsConfig  tts.Config
 	apiKey     string
+	reference  ReferenceSink
 	ctx        context.Context
 	cancel     context.CancelFunc
 	mu         sync.Mutex
@@ -29,6 +30,19 @@ type ttsStreamReader struct {
 	reader   io.Reader
 	doneOnce sync.Once
 	onDone   func()
+}
+
+type referenceTeeReader struct {
+	reader io.Reader
+	sink   ReferenceSink
+}
+
+func (r *referenceTeeReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 && r.sink != nil {
+		r.sink.WriteReference(p[:n])
+	}
+	return n, err
 }
 
 func (r *ttsStreamReader) Read(p []byte) (int, error) {
@@ -105,6 +119,12 @@ func (p *outPipeImpl) SetMixer(mixer AudioMixer) {
 	p.mixer = mixer
 }
 
+func (p *outPipeImpl) SetReferenceSink(sink ReferenceSink) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.reference = sink
+}
+
 func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 	if text == "" {
 		return nil
@@ -116,6 +136,7 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 	p.mu.Lock()
 	ctx := p.ctx
 	mixer := p.mixer
+	sink := p.reference
 	p.mu.Unlock()
 	if ctx == nil {
 		ctx = context.Background()
@@ -152,9 +173,11 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 	p.mu.Unlock()
 
 	audioReader := stream.AudioReader()
-	wrappedReader := &ttsStreamReader{
-		reader: audioReader,
+	reader := io.Reader(audioReader)
+	if sink != nil {
+		reader = &referenceTeeReader{reader: reader, sink: sink}
 	}
+	wrappedReader := &ttsStreamReader{reader: reader}
 	wrappedReader.onDone = func() {
 		if mixer != nil {
 			mixer.OnTTSFinished()

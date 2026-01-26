@@ -15,6 +15,7 @@ type AudioOutPipe interface {
 	PlayResource(audio io.Reader) error
 	Interrupt() error
 	SetMixer(mixer AudioMixer)
+	SetReferenceSink(sink ReferenceSink)
 }
 
 // OutPipeConfig OutPipe配置

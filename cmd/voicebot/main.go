@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
@@ -123,7 +124,40 @@ func main() {
 	}
 	logging.Infof("Microphone source created successfully")
 
-	audioInPipe, err := audio.NewInPipeWithAudioSource(appConfig.ASR.APIKey, inPipeCfg, micSource)
+	aecCfg := audio.DefaultEchoCancelConfig()
+	aecCfg.Enabled = appConfig.Audio.InPipe.AEC.Enable
+	aecCfg.Mode = appConfig.Audio.InPipe.AEC.Mode
+	if appConfig.Audio.InPipe.AEC.FrameMs > 0 {
+		aecCfg.FrameMs = appConfig.Audio.InPipe.AEC.FrameMs
+	}
+	if appConfig.Audio.InPipe.AEC.FarEndDelayMs > 0 {
+		aecCfg.FarEndDelayMs = appConfig.Audio.InPipe.AEC.FarEndDelayMs
+	}
+	if appConfig.Audio.InPipe.AEC.ReferenceActiveWindowMs > 0 {
+		aecCfg.ReferenceActiveWindowMs = appConfig.Audio.InPipe.AEC.ReferenceActiveWindowMs
+	}
+
+	audioSource := audio.AudioSource(micSource)
+	if aecCfg.Enabled {
+		frameBytes := audio.FrameBytes(inPipeCfg.SampleRate, inPipeCfg.Channels, aecCfg.FrameMs)
+		delayFrames := 0
+		if aecCfg.FrameMs > 0 {
+			delayFrames = aecCfg.FarEndDelayMs / aecCfg.FrameMs
+		}
+		referenceBuffer := audio.NewReferenceBuffer(frameBytes, 200, delayFrames)
+		referenceBuffer.SetActiveWindow(time.Duration(aecCfg.ReferenceActiveWindowMs) * time.Millisecond)
+		audioOutPipe.SetReferenceSink(referenceBuffer)
+		audioSource = audio.NewEchoCancellingSource(
+			micSource,
+			aecCfg,
+			referenceBuffer,
+			audio.NewNoopEchoCanceller(),
+			inPipeCfg.SampleRate,
+			inPipeCfg.Channels,
+		)
+	}
+
+	audioInPipe, err := audio.NewInPipeWithAudioSource(appConfig.ASR.APIKey, inPipeCfg, audioSource)
 	if err != nil {
 		logging.Fatalf("Failed to create AudioInPipe: %v", err)
 	}
