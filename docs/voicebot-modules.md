@@ -124,6 +124,7 @@ internal/
 - `PlayResource(audio io.Reader) error`
 - `Interrupt() error`
 - `SetMixer(mixer AudioMixer)`
+- `SetReferenceSink(sink ReferenceSink)`
 
 **实现细节**：
 - 集成 `tts.DashScopeProvider` 进行文本到音频的转换
@@ -144,6 +145,21 @@ internal/
 - `Stop() error`
 - `SendAudio(audio []byte) error`
 - `OnASRResult(handler func(text string, isFinal bool))`
+- `OnUserSpeakingDetected(handler func())`
+
+#### EchoCanceller (接口)
+- `Process(near []byte, far []byte) ([]byte, error)`
+- `Close() error`
+
+#### EchoCancellingSource (实现)
+- 组合 `AudioSource` + `EchoCanceller` + `ReferenceSource`
+- 在 `Read()` 中按帧处理，输出去回声后的 PCM
+- 支持“门控”降级：播放中抑制 ASR 输入
+
+#### ReferenceBuffer (实现)
+- 播放参考信号的缓冲区
+- 由 `AudioOutPipe` 写入参考 PCM
+- 供 `EchoCancellingSource` 拉取参考帧
 
 ### 4. text 包
 

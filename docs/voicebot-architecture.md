@@ -105,6 +105,8 @@ type ToolExecutor interface {
          └──────┬──────┘
                 ▼
             音频播放器
+                │
+                └──► ReferenceBuffer (播放参考信号)
 ```
 
 **混音逻辑**:
@@ -369,3 +371,17 @@ cmd/voicebot/
 6. 实现 ToolExecutor（工具执行器）
 7. 实现事件总线
 8. 集成测试和调优
+### 8. EchoCanceller（回声消除器）⭐
+**职责**: 在音频采集源层消除播放端回声
+
+**数据流**:
+```
+麦克风 → EchoCancellingSource → ASR
+              ↑
+        ReferenceBuffer
+```
+
+**关键点**:
+- 回声消除发生在 AudioSource 层（不改 Orchestrator）
+- ReferenceBuffer 接收播放端 PCM 参考信号
+- 不可用时可降级为“门控”(播放期间抑制 ASR)
