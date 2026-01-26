@@ -1,0 +1,29 @@
+{
+  "name": "orion-x",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "> 智能语音机器人系统 - 基于 Go 的实时语音交互平台",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LiusCraft/orion-x.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/LiusCraft/orion-x/issues"
+  },
+  "homepage": "https://github.com/LiusCraft/orion-x#readme",
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}
