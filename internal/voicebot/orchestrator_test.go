@@ -168,3 +168,42 @@ func TestOrchestratorStartStop(t *testing.T) {
 		t.Errorf("Stop() error = %v", err)
 	}
 }
+
+func TestOrchestratorMarkdownFilter(t *testing.T) {
+	orch := NewOrchestrator(nil, nil, nil, nil)
+	impl, ok := orch.(*orchestratorImpl)
+	if !ok {
+		t.Fatal("NewOrchestrator did not return *orchestratorImpl")
+	}
+
+	if impl.markdownFilter == nil {
+		t.Error("markdownFilter is nil, expected to be initialized")
+	}
+
+	// Test that the filter works
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "bold",
+			input:    "**投资成本**：两者都需要一定的初始投资",
+			expected: "投资成本：两者都需要一定的初始投资",
+		},
+		{
+			name:     "link",
+			input:    "请访问[官网](https://example.com)查看",
+			expected: "请访问官网查看",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := impl.markdownFilter.Filter(tt.input)
+			if result != tt.expected {
+				t.Errorf("Filter() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}

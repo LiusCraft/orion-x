@@ -61,6 +61,7 @@ type orchestratorImpl struct {
 	audioInPipe  audio.AudioInPipe
 	toolExecutor tools.ToolExecutor
 	segmenter    *text.Segmenter
+	markdownFilter agent.MarkdownFilter
 
 	currentEmotion string
 	ctx            context.Context
@@ -77,13 +78,14 @@ func NewOrchestrator(
 	toolExecutor tools.ToolExecutor,
 ) Orchestrator {
 	return &orchestratorImpl{
-		stateMachine: NewStateMachine(),
-		eventBus:     NewEventBus(),
-		voiceAgent:   voiceAgent,
-		audioOutPipe: audioOutPipe,
-		audioInPipe:  audioInPipe,
-		toolExecutor: toolExecutor,
-		segmenter:    text.NewSegmenter(120),
+		stateMachine:   NewStateMachine(),
+		eventBus:       NewEventBus(),
+		voiceAgent:     voiceAgent,
+		audioOutPipe:   audioOutPipe,
+		audioInPipe:    audioInPipe,
+		toolExecutor:   toolExecutor,
+		segmenter:      text.NewSegmenter(120),
+		markdownFilter: agent.NewMarkdownFilter(),
 	}
 }
 
@@ -310,6 +312,8 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 		sentences := o.segmenter.Feed(e.Chunk)
 		for _, sentence := range sentences {
 			if sentence != "" {
+				// 移除 Markdown 格式，避免 TTS 播放特殊符号
+				sentence = o.markdownFilter.Filter(sentence)
 				logging.Infof("Orchestrator: playing TTS for sentence: %s", sentence)
 				err := o.audioOutPipe.PlayTTS(sentence, o.currentEmotion)
 				if err != nil {
@@ -325,6 +329,8 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 		o.OnToolCall(e.Tool, e.Args)
 	case *agent.FinishedEvent:
 		if last := o.segmenter.Flush(); last != "" {
+			// 移除 Markdown 格式，避免 TTS 播放特殊符号
+			last = o.markdownFilter.Filter(last)
 			logging.Infof("Orchestrator: playing final TTS sentence: %s", last)
 			err := o.audioOutPipe.PlayTTS(last, o.currentEmotion)
 			if err != nil {

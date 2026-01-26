@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/liuscraft/orion-x/pkg/markdown"
 )
 
 // LLMProcessor LLM流处理器
@@ -49,34 +51,22 @@ type MarkdownFilter interface {
 	RemoveEmotionTags(text string) string
 }
 
-// markdownFilter Markdown过滤器实现
-type markdownFilter struct {
-	patterns []string
-}
+// markdownFilter Markdown过滤器实现（使用 pkg/markdown）
+type markdownFilter struct{}
 
 func NewMarkdownFilter() MarkdownFilter {
-	return &markdownFilter{
-		patterns: []string{
-			`\*\*.*?\*\*`,     // 加粗
-			`__.*?__`,         // 下划线
-			"```.*?```",       // 代码块
-			"`[^`]+`",         // 行内代码
-			`\[.*?\]\(.*?\)`,  // 链接
-			`!\[.*?\]\(.*?\)`, // 图片
-			`^#+\s+.*?$`,      // 标题
-		},
-	}
+	return &markdownFilter{}
 }
 
 // Filter 过滤Markdown标记
 func (f *markdownFilter) Filter(text string) string {
-	result := text
-	// 简化实现：移除情绪标签
-	result = removeEmotionTags(result)
-	// TODO: 实现完整的Markdown过滤
-	return result
+	// 使用 pkg/markdown 进行过滤
+	result := markdown.Filter(text)
+	// 移除情绪标签
+	return removeEmotionTags(result)
 }
 
+// RemoveEmotionTags 移除情绪标签
 func (f *markdownFilter) RemoveEmotionTags(text string) string {
 	return removeEmotionTags(text)
 }
@@ -86,7 +76,7 @@ func removeEmotionTags(text string) string {
 	for _, emotion := range []string{"happy", "sad", "angry", "calm", "excited"} {
 		text = replaceAll(text, fmt.Sprintf("[EMO:%s]", emotion), "")
 	}
-	return text
+	return strings.TrimSpace(text)
 }
 
 func replaceAll(s, old, new string) string {
