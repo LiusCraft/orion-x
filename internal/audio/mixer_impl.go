@@ -161,12 +161,14 @@ func mixFromStream(stream io.Reader, buf [][]float32, volume float32) {
 	if stream == nil {
 		return
 	}
-	samples := make([]byte, len(buf[0])*4)
+	// 16-bit PCM uses 2 bytes per sample; read exactly the frame size to avoid dropping data
+	samples := make([]byte, len(buf[0])*2)
 	n, err := io.ReadFull(stream, samples)
-	if err != nil {
+	if err != nil && err != io.ErrUnexpectedEOF {
 		return
 	}
-	for i := 0; i < n/4; i++ {
+	limit := n / 2
+	for i := 0; i < limit && i < len(buf[0]); i++ {
 		sample := int16(samples[i*2]) | int16(samples[i*2+1])<<8
 		normalized := float32(sample) / 32768.0
 
