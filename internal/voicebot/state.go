@@ -1,5 +1,7 @@
 package voicebot
 
+import "slices"
+
 // StateMachine 状态机
 type StateMachine struct {
 	currentState State
@@ -27,13 +29,7 @@ func (sm *StateMachine) CanTransition(to State) bool {
 		return false
 	}
 
-	for _, state := range validTo {
-		if state == to {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(validTo, to)
 }
 
 // Transition 状态转换
