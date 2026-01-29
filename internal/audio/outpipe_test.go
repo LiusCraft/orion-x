@@ -61,6 +61,14 @@ func (m *mockTTSStream) AudioReader() io.ReadCloser {
 	return m.reader
 }
 
+func (m *mockTTSStream) SampleRate() int {
+	return 16000
+}
+
+func (m *mockTTSStream) Channels() int {
+	return 1
+}
+
 type mockMixer struct {
 	ttsAdded        bool
 	ttsReader       io.Reader

@@ -30,6 +30,8 @@ type Stream interface {
 	WriteTextChunk(ctx context.Context, text string) error
 	Close(ctx context.Context) error
 	AudioReader() io.ReadCloser
+	SampleRate() int // 返回音频采样率 (Hz)
+	Channels() int   // 返回音频声道数 (1=mono, 2=stereo)
 }
 
 var (

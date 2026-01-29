@@ -61,6 +61,8 @@ type AudioConfig struct {
 type MixerConfig struct {
 	TTSVolume      float64 `json:"tts_volume"`
 	ResourceVolume float64 `json:"resource_volume"`
+	SampleRate     int     `json:"sample_rate"`
+	Channels       int     `json:"channels"`
 }
 
 type InPipeConfig struct {

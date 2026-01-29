@@ -92,9 +92,21 @@
 - [ ] 实现音色动态切换
 
 ### 9. MarkdownFilter 实现 (优先级: 中)
-- [ ] 实现完整的正则过滤逻辑
+- [x] 实现完整的正则过滤逻辑
 - [ ] 支持可配置的过滤规则
 - [ ] 测试各种Markdown格式
+
+### 9.1 多采样率支持 (优先级: 高) ⭐️ 已完成
+- [x] 创建 Resampler 接口和线性插值实现
+- [x] 实现 ResamplingReader 包装器
+- [x] 扩展 MixerConfig 支持可配置采样率和声道数
+- [x] 扩展 TTS Stream 接口，添加 SampleRate() 和 Channels() 方法
+- [x] DashScope Provider 实现采样率元数据返回
+- [x] OutPipe 自动检测并插入重采样逻辑
+- [x] 更新配置文件支持采样率配置
+- [x] 单元测试覆盖（线性插值、ResamplingReader、边界条件）
+- [ ] 接入高质量重采样库（libsamplerate，可选）
+- [ ] 音质对比测试
 
 ### 10. 配置管理 (优先级: 低)
 - [x] 实现配置文件支持（JSON）

@@ -14,16 +14,17 @@ import (
 )
 
 type outPipeImpl struct {
-	mixer      AudioMixer
-	tts        tts.Provider
-	ttsStreams []tts.Stream
-	voiceMap   map[string]string
-	ttsConfig  tts.Config
-	apiKey     string
-	reference  ReferenceSink
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.Mutex
+	mixer       AudioMixer
+	mixerConfig *MixerConfig
+	tts         tts.Provider
+	ttsStreams  []tts.Stream
+	voiceMap    map[string]string
+	ttsConfig   tts.Config
+	apiKey      string
+	reference   ReferenceSink
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.Mutex
 }
 
 type ttsStreamReader struct {
@@ -81,10 +82,11 @@ func NewOutPipeWithConfig(cfg *OutPipeConfig) AudioOutPipe {
 	}
 
 	return &outPipeImpl{
-		voiceMap:  voiceMap,
-		ttsConfig: cfg.TTS,
-		apiKey:    cfg.TTS.APIKey,
-		tts:       tts.NewDashScopeProvider(),
+		voiceMap:    voiceMap,
+		mixerConfig: cfg.Mixer,
+		ttsConfig:   cfg.TTS,
+		apiKey:      cfg.TTS.APIKey,
+		tts:         tts.NewDashScopeProvider(),
 	}
 }
 
@@ -170,10 +172,29 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 
 	p.mu.Lock()
 	p.ttsStreams = append(p.ttsStreams, stream)
+	mixerConfig := p.mixerConfig
 	p.mu.Unlock()
 
 	audioReader := stream.AudioReader()
 	reader := io.Reader(audioReader)
+
+	// 检测采样率并进行重采样
+	ttsSampleRate := stream.SampleRate()
+	ttsChannels := stream.Channels()
+	systemSampleRate := 16000 // 默认系统采样率
+	if mixerConfig != nil && mixerConfig.SampleRate > 0 {
+		systemSampleRate = mixerConfig.SampleRate
+	}
+
+	if ttsSampleRate != systemSampleRate {
+		logging.Infof("AudioOutPipe: TTS sample rate (%d Hz) differs from system (%d Hz), resampling required",
+			ttsSampleRate, systemSampleRate)
+		resampler := NewLinearResampler()
+		reader = NewResamplingReader(reader, ttsSampleRate, systemSampleRate, ttsChannels, resampler)
+	} else {
+		logging.Debugf("AudioOutPipe: TTS sample rate matches system (%d Hz), no resampling needed", ttsSampleRate)
+	}
+
 	if sink != nil {
 		reader = &referenceTeeReader{reader: reader, sink: sink}
 	}

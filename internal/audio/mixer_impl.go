@@ -37,7 +37,17 @@ func NewMixer(config *MixerConfig) (AudioMixer, error) {
 		ctx:                   ctx,
 		cancel:                cancel,
 	}
-	stream, err := portaudio.OpenDefaultStream(0, 2, 16000, 1024, m.audioCallback)
+	// Use sample rate and channels from config
+	sampleRate := config.SampleRate
+	if sampleRate == 0 {
+		sampleRate = 16000 // fallback to default
+	}
+	channels := config.Channels
+	if channels == 0 {
+		channels = 2 // fallback to stereo
+	}
+
+	stream, err := portaudio.OpenDefaultStream(0, channels, float64(sampleRate), 1024, m.audioCallback)
 	if err != nil {
 		portaudio.Terminate()
 		cancel()

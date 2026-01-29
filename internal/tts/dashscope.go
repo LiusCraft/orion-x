@@ -86,6 +86,20 @@ func (s *dashScopeStream) AudioReader() io.ReadCloser {
 	return s.audioOut
 }
 
+func (s *dashScopeStream) SampleRate() int {
+	// DashScope TTS 根据配置返回采样率
+	// 默认为 16000 Hz
+	if s.cfg.SampleRate > 0 {
+		return s.cfg.SampleRate
+	}
+	return 16000
+}
+
+func (s *dashScopeStream) Channels() int {
+	// DashScope TTS 输出单声道 PCM
+	return 1
+}
+
 func (s *dashScopeStream) WriteTextChunk(ctx context.Context, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return nil

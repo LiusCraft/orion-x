@@ -22,6 +22,8 @@ type AudioMixer interface {
 type MixerConfig struct {
 	TTSVolume      float64 // 默认TTS音量
 	ResourceVolume float64 // 默认资源音频音量
+	SampleRate     int     // 系统采样率 (Hz)，默认 16000
+	Channels       int     // 输出声道数，默认 2 (立体声)
 	// 当TTS播放时，资源音频自动降为50%
 }
 
@@ -34,5 +36,7 @@ func DefaultMixerConfig() *MixerConfig {
 	return &MixerConfig{
 		TTSVolume:      1.0,
 		ResourceVolume: 1.0,
+		SampleRate:     16000, // 默认 16kHz
+		Channels:       2,     // 默认立体声
 	}
 }
