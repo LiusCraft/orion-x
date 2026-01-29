@@ -217,14 +217,22 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 
 	logging.Infof("AudioOutPipe: writing text chunk to TTS...")
 	if err := stream.WriteTextChunk(ttsCtx, text); err != nil {
-		logging.Errorf("AudioOutPipe: TTS write error: %v", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			logging.Infof("AudioOutPipe: TTS write cancelled due to context cancellation (normal interruption)")
+		} else {
+			logging.Errorf("AudioOutPipe: TTS write error: %v", err)
+		}
 		wrappedReader.done()
 		return fmt.Errorf("TTS write error: %w", err)
 	}
 
 	logging.Infof("AudioOutPipe: closing TTS stream...")
 	if err := stream.Close(ttsCtx); err != nil {
-		logging.Errorf("AudioOutPipe: TTS close error: %v", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			logging.Infof("AudioOutPipe: TTS stream closed due to context cancellation (normal interruption)")
+		} else {
+			logging.Errorf("AudioOutPipe: TTS close error: %v", err)
+		}
 		wrappedReader.done()
 		return fmt.Errorf("TTS close error: %w", err)
 	}

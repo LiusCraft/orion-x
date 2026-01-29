@@ -2,6 +2,7 @@ package voicebot
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sync"
 
@@ -317,7 +318,11 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 				logging.Infof("Orchestrator: playing TTS for sentence: %s", sentence)
 				err := o.audioOutPipe.PlayTTS(sentence, o.currentEmotion)
 				if err != nil {
-					logging.Errorf("Orchestrator: PlayTTS error: %v", err)
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						logging.Infof("Orchestrator: PlayTTS cancelled (normal interruption)")
+					} else {
+						logging.Errorf("Orchestrator: PlayTTS error: %v", err)
+					}
 				}
 				o.transitionTo(StateSpeaking)
 			}
@@ -334,7 +339,11 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 			logging.Infof("Orchestrator: playing final TTS sentence: %s", last)
 			err := o.audioOutPipe.PlayTTS(last, o.currentEmotion)
 			if err != nil {
-				logging.Errorf("Orchestrator: PlayTTS error: %v", err)
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					logging.Infof("Orchestrator: PlayTTS cancelled (normal interruption)")
+				} else {
+					logging.Errorf("Orchestrator: PlayTTS error: %v", err)
+				}
 			}
 			o.transitionTo(StateSpeaking)
 		}
