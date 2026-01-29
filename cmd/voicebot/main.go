@@ -227,18 +227,19 @@ func main() {
 		logging.Infof("     Received interrupt signal...       ")
 		logging.Infof("========================================")
 
-		logging.Infof("Stopping Mixer...")
-		mixer.Stop()
-
+		// 关闭顺序：从外到内，先停止依赖方，再停止被依赖方
+		// Orchestrator 依赖 Mixer，所以先停 Orchestrator
 		logging.Infof("Stopping Orchestrator...")
 		if err := orchestrator.Stop(); err != nil {
 			logging.Errorf("Error stopping orchestrator: %v", err)
 		}
 
+		logging.Infof("Stopping Mixer...")
+		mixer.Stop()
+
+		// 取消 context，让 main 函数自然退出
+		// 不使用 os.Exit(0)，这样 defer 语句（如 portaudio.Terminate()）才会被执行
 		cancel()
-		logging.Infof("Exiting...")
-		logging.Sync()
-		os.Exit(0)
 	}()
 
 	logging.Infof("Starting Orchestrator...")
@@ -251,12 +252,13 @@ func main() {
 	logging.Infof("     Press Ctrl+C to stop.             ")
 	logging.Infof("========================================")
 
-	// Wait for signal
+	// Wait for context cancellation (triggered by signal handler)
 	<-ctx.Done()
 
 	logging.Infof("\n========================================")
 	logging.Infof("     VoiceBot Shutting Down...          ")
 	logging.Infof("========================================")
 
+	// PortAudio 会在 defer portaudio.Terminate() 中被清理
 	logging.Infof("VoiceBot stopped.")
 }

@@ -158,7 +158,6 @@ func (o *orchestratorImpl) Start(ctx context.Context) error {
 // Stop 停止Orchestrator
 func (o *orchestratorImpl) Stop() error {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 
 	logging.Infof("Orchestrator: stopping...")
 
@@ -172,14 +171,21 @@ func (o *orchestratorImpl) Stop() error {
 		o.cancel()
 	}
 
-	if o.audioInPipe != nil {
+	// 获取组件引用后释放锁，避免死锁
+	// 因为子组件的 Stop 可能会触发回调，回调中需要获取锁
+	audioInPipe := o.audioInPipe
+	audioOutPipe := o.audioOutPipe
+	o.mu.Unlock()
+
+	// 在锁外调用子组件的 Stop 方法
+	if audioInPipe != nil {
 		logging.Infof("Orchestrator: stopping AudioInPipe...")
-		o.audioInPipe.Stop()
+		audioInPipe.Stop()
 	}
 
-	if o.audioOutPipe != nil {
+	if audioOutPipe != nil {
 		logging.Infof("Orchestrator: stopping AudioOutPipe...")
-		o.audioOutPipe.Stop()
+		audioOutPipe.Stop()
 	}
 
 	logging.Infof("Orchestrator: waiting for goroutines to finish...")

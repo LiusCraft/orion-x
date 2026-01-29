@@ -144,7 +144,9 @@ func (m *mixerImpl) Stop() {
 		}
 	}
 
-	portaudio.Terminate()
+	// 注意：不在这里调用 portaudio.Terminate()
+	// PortAudio 的生命周期由 main.go 统一管理
+	// Mixer 只是 PortAudio 的使用者，不负责其初始化和终止
 }
 
 func (m *mixerImpl) audioCallback(out [][]float32) {

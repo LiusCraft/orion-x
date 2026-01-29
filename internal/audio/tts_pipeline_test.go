@@ -3,6 +3,7 @@ package audio
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -866,4 +867,136 @@ func TestTTSPipelineRaceCondition(t *testing.T) {
 	// 不崩溃就算通过
 	stats := pipeline.Stats()
 	t.Logf("Final stats: %+v", stats)
+}
+
+// TestTTSPipelineStopDuringPlayback 测试在播放过程中调用 Stop 不会阻塞
+// 这是为了验证修复：当 Mixer 已经停止时，Stop() 不会永远阻塞
+func TestTTSPipelineStopDuringPlayback(t *testing.T) {
+	// 创建一个慢速的 mock provider，模拟长时间播放
+	provider := &slowMockTTSProvider{
+		readDelay: 100 * time.Millisecond, // 每次读取延迟 100ms
+	}
+	config := DefaultTTSPipelineConfig()
+	ttsConfig := tts.Config{APIKey: "test"}
+
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+
+	// 使用一个 mock mixer 来消费数据
+	mixer := newMockMixer()
+	pipeline.SetMixer(mixer)
+
+	ctx := context.Background()
+	err := pipeline.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start pipeline: %v", err)
+	}
+
+	// 入队一些文本
+	for i := 0; i < 5; i++ {
+		err = pipeline.EnqueueText(fmt.Sprintf("Test sentence %d", i), "default")
+		if err != nil {
+			t.Fatalf("Failed to enqueue text: %v", err)
+		}
+	}
+
+	// 等待一点时间让播放开始
+	time.Sleep(50 * time.Millisecond)
+
+	// 在播放过程中调用 Stop，应该在合理时间内返回
+	stopDone := make(chan struct{})
+	go func() {
+		pipeline.Stop()
+		close(stopDone)
+	}()
+
+	select {
+	case <-stopDone:
+		t.Log("Stop completed successfully")
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop blocked for more than 2 seconds - this indicates a deadlock")
+	}
+}
+
+// slowMockTTSProvider 模拟慢速 TTS provider
+type slowMockTTSProvider struct {
+	readDelay time.Duration
+}
+
+func (p *slowMockTTSProvider) Start(ctx context.Context, cfg tts.Config) (tts.Stream, error) {
+	reader := &slowMockReader{
+		readDelay: p.readDelay,
+		data:      make([]byte, 1024), // 1KB 的模拟音频数据
+		ctx:       ctx,
+	}
+	return &slowMockTTSStream{
+		reader: reader,
+	}, nil
+}
+
+type slowMockTTSStream struct {
+	reader *slowMockReader
+}
+
+func (s *slowMockTTSStream) WriteTextChunk(ctx context.Context, text string) error {
+	return nil
+}
+
+func (s *slowMockTTSStream) Close(ctx context.Context) error {
+	return nil
+}
+
+func (s *slowMockTTSStream) AudioReader() io.ReadCloser {
+	return s.reader
+}
+
+func (s *slowMockTTSStream) SampleRate() int {
+	return 16000
+}
+
+func (s *slowMockTTSStream) Channels() int {
+	return 1
+}
+
+// slowMockReader 实现 io.ReadCloser 接口
+type slowMockReader struct {
+	readDelay time.Duration
+	data      []byte
+	offset    int
+	ctx       context.Context
+	closed    bool
+	mu        sync.Mutex
+}
+
+func (r *slowMockReader) Read(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return 0, io.EOF
+	}
+
+	// 检查 context 是否被取消
+	select {
+	case <-r.ctx.Done():
+		return 0, r.ctx.Err()
+	default:
+	}
+
+	// 模拟慢速读取
+	time.Sleep(r.readDelay)
+
+	if r.offset >= len(r.data) {
+		return 0, io.EOF
+	}
+
+	n := copy(p, r.data[r.offset:])
+	r.offset += n
+	return n, nil
+}
+
+func (r *slowMockReader) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed = true
+	return nil
 }

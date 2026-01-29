@@ -176,10 +176,60 @@ func (p *ttsPipelineImpl) Stop() error {
 	if p.cancel != nil {
 		p.cancel()
 	}
+
+	// 主动关闭当前正在播放的 item 的 reader，解除 playItem 中的阻塞
+	currentItem := p.currentItem
 	p.mu.Unlock()
+
+	if currentItem != nil {
+		// 关闭 eofNotifyReader，通知 playItem 退出
+		currentItem.Reader.Close()
+		// 关闭原始 reader（bufferedPipe），解除 Mixer 的读取阻塞
+		if closer, ok := currentItem.OrigReader.(io.Closer); ok {
+			closer.Close()
+		}
+	}
+
+	// 启动一个 goroutine 持续清空 ttsBuffer，直到被通知停止
+	// 这样 ttsWorker 中的 notifySeqCompleted 才不会因为 buffer 满而阻塞
+	stopDrainer := make(chan struct{})
+	drainerDone := make(chan struct{})
+	go func() {
+		defer close(drainerDone)
+		drained := 0
+		for {
+			select {
+			case <-stopDrainer:
+				// 被通知停止，做最后一次清理
+				for {
+					select {
+					case item := <-p.ttsBuffer:
+						item.Reader.Close()
+						if closer, ok := item.OrigReader.(io.Closer); ok {
+							closer.Close()
+						}
+						drained++
+					default:
+						return
+					}
+				}
+			case item := <-p.ttsBuffer:
+				// 消费 buffer 中的 item
+				item.Reader.Close()
+				if closer, ok := item.OrigReader.(io.Closer); ok {
+					closer.Close()
+				}
+				drained++
+			}
+		}
+	}()
 
 	// 等待所有 worker 退出
 	p.wg.Wait()
+
+	// 停止 drainer goroutine
+	close(stopDrainer)
+	<-drainerDone
 
 	// 清空队列
 	p.clearQueues()
@@ -236,7 +286,8 @@ func (p *ttsPipelineImpl) Interrupt() error {
 	}
 
 	// 2. 立即停止当前播放
-	if p.currentItem != nil {
+	currentItem := p.currentItem
+	if currentItem != nil {
 		if p.mixer != nil {
 			p.mixer.RemoveTTSStream()
 			p.mixer.OnTTSFinished()
@@ -245,20 +296,28 @@ func (p *ttsPipelineImpl) Interrupt() error {
 	}
 	p.mu.Unlock()
 
-	// 3. 等待所有 worker 退出
+	// 3. 关闭当前正在播放的 item 的 reader，解除 playItem 中的阻塞
+	if currentItem != nil {
+		currentItem.Reader.Close()
+		if closer, ok := currentItem.OrigReader.(io.Closer); ok {
+			closer.Close()
+		}
+	}
+
+	// 4. 等待所有 worker 退出
 	p.wg.Wait()
 
-	// 4. 清空队列
+	// 5. 清空队列
 	p.clearQueues()
 
-	// 5. 重置序号计数器
+	// 6. 重置序号计数器
 	p.pendingMu.Lock()
 	p.nextSeqNum = 1
 	p.nextPlaySeqNum = 1
 	p.pendingItems = make(map[int64]*ttsItem)
 	p.pendingMu.Unlock()
 
-	// 6. 重新创建 context 和 workers
+	// 7. 重新创建 context 和 workers
 	p.mu.Lock()
 	if p.parentCtx != nil && p.parentCtx.Err() == nil {
 		p.ctx, p.cancel = context.WithCancel(p.parentCtx)
@@ -443,11 +502,14 @@ func (p *ttsPipelineImpl) playItem(item *ttsItem) {
 	}
 
 	// 等待播放完成：Mixer 读取到 EOF 时，item.Reader.Done() 会被关闭
-	// 不再使用 drainReader，避免与 Mixer 竞争读取数据
 	select {
 	case <-p.ctx.Done():
 		// 被打断，确保通知 reader done
 		item.Reader.Close()
+		// 同时关闭原始 reader，解除可能的读取阻塞
+		if closer, ok := item.OrigReader.(io.Closer); ok {
+			closer.Close()
+		}
 	case <-item.Reader.Done():
 		// Mixer 读取完毕
 	}
