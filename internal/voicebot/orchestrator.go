@@ -56,11 +56,11 @@ type orchestratorImpl struct {
 	stateMachine *StateMachine
 	eventBus     EventBus
 
-	voiceAgent   agent.VoiceAgent
-	audioOutPipe audio.AudioOutPipe
-	audioInPipe  audio.AudioInPipe
-	toolExecutor tools.ToolExecutor
-	segmenter    *text.Segmenter
+	voiceAgent     agent.VoiceAgent
+	audioOutPipe   audio.AudioOutPipe
+	audioInPipe    audio.AudioInPipe
+	toolExecutor   tools.ToolExecutor
+	segmenter      *text.Segmenter
 	markdownFilter agent.MarkdownFilter
 
 	currentEmotion string

@@ -70,6 +70,21 @@
 - [x] 在音频采集源层加入回声消除管线（ReferenceBuffer + EchoCancellingSource）
 - [ ] 接入 WebRTC AEC3（或系统级 AEC）实现真正回声消除
 
+### 5.1 音频源模块重构 (优先级: 高) ⭐️ 已完成
+- [x] 创建 `internal/audio/source/` 独立包
+- [x] 将 MicrophoneSource 从 audio 包分离到 source 包
+- [x] 实现模块解耦，支持客户端和服务端场景
+- [x] 修复 AudioMixer 双重停止错误（移除 Abort() 调用）
+- [x] 修复 MicrophoneSource 双重停止错误（优化关闭流程）
+- [x] 创建音频源设计文档（audio-source-design.md）
+- [x] 更新 AudioInPipe 设计文档（audio-in-pipe-design.md）
+- [x] 创建 source 包使用说明（source/README.md）
+- [x] 创建重构总结和验证清单文档
+- [x] 为 WebSocket、File 等音频源预留扩展空间
+- [ ] 实现 WebSocketSource（服务端 WebSocket 音频流）
+- [ ] 实现 FileSource（文件音频读取，测试用）
+- [ ] 实现 StreamSource（通用 io.Reader 包装器）
+
 ## 阶段二：工具集成
 
 ### 6. 工具实现 (优先级: 中)

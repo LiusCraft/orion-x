@@ -2,15 +2,17 @@
 
 ## 模块职责
 
-AudioInPipe 是音频输入管道，负责音频采集、VAD监听、ASR调用。
+AudioInPipe 是音频输入管道，负责音频数据接收、VAD监听、ASR调用。
+
+**重要说明**：AudioInPipe 本身不负责音频采集，而是通过 `AudioSource` 接口抽象音频输入源。具体的音频采集实现（如本地麦克风、WebSocket、文件等）位于 `internal/audio/source/` 包中。
 
 ## 核心功能
 
-1. **音频采集**：从麦克风采集音频数据
+1. **音频数据接收**：通过 `AudioSource` 接口或 `SendAudio()` 方法接收音频数据
 2. **VAD检测**：检测用户说话活动
 3. **ASR调用**：调用 ASR 服务进行语音识别
 4. **事件发布**：发布识别结果和用户说话检测事件
-5. **中断处理**：响应中断信号，停止采集和识别
+5. **中断处理**：响应中断信号，停止接收和识别
 
 ## 状态机设计
 
@@ -86,14 +88,31 @@ ASR识别
 ## 依赖模块
 
 - `internal/asr/recognizer.go` - ASR 服务
-- `AudioSource` 接口 - 音频源抽象
+- `AudioSource` 接口 - 音频源抽象（详见 [AudioSource 设计文档](./audio-source-design.md)）
 
-## 实现细节
+## 部署场景
 
-### 音频源设计
+### 客户端模式（本地运行）
 
-AudioInPipe 支持多种音频输入源，通过 `AudioSource` 接口抽象：
+```
+本地麦克风 → AudioSource → AudioInPipe → ASR → 后续处理
+```
 
+使用 `internal/audio/source/MicrophoneSource`（基于 PortAudio）采集本地麦克风音频。
+
+### 服务端模式（WebSocket）
+
+```
+浏览器麦克风 → WebSocket → AudioInPipe.SendAudio() → ASR → 后续处理
+```
+
+服务端不使用 AudioSource，而是通过 `SendAudio()` 方法接收来自 WebSocket 的音频流。
+
+## 音频源集成
+
+AudioInPipe 通过 `AudioSource` 接口抽象音频输入源，具体的音频源实现（如本地麦克风、WebSocket、文件等）位于 `internal/audio/source/` 包中。
+
+**AudioSource 接口**：
 ```go
 type AudioSource interface {
     Read(ctx context.Context) ([]byte, error)
@@ -101,24 +120,12 @@ type AudioSource interface {
 }
 ```
 
-### 内置音频源
+**详细说明**：参见 [AudioSource 设计文档](./audio-source-design.md)
 
-#### MicrophoneSource（麦克风）
-
-使用 PortAudio 从麦克风采集 PCM 音频：
-- 格式：16-bit PCM, little-endian
-- 采样率：16000 Hz
-- 声道数：1（单声道）
-- 帧长：3200 samples（约 200ms）
-- 读取支持 `context` 取消：当 `ctx.Done()` 或 `Close()` 触发时，主动 `Abort()` 打断 `Read()` 的阻塞
-- 关闭流程：先 `Abort()` 强制中断阻塞读，再 `Stop()`/`Close()`，避免退出时卡住
-
-#### 其他可能的音频源
-
-- WebSocket 音频流
-- 文件音频
-- 网络 RTP 流
-- 虚拟音频设备
+**可用的音频源**：
+- `MicrophoneSource` - 本地麦克风（已实现）
+- `WebSocketSource` - WebSocket 音频流（待实现）
+- `FileSource` - 文件音频（待实现）
 
 ## VAD 检测（可选）
 
@@ -134,29 +141,70 @@ type AudioSource interface {
 - 最小触发间隔：300ms（防止频繁触发）。
 - 若音频读取返回 `context.Canceled`/`io.EOF`，直接退出，不触发 VAD。
 
-### 使用方式
+## 使用方式
 
-**方式一：使用默认麦克风源**
+### 客户端模式：使用 MicrophoneSource
 
 ```go
-micSource, err := audio.NewMicrophoneSource(16000, 1, 3200)
+import (
+    "github.com/liuscraft/orion-x/internal/audio"
+    "github.com/liuscraft/orion-x/internal/audio/source"
+)
+
+// 1. 创建麦克风音频源
+micSource, err := source.NewMicrophoneSource(16000, 1, 3200)
+if err != nil {
+    return err
+}
+defer micSource.Close()
+
+// 2. 创建 AudioInPipe 并关联音频源
+config := audio.DefaultInPipeConfig()
 audioInPipe, err := audio.NewInPipeWithAudioSource(apiKey, config, micSource)
+if err != nil {
+    return err
+}
+
+// 3. 启动音频处理
+audioInPipe.Start(ctx)
 ```
 
-**方式二：使用自定义音频源**
+### 服务端模式：使用 SendAudio()
 
 ```go
-customSource := &MyCustomSource{}
-audioInPipe, err := audio.NewInPipeWithAudioSource(apiKey, config, customSource)
-```
+import "github.com/liuscraft/orion-x/internal/audio"
 
-**方式三：手动发送音频**
-
-```go
+// 1. 创建 AudioInPipe（不关联 AudioSource）
+config := audio.DefaultInPipeConfig()
 audioInPipe, err := audio.NewInPipe(apiKey, config)
+if err != nil {
+    return err
+}
 
-// 手动发送音频数据
-audioInPipe.SendAudio(audioData)
+// 2. 从 WebSocket 接收音频并发送到 AudioInPipe
+go func() {
+    for {
+        audioData, err := websocket.ReadMessage()
+        if err != nil {
+            break
+        }
+        audioInPipe.SendAudio(audioData)
+    }
+}()
+```
+
+### 测试模式：使用自定义 AudioSource
+
+```go
+// 实现自定义音频源（如文件、Mock）
+type CustomSource struct { ... }
+
+func (c *CustomSource) Read(ctx context.Context) ([]byte, error) { ... }
+func (c *CustomSource) Close() error { ... }
+
+// 使用自定义源
+customSource := &CustomSource{}
+audioInPipe, err := audio.NewInPipeWithAudioSource(apiKey, config, customSource)
 ```
 
 ### VAD 检测
@@ -240,5 +288,11 @@ recognizer.OnResult(func(result asr.Result) {
 ```go
 config := audio.DefaultInPipeConfig()
 config.SampleRate = 16000
+config.Channels = 1
 config.EnableVAD = true
+config.VADThreshold = 0.5
 ```
+
+## 相关文档
+
+- [AudioSource 设计文档](./audio-source-design.md) - 音频源接口和实现详细说明

@@ -138,9 +138,6 @@ func (m *mixerImpl) Stop() {
 	m.mu.Unlock()
 
 	if player != nil {
-		if err := player.Abort(); err != nil {
-			logging.Errorf("AudioMixer: failed to abort stream: %v", err)
-		}
 		if err := player.Stop(); err != nil {
 			logging.Errorf("AudioMixer: failed to stop stream: %v", err)
 		}

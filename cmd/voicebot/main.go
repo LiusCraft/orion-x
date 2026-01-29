@@ -11,6 +11,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
+	"github.com/liuscraft/orion-x/internal/audio/source"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/tools"
@@ -118,7 +119,7 @@ func main() {
 	}
 
 	logging.Infof("Creating Microphone source...")
-	micSource, err := audio.NewMicrophoneSource(inPipeCfg.SampleRate, inPipeCfg.Channels, 3200)
+	micSource, err := source.NewMicrophoneSource(inPipeCfg.SampleRate, inPipeCfg.Channels, 3200)
 	if err != nil {
 		logging.Fatalf("Failed to create Microphone source: %v", err)
 	}
