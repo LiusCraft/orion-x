@@ -216,8 +216,11 @@ func (o *orchestratorImpl) handleStateChanged(event Event) {
 }
 
 func (o *orchestratorImpl) handleUserSpeakingDetected(event Event) {
-	logging.Infof("Orchestrator: UserSpeakingDetected received, current state: %s", o.stateMachine.GetCurrentState())
-	if o.stateMachine.GetCurrentState() == StateSpeaking {
+	currentState := o.stateMachine.GetCurrentState()
+	logging.Infof("Orchestrator: UserSpeakingDetected received, current state: %s", currentState)
+
+	// 只在 Processing 或 Speaking 状态时才需要打断
+	if currentState == StateSpeaking || currentState == StateProcessing {
 		logging.Infof("Orchestrator: interrupting current playback...")
 		o.transitionTo(StateListening)
 		o.audioOutPipe.Interrupt()

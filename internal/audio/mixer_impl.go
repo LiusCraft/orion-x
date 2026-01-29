@@ -26,9 +26,8 @@ func NewMixer(config *MixerConfig) (AudioMixer, error) {
 	if config == nil {
 		config = DefaultMixerConfig()
 	}
-	if err := portaudio.Initialize(); err != nil {
-		return nil, err
-	}
+	// Note: PortAudio should be initialized by the caller before creating Mixer
+	// This avoids multiple Initialize() calls which can cause device conflicts
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &mixerImpl{
 		config:                config,
@@ -49,7 +48,6 @@ func NewMixer(config *MixerConfig) (AudioMixer, error) {
 
 	stream, err := portaudio.OpenDefaultStream(0, channels, float64(sampleRate), 1024, m.audioCallback)
 	if err != nil {
-		portaudio.Terminate()
 		cancel()
 		return nil, err
 	}

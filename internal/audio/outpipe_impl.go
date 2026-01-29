@@ -24,6 +24,7 @@ type outPipeImpl struct {
 	reference   ReferenceSink
 	ctx         context.Context
 	cancel      context.CancelFunc
+	ttsCancel   context.CancelFunc // 用于取消当前正在进行的 TTS
 	mu          sync.Mutex
 }
 
@@ -139,12 +140,21 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 	ctx := p.ctx
 	mixer := p.mixer
 	sink := p.reference
-	p.mu.Unlock()
+
+	// 创建可被 Interrupt 取消的 context
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ttsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	ttsCtx, ttsCancel := context.WithTimeout(ctx, 10*time.Second)
+	p.ttsCancel = ttsCancel
+	p.mu.Unlock()
+
+	defer func() {
+		ttsCancel()
+		p.mu.Lock()
+		p.ttsCancel = nil
+		p.mu.Unlock()
+	}()
 
 	cfg := p.ttsConfig
 	if cfg.APIKey == "" {
@@ -256,16 +266,28 @@ func (p *outPipeImpl) PlayResource(audio io.Reader) error {
 
 func (p *outPipeImpl) Interrupt() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	ttsCancel := p.ttsCancel
+	mixer := p.mixer
+	ctx := p.ctx
 
+	// 立即取消正在进行的 TTS
+	if ttsCancel != nil {
+		ttsCancel()
+		p.ttsCancel = nil
+	}
+
+	// 关闭所有 TTS streams
 	for _, stream := range p.ttsStreams {
-		_ = stream.Close(p.ctx)
+		_ = stream.Close(ctx)
 	}
 	p.ttsStreams = nil
+	p.mu.Unlock()
 
-	if p.mixer != nil {
-		p.mixer.RemoveTTSStream()
-		p.mixer.RemoveResourceStream()
+	// 立即从 Mixer 移除音频流，停止播放
+	// 注意：不调用 OnTTSFinished，因为 wrappedReader.onDone 会在 reader 返回错误时自动调用
+	if mixer != nil {
+		mixer.RemoveTTSStream()
+		mixer.RemoveResourceStream()
 	}
 
 	logging.Infof("AudioOutPipe: interrupted")

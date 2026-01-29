@@ -250,11 +250,16 @@ func (p *inPipeImpl) handleASRResult(result asr.Result) {
 
 func (p *inPipeImpl) handleVAD(audio []byte) {
 	if !p.vadEnabled {
+		logging.Infof("AudioInPipe: VAD disabled")
 		return
 	}
-	if !p.detectSpeech(audio) {
+
+	isSpeech := p.detectSpeech(audio)
+	if !isSpeech {
 		return
 	}
+
+	logging.Infof("AudioInPipe: VAD detected speech")
 
 	now := time.Now()
 	p.mu.Lock()
@@ -267,11 +272,15 @@ func (p *inPipeImpl) handleVAD(audio []byte) {
 	p.mu.Unlock()
 
 	if handler == nil {
+		logging.Infof("AudioInPipe: VAD handler is nil")
 		return
 	}
 	if now.Sub(last) < minInterval {
+		logging.Infof("AudioInPipe: VAD throttled (last: %v, interval: %v)", now.Sub(last), minInterval)
 		return
 	}
+
+	logging.Infof("AudioInPipe: VAD triggering user speaking detected")
 	handler()
 }
 
@@ -289,7 +298,17 @@ func (p *inPipeImpl) detectSpeech(audio []byte) bool {
 		sum += v * v
 	}
 	rms := math.Sqrt(sum / float64(count))
-	return rms >= p.vadThreshold
+	detected := rms >= p.vadThreshold
+
+	// 每秒最多打印一次 RMS 值用于调试
+	p.mu.Lock()
+	now := time.Now()
+	if detected && now.Sub(p.lastVADTime) >= 1*time.Second {
+		logging.Infof("AudioInPipe: VAD RMS=%.4f, threshold=%.4f, detected=%v", rms, p.vadThreshold, detected)
+	}
+	p.mu.Unlock()
+
+	return detected
 }
 
 func (p *inPipeImpl) GetState() InPipeState {

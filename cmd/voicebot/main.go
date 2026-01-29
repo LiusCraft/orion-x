@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gordonklaus/portaudio"
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/source"
@@ -73,9 +74,18 @@ func main() {
 		TTSVolume:      appConfig.Audio.Mixer.TTSVolume,
 		ResourceVolume: appConfig.Audio.Mixer.ResourceVolume,
 	}
+	// Initialize PortAudio once for all audio components
+	logging.Infof("Initializing PortAudio...")
+	if err := portaudio.Initialize(); err != nil {
+		logging.Fatalf("Failed to initialize PortAudio: %v", err)
+	}
+	defer portaudio.Terminate()
+	logging.Infof("PortAudio initialized successfully")
+
+	logging.Infof("Creating AudioMixer...")
 	mixer, err := audio.NewMixer(mixerCfg)
 	if err != nil {
-		logging.Fatalf("Failed to create Mixer: %v", err)
+		logging.Fatalf("Failed to create AudioMixer: %v", err)
 	}
 	logging.Infof("AudioMixer created successfully")
 
