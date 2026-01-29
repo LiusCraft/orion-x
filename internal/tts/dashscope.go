@@ -35,12 +35,16 @@ func (p *DashScopeProvider) Start(ctx context.Context, cfg Config) (Stream, erro
 		return nil, err
 	}
 
-	reader, writer := io.Pipe()
+	// Use a buffered channel-based pipe to avoid deadlock
+	// The standard io.Pipe blocks on Write if no one is reading,
+	// but generateTTS waits for Close() before returning the reader.
+	// This creates a deadlock. Using a buffer allows writes to proceed.
+	audioBuf := newBufferedPipe(1024 * 1024) // 1MB buffer for audio data
+
 	stream := &dashScopeStream{
 		cfg:       normalized,
 		conn:      conn,
-		audioIn:   writer,
-		audioOut:  reader,
+		audioBuf:  audioBuf,
 		startedCh: make(chan struct{}),
 		doneCh:    make(chan struct{}),
 		errCh:     make(chan error, 1),
@@ -51,15 +55,13 @@ func (p *DashScopeProvider) Start(ctx context.Context, cfg Config) (Stream, erro
 
 	if err := stream.sendRunTask(ctx); err != nil {
 		_ = conn.Close()
-		_ = writer.Close()
-		_ = reader.Close()
+		_ = audioBuf.Close()
 		return nil, err
 	}
 
 	if err := stream.waitStarted(ctx); err != nil {
 		_ = conn.Close()
-		_ = writer.Close()
-		_ = reader.Close()
+		_ = audioBuf.Close()
 		return nil, err
 	}
 
@@ -69,8 +71,7 @@ func (p *DashScopeProvider) Start(ctx context.Context, cfg Config) (Stream, erro
 type dashScopeStream struct {
 	cfg       Config
 	conn      *websocket.Conn
-	audioIn   *io.PipeWriter
-	audioOut  *io.PipeReader
+	audioBuf  *bufferedPipe
 	writeMu   sync.Mutex
 	startedCh chan struct{}
 	doneCh    chan struct{}
@@ -82,8 +83,66 @@ type dashScopeStream struct {
 	finishOnce  sync.Once
 }
 
+// bufferedPipe is a thread-safe buffered pipe that doesn't block on write
+type bufferedPipe struct {
+	buf    []byte
+	mu     sync.Mutex
+	cond   *sync.Cond
+	closed bool
+	maxLen int
+}
+
+func newBufferedPipe(maxLen int) *bufferedPipe {
+	bp := &bufferedPipe{
+		buf:    make([]byte, 0, maxLen),
+		maxLen: maxLen,
+	}
+	bp.cond = sync.NewCond(&bp.mu)
+	return bp
+}
+
+func (bp *bufferedPipe) Write(p []byte) (int, error) {
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+
+	if bp.closed {
+		return 0, io.ErrClosedPipe
+	}
+
+	// If buffer is full, wait for some space or just append (may grow)
+	bp.buf = append(bp.buf, p...)
+	bp.cond.Signal()
+	return len(p), nil
+}
+
+func (bp *bufferedPipe) Read(p []byte) (int, error) {
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+
+	for len(bp.buf) == 0 && !bp.closed {
+		bp.cond.Wait()
+	}
+
+	if len(bp.buf) == 0 && bp.closed {
+		return 0, io.EOF
+	}
+
+	n := copy(p, bp.buf)
+	bp.buf = bp.buf[n:]
+	return n, nil
+}
+
+func (bp *bufferedPipe) Close() error {
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+
+	bp.closed = true
+	bp.cond.Broadcast()
+	return nil
+}
+
 func (s *dashScopeStream) AudioReader() io.ReadCloser {
-	return s.audioOut
+	return s.audioBuf
 }
 
 func (s *dashScopeStream) SampleRate() int {
@@ -243,7 +302,7 @@ func (s *dashScopeStream) startReceiver() {
 			}
 
 			if messageType == websocket.BinaryMessage {
-				if _, err := s.audioIn.Write(data); err != nil {
+				if _, err := s.audioBuf.Write(data); err != nil {
 					s.closeWithError(err)
 					return
 				}
@@ -277,6 +336,9 @@ func (s *dashScopeStream) handleEvent(event eventMessage) bool {
 		err := mapDashScopeError(event.Header.ErrorCode, event.Header.ErrorMessage)
 		s.closeWithError(err)
 		return true
+	// result-generated is expected, ignore it
+	case "result-generated":
+		// normal event, no action needed
 	}
 	return false
 }
@@ -298,7 +360,7 @@ func (s *dashScopeStream) setErr(err error) {
 
 func (s *dashScopeStream) markDone() {
 	s.doneOnce.Do(func() {
-		_ = s.audioIn.Close()
+		_ = s.audioBuf.Close()
 		close(s.doneCh)
 	})
 }

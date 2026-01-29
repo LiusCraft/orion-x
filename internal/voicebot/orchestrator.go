@@ -67,8 +67,16 @@ type orchestratorImpl struct {
 	currentEmotion string
 	ctx            context.Context
 	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	mu             sync.Mutex
+
+	// Agent context 管理（用于打断时取消 Agent）
+	agentCtx    context.Context
+	agentCancel context.CancelFunc
+
+	// TTS 播放计数（用于追踪是否有 TTS 正在播放）
+	ttsPendingCount int
+
+	wg sync.WaitGroup
+	mu sync.Mutex
 }
 
 // NewOrchestrator 创建新的Orchestrator
@@ -116,13 +124,14 @@ func (o *orchestratorImpl) Start(ctx context.Context) error {
 		logging.Infof("Orchestrator: AudioInPipe started")
 
 		o.audioInPipe.OnASRResult(func(text string, isFinal bool) {
-			if text != "" {
-				logging.Infof("Orchestrator: user speaking detected: %s", text)
-				o.OnUserSpeakingDetected()
-			}
 			if isFinal {
+				// ASR final 表示用户说完了，直接处理，不触发打断
 				logging.Infof("Orchestrator: ASR final result: %s", text)
 				o.OnASRFinal(text)
+			} else if text != "" {
+				// 只有非 final 的中间结果才触发打断（用户正在说话）
+				logging.Infof("Orchestrator: user speaking detected (interim): %s", text)
+				o.OnUserSpeakingDetected()
 			}
 		})
 		o.audioInPipe.OnUserSpeakingDetected(func() {
@@ -133,6 +142,8 @@ func (o *orchestratorImpl) Start(ctx context.Context) error {
 
 	if o.audioOutPipe != nil {
 		logging.Infof("Orchestrator: starting AudioOutPipe...")
+		// 设置播放完成回调
+		o.audioOutPipe.SetOnPlaybackFinished(o.onTTSPlaybackFinished)
 		if err := o.audioOutPipe.Start(o.ctx); err != nil {
 			logging.Errorf("Orchestrator: failed to start AudioOutPipe: %v", err)
 			return err
@@ -150,6 +161,12 @@ func (o *orchestratorImpl) Stop() error {
 	defer o.mu.Unlock()
 
 	logging.Infof("Orchestrator: stopping...")
+
+	// 取消 Agent（如果正在运行）
+	if o.agentCancel != nil {
+		o.agentCancel()
+		o.agentCancel = nil
+	}
 
 	if o.cancel != nil {
 		o.cancel()
@@ -217,13 +234,61 @@ func (o *orchestratorImpl) handleStateChanged(event Event) {
 
 func (o *orchestratorImpl) handleUserSpeakingDetected(event Event) {
 	currentState := o.stateMachine.GetCurrentState()
-	logging.Infof("Orchestrator: UserSpeakingDetected received, current state: %s", currentState)
 
-	// 只在 Processing 或 Speaking 状态时才需要打断
-	if currentState == StateSpeaking || currentState == StateProcessing {
-		logging.Infof("Orchestrator: interrupting current playback...")
+	// 检查是否有 TTS 正在播放
+	o.mu.Lock()
+	ttsPending := o.ttsPendingCount > 0
+	o.mu.Unlock()
+
+	// 只在 Processing、Speaking 状态或有 TTS pending 时才需要打断
+	needInterrupt := currentState == StateSpeaking || currentState == StateProcessing || ttsPending
+	if needInterrupt {
+		logging.Infof("Orchestrator: UserSpeakingDetected - interrupting (state=%s, ttsPending=%d)", currentState, o.ttsPendingCount)
+
+		// 1. 取消 Agent（停止 LLM 生成）
+		o.mu.Lock()
+		if o.agentCancel != nil {
+			logging.Infof("Orchestrator: cancelling Agent...")
+			o.agentCancel()
+			o.agentCancel = nil
+		}
+		o.mu.Unlock()
+
+		// 2. 中断 TTS Pipeline（清空队列、停止播放）
+		if o.audioOutPipe != nil {
+			logging.Infof("Orchestrator: interrupting AudioOutPipe...")
+			o.audioOutPipe.Interrupt()
+		}
+
+		// 3. 重置分句器
+		o.segmenter.Flush()
+
+		// 4. 重置 TTS 计数
+		o.mu.Lock()
+		o.ttsPendingCount = 0
+		o.mu.Unlock()
+
+		// 5. 状态转换
 		o.transitionTo(StateListening)
-		o.audioOutPipe.Interrupt()
+	}
+}
+
+// onTTSPlaybackFinished TTS 播放完成回调（由 TTSPipeline 调用）
+func (o *orchestratorImpl) onTTSPlaybackFinished() {
+	o.mu.Lock()
+	o.ttsPendingCount--
+	pending := o.ttsPendingCount
+	o.mu.Unlock()
+
+	logging.Infof("Orchestrator: TTS playback finished, pending count: %d", pending)
+
+	// 如果所有 TTS 都播放完成，转为 Idle
+	if pending <= 0 {
+		currentState := o.stateMachine.GetCurrentState()
+		if currentState == StateSpeaking {
+			logging.Infof("Orchestrator: All TTS finished, transitioning to Idle")
+			o.transitionTo(StateIdle)
+		}
 	}
 }
 
@@ -233,6 +298,18 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 		return
 	}
 
+	// 如果之前有 Agent 在运行，先取消
+	o.mu.Lock()
+	if o.agentCancel != nil {
+		logging.Infof("Orchestrator: cancelling previous Agent before starting new one...")
+		o.agentCancel()
+	}
+
+	// 为新的 Agent 调用创建独立的 context
+	o.agentCtx, o.agentCancel = context.WithCancel(o.ctx)
+	agentCtx := o.agentCtx
+	o.mu.Unlock()
+
 	logging.StartTurn()
 	logging.Infof("Orchestrator: ASR final event received: %s", asrEvent.Text)
 	o.transitionTo(StateProcessing)
@@ -241,16 +318,36 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 	go func() {
 		defer o.wg.Done()
 
-		eventChan, err := o.voiceAgent.Process(o.ctx, asrEvent.Text)
+		// 使用 agentCtx 调用 Agent（可被打断）
+		eventChan, err := o.voiceAgent.Process(agentCtx, asrEvent.Text)
 		if err != nil {
-			logging.Errorf("Orchestrator: VoiceAgent process error: %v", err)
+			if errors.Is(err, context.Canceled) {
+				logging.Infof("Orchestrator: VoiceAgent process cancelled (normal interruption)")
+			} else {
+				logging.Errorf("Orchestrator: VoiceAgent process error: %v", err)
+			}
 			o.transitionTo(StateIdle)
 			return
 		}
 
 		for agentEvent := range eventChan {
+			// 检查是否被取消
+			select {
+			case <-agentCtx.Done():
+				logging.Infof("Orchestrator: Agent cancelled, stopping event processing")
+				return
+			default:
+			}
+
 			o.handleAgentEvent(agentEvent)
 		}
+
+		// Agent 完成后清理
+		o.mu.Lock()
+		if o.agentCtx == agentCtx {
+			o.agentCancel = nil
+		}
+		o.mu.Unlock()
 	}()
 }
 
@@ -318,15 +415,21 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 			if sentence != "" {
 				// 移除 Markdown 格式，避免 TTS 播放特殊符号
 				sentence = o.markdownFilter.Filter(sentence)
-				logging.Infof("Orchestrator: playing TTS for sentence: %s", sentence)
+				logging.Infof("Orchestrator: enqueuing TTS for sentence: %s", sentence)
+				// PlayTTS 现在是异步的，立即返回
 				err := o.audioOutPipe.PlayTTS(sentence, o.currentEmotion)
 				if err != nil {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 						logging.Infof("Orchestrator: PlayTTS cancelled (normal interruption)")
+						return // 被打断，停止处理
 					} else {
 						logging.Errorf("Orchestrator: PlayTTS error: %v", err)
 					}
 				}
+				// 增加 TTS 计数
+				o.mu.Lock()
+				o.ttsPendingCount++
+				o.mu.Unlock()
 				o.transitionTo(StateSpeaking)
 			}
 		}
@@ -339,7 +442,8 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 		if last := o.segmenter.Flush(); last != "" {
 			// 移除 Markdown 格式，避免 TTS 播放特殊符号
 			last = o.markdownFilter.Filter(last)
-			logging.Infof("Orchestrator: playing final TTS sentence: %s", last)
+			logging.Infof("Orchestrator: enqueuing final TTS sentence: %s", last)
+			// PlayTTS 现在是异步的，立即返回
 			err := o.audioOutPipe.PlayTTS(last, o.currentEmotion)
 			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -348,10 +452,15 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 					logging.Errorf("Orchestrator: PlayTTS error: %v", err)
 				}
 			}
+			// 增加 TTS 计数
+			o.mu.Lock()
+			o.ttsPendingCount++
+			o.mu.Unlock()
 			o.transitionTo(StateSpeaking)
 		}
-		logging.Infof("Orchestrator: VoiceAgent finished")
-		o.transitionTo(StateIdle)
+		logging.Infof("Orchestrator: VoiceAgent finished (TTS pending: %d)", o.ttsPendingCount)
+		// 注意：不转为 Idle，保持 Speaking 状态直到所有 TTS 播放完成
+		// onTTSPlaybackFinished 会在每个 TTS 播放完成时被调用
 	}
 }
 

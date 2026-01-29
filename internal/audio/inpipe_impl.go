@@ -205,6 +205,9 @@ func (p *inPipeImpl) readAudioFromSource(ctx context.Context) {
 	logging.Infof("AudioInPipe: audio reader goroutine started")
 	defer logging.Infof("AudioInPipe: audio reader goroutine stopped")
 
+	consecutiveErrors := 0
+	const maxConsecutiveErrors = 5
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -217,9 +220,29 @@ func (p *inPipeImpl) readAudioFromSource(ctx context.Context) {
 			if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, io.EOF) {
 				return
 			}
-			logging.Errorf("AudioInPipe: error reading from audio source: %v", err)
-			return
+
+			// Handle transient errors like "Input overflowed" gracefully
+			// These can happen during startup or under high load
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecutiveErrors {
+				logging.Errorf("AudioInPipe: too many consecutive errors (%d), stopping: %v", consecutiveErrors, err)
+				return
+			}
+
+			logging.Warnf("AudioInPipe: transient error reading from audio source (attempt %d/%d): %v",
+				consecutiveErrors, maxConsecutiveErrors, err)
+
+			// Brief pause before retry to avoid tight error loop
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+			continue
 		}
+
+		// Reset error counter on successful read
+		consecutiveErrors = 0
 
 		p.handleVAD(audio)
 

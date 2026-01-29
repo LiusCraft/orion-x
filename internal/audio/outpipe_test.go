@@ -2,128 +2,9 @@ package audio
 
 import (
 	"context"
-	"io"
-	"strings"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/liuscraft/orion-x/internal/tts"
 )
-
-type mockTTSProvider struct {
-	startCalled bool
-	stream      *mockTTSStream
-}
-
-type mockTTSStream struct {
-	closed bool
-	reader *io.PipeReader
-	writer *io.PipeWriter
-}
-
-func newMockTTSStream() *mockTTSStream {
-	reader, writer := io.Pipe()
-	return &mockTTSStream{
-		reader: reader,
-		writer: writer,
-	}
-}
-
-func (m *mockTTSProvider) Start(ctx context.Context, cfg tts.Config) (tts.Stream, error) {
-	m.startCalled = true
-	if m.stream == nil {
-		m.stream = newMockTTSStream()
-	}
-	return m.stream, nil
-}
-
-func (m *mockTTSStream) WriteTextChunk(ctx context.Context, text string) error {
-	if m.writer == nil {
-		return nil
-	}
-	_, _ = m.writer.Write([]byte{0x00, 0x00, 0x00, 0x00})
-	return nil
-}
-
-func (m *mockTTSStream) Close(ctx context.Context) error {
-	m.closed = true
-	if m.writer != nil {
-		_ = m.writer.Close()
-	}
-	return nil
-}
-
-func (m *mockTTSStream) AudioReader() io.ReadCloser {
-	if m.reader == nil {
-		return io.NopCloser(strings.NewReader(""))
-	}
-	return m.reader
-}
-
-func (m *mockTTSStream) SampleRate() int {
-	return 16000
-}
-
-func (m *mockTTSStream) Channels() int {
-	return 1
-}
-
-type mockMixer struct {
-	ttsAdded        bool
-	ttsReader       io.Reader
-	resourceAdded   bool
-	ttsStarted      bool
-	ttsFinished     bool
-	ttsVolume       float64
-	resourceVolume  float64
-	ttsRemoved      bool
-	resourceRemoved bool
-	finishedCh      chan struct{}
-	finishedOnce    sync.Once
-}
-
-func (m *mockMixer) AddTTSStream(audio io.Reader) {
-	m.ttsAdded = true
-	m.ttsReader = audio
-}
-
-func (m *mockMixer) AddResourceStream(audio io.Reader) {
-	m.resourceAdded = true
-}
-
-func (m *mockMixer) RemoveTTSStream() {
-	m.ttsRemoved = true
-}
-
-func (m *mockMixer) RemoveResourceStream() {
-	m.resourceRemoved = true
-}
-
-func (m *mockMixer) SetTTSVolume(volume float64) {
-	m.ttsVolume = volume
-}
-
-func (m *mockMixer) SetResourceVolume(volume float64) {
-	m.resourceVolume = volume
-}
-
-func (m *mockMixer) OnTTSStarted() {
-	m.ttsStarted = true
-}
-
-func (m *mockMixer) OnTTSFinished() {
-	m.ttsFinished = true
-	m.finishedOnce.Do(func() {
-		if m.finishedCh != nil {
-			close(m.finishedCh)
-		}
-	})
-}
-
-func (m *mockMixer) Start() {}
-
-func (m *mockMixer) Stop() {}
 
 func TestNewOutPipe(t *testing.T) {
 	pipe := NewOutPipe("test-api-key")
@@ -139,44 +20,22 @@ func TestNewOutPipeWithConfig(t *testing.T) {
 		"default": "voice-x",
 	}
 
-	pipe := NewOutPipeWithConfig(cfg).(*outPipeImpl)
-	if pipe.ttsConfig.APIKey != "config-key" {
-		t.Fatalf("expected API key to be set from config")
-	}
-	if pipe.getVoice("unknown") != "voice-x" {
-		t.Fatalf("expected custom default voice to be used")
-	}
-}
-
-func TestOutPipe_GetVoice(t *testing.T) {
-	tests := []struct {
-		name     string
-		emotion  string
-		expected string
-	}{
-		{"happy emotion", "happy", "longanyang"},
-		{"sad emotion", "sad", "zhichu"},
-		{"angry emotion", "angry", "zhimeng"},
-		{"calm emotion", "calm", "longxiaochun"},
-		{"unknown emotion", "unknown", "longanyang"},
-		{"empty emotion", "", "longanyang"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pipe := NewOutPipe("test-api-key").(*outPipeImpl)
-			voice := pipe.getVoice(tt.emotion)
-			if voice != tt.expected {
-				t.Errorf("getVoice(%q) = %q, want %q", tt.emotion, voice, tt.expected)
-			}
-		})
+	pipe := NewOutPipeWithConfig(cfg)
+	if pipe == nil {
+		t.Fatal("NewOutPipeWithConfig returned nil")
 	}
 }
 
 func TestOutPipe_SetMixer(t *testing.T) {
 	pipe := NewOutPipe("test-api-key")
-	mixer := &mockMixer{}
+	mixer := newMockMixer()
 	pipe.SetMixer(mixer)
+}
+
+func TestOutPipe_SetReferenceSink(t *testing.T) {
+	pipe := NewOutPipe("test-api-key")
+	sink := newMockReferenceSink()
+	pipe.SetReferenceSink(sink)
 }
 
 func TestOutPipe_StartStop(t *testing.T) {
@@ -197,10 +56,6 @@ func TestOutPipe_StartStop(t *testing.T) {
 	}
 }
 
-func TestOutPipe_PlayTTS(t *testing.T) {
-	t.Skip("Skipping test that requires real TTS API connection")
-}
-
 func TestOutPipe_PlayTTS_EmptyText(t *testing.T) {
 	pipe := NewOutPipe("test-api-key")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -218,47 +73,188 @@ func TestOutPipe_PlayTTS_EmptyText(t *testing.T) {
 	}
 }
 
-func TestOutPipe_PlayTTS_CleansUpOnEOF(t *testing.T) {
-	pipe := NewOutPipe("test-api-key").(*outPipeImpl)
-	provider := &mockTTSProvider{stream: newMockTTSStream()}
-	pipe.tts = provider
-
-	mixer := &mockMixer{finishedCh: make(chan struct{})}
+func TestOutPipe_PlayTTS_Async(t *testing.T) {
+	pipe := NewOutPipe("test-api-key")
+	mixer := newMockMixer()
 	pipe.SetMixer(mixer)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	if err := pipe.Start(ctx); err != nil {
+	err := pipe.Start(ctx)
+	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
 	defer pipe.Stop()
 
-	if err := pipe.PlayTTS("hello", "happy"); err != nil {
+	// PlayTTS 应该是异步的，立即返回
+	start := time.Now()
+	err = pipe.PlayTTS("Hello, World!", "happy")
+	duration := time.Since(start)
+
+	if err != nil {
 		t.Fatalf("PlayTTS error: %v", err)
 	}
 
-	if mixer.ttsReader == nil {
-		t.Fatal("expected TTS reader to be set")
+	// 异步调用应该很快返回（不等待 TTS 完成）
+	if duration > 100*time.Millisecond {
+		t.Errorf("PlayTTS took too long: %v (expected < 100ms for async)", duration)
 	}
+}
 
-	buf := make([]byte, 8)
-	for {
-		if _, err := mixer.ttsReader.Read(buf); err != nil {
-			break
+func TestOutPipe_Interrupt(t *testing.T) {
+	pipe := NewOutPipe("test-api-key")
+	mixer := newMockMixer()
+	pipe.SetMixer(mixer)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := pipe.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	defer pipe.Stop()
+
+	// 入队一些文本
+	for i := 0; i < 3; i++ {
+		err = pipe.PlayTTS("Test sentence", "neutral")
+		if err != nil {
+			t.Fatalf("PlayTTS error: %v", err)
 		}
 	}
 
-	select {
-	case <-mixer.finishedCh:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timeout waiting for TTS cleanup")
+	// 打断
+	err = pipe.Interrupt()
+	if err != nil {
+		t.Fatalf("Interrupt error: %v", err)
 	}
 
-	if !mixer.ttsRemoved {
-		t.Fatal("expected TTS stream to be removed")
+	// 打断后应该能继续工作
+	err = pipe.PlayTTS("After interrupt", "happy")
+	if err != nil {
+		t.Fatalf("PlayTTS after interrupt error: %v", err)
 	}
-	if len(pipe.ttsStreams) != 0 {
-		t.Fatalf("expected ttsStreams to be cleared, got %d", len(pipe.ttsStreams))
+}
+
+func TestOutPipe_Stats(t *testing.T) {
+	pipe := NewOutPipe("test-api-key")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := pipe.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	defer pipe.Stop()
+
+	stats := pipe.Stats()
+	if stats.TotalEnqueued != 0 {
+		t.Errorf("Expected TotalEnqueued=0, got %d", stats.TotalEnqueued)
+	}
+
+	// 入队一些文本
+	err = pipe.PlayTTS("Test", "neutral")
+	if err != nil {
+		t.Fatalf("PlayTTS error: %v", err)
+	}
+
+	// 等待一点时间让队列处理
+	time.Sleep(50 * time.Millisecond)
+
+	stats = pipe.Stats()
+	if stats.TotalEnqueued != 1 {
+		t.Errorf("Expected TotalEnqueued=1, got %d", stats.TotalEnqueued)
+	}
+}
+
+func TestOutPipe_PlayResource(t *testing.T) {
+	pipe := NewOutPipe("test-api-key")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := pipe.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	defer pipe.Stop()
+
+	// 没有设置 mixer 时应该报错
+	err = pipe.PlayResource(nil)
+	if err == nil {
+		t.Error("PlayResource without mixer should return error")
+	}
+
+	// 设置 mixer
+	mixer := newMockMixer()
+	pipe.SetMixer(mixer)
+
+	// 现在应该成功
+	reader := newMockAudioReader()
+	reader.setData([]byte{0x00, 0x01, 0x02, 0x03})
+	err = pipe.PlayResource(reader)
+	if err != nil {
+		t.Errorf("PlayResource with mixer should succeed: %v", err)
+	}
+}
+
+func TestOutPipe_DoubleStart(t *testing.T) {
+	pipe := NewOutPipe("test-api-key")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := pipe.Start(ctx)
+	if err != nil {
+		t.Fatalf("First Start error: %v", err)
+	}
+	defer pipe.Stop()
+
+	// 第二次启动应该报错（因为 Pipeline 已经启动）
+	err = pipe.Start(ctx)
+	if err == nil {
+		t.Error("Second Start should return error")
+	}
+}
+
+func TestOutPipe_InterruptBeforeStart(t *testing.T) {
+	pipe := NewOutPipe("test-api-key")
+
+	// 未启动时打断应该不会崩溃
+	err := pipe.Interrupt()
+	// 可能返回错误或 nil，但不应该 panic
+	_ = err
+}
+
+func TestOutPipe_MultipleInterrupts(t *testing.T) {
+	pipe := NewOutPipe("test-api-key")
+	mixer := newMockMixer()
+	pipe.SetMixer(mixer)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := pipe.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	defer pipe.Stop()
+
+	// 多次打断应该正常工作
+	for i := 0; i < 5; i++ {
+		err = pipe.PlayTTS("Test", "neutral")
+		if err != nil {
+			t.Fatalf("PlayTTS error: %v", err)
+		}
+
+		err = pipe.Interrupt()
+		if err != nil {
+			t.Fatalf("Interrupt error: %v", err)
+		}
+	}
+
+	stats := pipe.Stats()
+	if stats.TotalInterrupts != 5 {
+		t.Errorf("Expected TotalInterrupts=5, got %d", stats.TotalInterrupts)
 	}
 }

@@ -48,6 +48,9 @@
 - [x] 集成 `AudioMixer`
 - [x] 集成 `internal/tts/dashscope.go` 的TTS服务
 - [x] 实现音色切换逻辑（基于情绪）
+- [x] 实现异步 TTS Pipeline（预缓冲、非阻塞播放）
+- [x] 支持 Agent context 取消（快速打断 LLM 生成）
+- [x] 可配置 TTS 缓冲区大小和并发数
 - [x] 修复 TTS 播放阻塞/不出声问题
 
 ### 5. AudioInPipe 实现 (优先级: 高)

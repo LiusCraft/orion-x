@@ -54,8 +54,15 @@ type LLMConfig struct {
 }
 
 type AudioConfig struct {
-	Mixer  MixerConfig  `json:"mixer"`
-	InPipe InPipeConfig `json:"in_pipe"`
+	Mixer       MixerConfig       `json:"mixer"`
+	InPipe      InPipeConfig      `json:"in_pipe"`
+	TTSPipeline TTSPipelineConfig `json:"tts_pipeline"`
+}
+
+type TTSPipelineConfig struct {
+	MaxTTSBuffer     int `json:"max_tts_buffer"`
+	MaxConcurrentTTS int `json:"max_concurrent_tts"`
+	TextQueueSize    int `json:"text_queue_size"`
 }
 
 type MixerConfig struct {
@@ -70,6 +77,9 @@ type InPipeConfig struct {
 	Channels     int       `json:"channels"`
 	EnableVAD    bool      `json:"enable_vad"`
 	VADThreshold float64   `json:"vad_threshold"`
+	BufferSize   int       `json:"buffer_size"`  // 缓冲区大小（样本数），默认 3200
+	HighLatency  bool      `json:"high_latency"` // 高延迟模式，适合蓝牙设备
+	InputDevice  string    `json:"input_device"` // 输入设备名称，空字符串表示使用默认设备
 	AEC          AECConfig `json:"aec"`
 }
 
@@ -121,6 +131,11 @@ func DefaultConfig() *AppConfig {
 			Mixer: MixerConfig{
 				TTSVolume:      1.0,
 				ResourceVolume: 1.0,
+			},
+			TTSPipeline: TTSPipelineConfig{
+				MaxTTSBuffer:     3,
+				MaxConcurrentTTS: 2,
+				TextQueueSize:    100,
 			},
 			InPipe: InPipeConfig{
 				SampleRate:   16000,

@@ -43,6 +43,11 @@
             "sample_rate": 16000,
             "channels": 2
         },
+        "tts_pipeline": {
+            "max_tts_buffer": 3,
+            "max_concurrent_tts": 2,
+            "text_queue_size": 100
+        },
         "in_pipe": {
             "sample_rate": 16000,
             "channels": 1,

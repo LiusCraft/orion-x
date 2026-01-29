@@ -34,6 +34,10 @@ func (s *blockingStream) Abort() error {
 	return nil
 }
 
+func (s *blockingStream) Start() error {
+	return nil
+}
+
 func (s *blockingStream) Stop() error {
 	return nil
 }

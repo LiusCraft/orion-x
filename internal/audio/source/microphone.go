@@ -3,7 +3,9 @@ package source
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +23,11 @@ type MicrophoneSource struct {
 	closeCh    chan struct{}
 	closeOnce  sync.Once
 
+	// 启动状态
+	started   bool
+	startOnce sync.Once
+	startErr  error
+
 	// 诊断指标
 	totalReads   int64
 	blockedReads int64
@@ -30,6 +37,7 @@ type MicrophoneSource struct {
 }
 
 type audioStream interface {
+	Start() error
 	Read() error
 	Abort() error
 	Stop() error
@@ -37,28 +45,130 @@ type audioStream interface {
 }
 
 // NewMicrophoneSource 创建新的麦克风音频源
+// Note: The stream is NOT started immediately. Call Start() or Read() to start the stream.
+// This avoids input overflow errors when there's a delay between creation and first read.
 func NewMicrophoneSource(sampleRate, channels, bufferSize int) (*MicrophoneSource, error) {
+	return NewMicrophoneSourceWithDevice(sampleRate, channels, bufferSize, false, "")
+}
+
+// NewMicrophoneSourceWithLatency 创建麦克风音频源，支持高延迟模式
+// highLatency: 如果为 true，使用设备的默认高延迟设置（适合蓝牙设备）
+// Note: The stream is NOT started immediately. Call Start() or Read() to start the stream.
+func NewMicrophoneSourceWithLatency(sampleRate, channels, bufferSize int, highLatency bool) (*MicrophoneSource, error) {
+	return NewMicrophoneSourceWithDevice(sampleRate, channels, bufferSize, highLatency, "")
+}
+
+// NewMicrophoneSourceWithDevice 创建麦克风音频源，支持指定设备和高延迟模式
+// highLatency: 如果为 true，使用设备的默认高延迟设置（适合蓝牙设备）
+// deviceName: 设备名称（部分匹配），空字符串表示使用默认设备
+// Note: The stream is NOT started immediately. Call Start() or Read() to start the stream.
+func NewMicrophoneSourceWithDevice(sampleRate, channels, bufferSize int, highLatency bool, deviceName string) (*MicrophoneSource, error) {
 	// Note: PortAudio should be initialized by the caller before creating MicrophoneSource
 	// This avoids multiple Initialize() calls which can cause device conflicts
-	logging.Infof("MicrophoneSource: creating source...")
+	logging.Infof("MicrophoneSource: creating source (highLatency=%v, deviceName=%q)...", highLatency, deviceName)
 
 	buffer := make([]int16, bufferSize)
-	stream, err := portaudio.OpenDefaultStream(channels, 0, float64(sampleRate), len(buffer), &buffer)
+
+	// 查找输入设备
+	var inputDevice *portaudio.DeviceInfo
+	var err error
+
+	if deviceName != "" {
+		// 按名称查找设备
+		inputDevice, err = findInputDeviceByName(deviceName)
+		if err != nil {
+			logging.Warnf("MicrophoneSource: device %q not found, falling back to default: %v", deviceName, err)
+			inputDevice = nil
+		}
+	}
+
+	if inputDevice == nil {
+		// 使用默认输入设备
+		inputDevice, err = portaudio.DefaultInputDevice()
+		if err != nil {
+			logging.Errorf("MicrophoneSource: failed to get default input device: %v", err)
+			// Fallback to simple stream
+			stream, err := portaudio.OpenDefaultStream(channels, 0, float64(sampleRate), len(buffer), &buffer)
+			if err != nil {
+				return nil, err
+			}
+			logging.Infof("MicrophoneSource: created with fallback (sampleRate=%d, channels=%d, bufferSize=%d)", sampleRate, channels, bufferSize)
+			return newMicrophoneSourceWithStream(stream, sampleRate, channels, bufferSize, buffer), nil
+		}
+	}
+
+	// 选择延迟模式
+	latency := inputDevice.DefaultLowInputLatency
+	latencyMode := "low"
+	if highLatency {
+		latency = inputDevice.DefaultHighInputLatency
+		latencyMode = "high"
+	}
+
+	logging.Infof("MicrophoneSource: device=%s, %s latency=%.1fms",
+		inputDevice.Name, latencyMode, latency.Seconds()*1000)
+
+	// 使用 StreamParameters 打开流，允许指定延迟
+	streamParams := portaudio.StreamParameters{
+		Input: portaudio.StreamDeviceParameters{
+			Device:   inputDevice,
+			Channels: channels,
+			Latency:  latency,
+		},
+		SampleRate:      float64(sampleRate),
+		FramesPerBuffer: bufferSize,
+	}
+
+	stream, err := portaudio.OpenStream(streamParams, &buffer)
+	if err != nil {
+		logging.Errorf("MicrophoneSource: failed to open stream with params: %v, falling back to default", err)
+		// Fallback to simple stream
+		stream, err := portaudio.OpenDefaultStream(channels, 0, float64(sampleRate), len(buffer), &buffer)
+		if err != nil {
+			return nil, err
+		}
+		logging.Infof("MicrophoneSource: created with fallback (sampleRate=%d, channels=%d, bufferSize=%d)", sampleRate, channels, bufferSize)
+		return newMicrophoneSourceWithStream(stream, sampleRate, channels, bufferSize, buffer), nil
+	}
+
+	logging.Infof("MicrophoneSource: created with sampleRate=%d, channels=%d, bufferSize=%d, latency=%s (stream not started yet)",
+		sampleRate, channels, bufferSize, latencyMode)
+
+	return newMicrophoneSourceWithStream(stream, sampleRate, channels, bufferSize, buffer), nil
+}
+
+// findInputDeviceByName 按名称查找输入设备（支持部分匹配）
+func findInputDeviceByName(name string) (*portaudio.DeviceInfo, error) {
+	devices, err := portaudio.Devices()
 	if err != nil {
 		return nil, err
 	}
 
-	logging.Infof("MicrophoneSource: created with sampleRate=%d, channels=%d, bufferSize=%d", sampleRate, channels, bufferSize)
-
-	if err := stream.Start(); err != nil {
-		stream.Close()
-		portaudio.Terminate()
-		return nil, err
+	nameLower := strings.ToLower(name)
+	for _, dev := range devices {
+		if dev.MaxInputChannels > 0 && strings.Contains(strings.ToLower(dev.Name), nameLower) {
+			logging.Infof("MicrophoneSource: found device %q matching %q", dev.Name, name)
+			return dev, nil
+		}
 	}
 
-	logging.Infof("MicrophoneSource: stream started")
+	return nil, fmt.Errorf("no input device found matching %q", name)
+}
 
-	return newMicrophoneSourceWithStream(stream, sampleRate, channels, bufferSize, buffer), nil
+// Start starts the audio stream. This is called automatically on first Read(),
+// but can be called explicitly if you want to control when the stream starts.
+func (m *MicrophoneSource) Start() error {
+	m.startOnce.Do(func() {
+		logging.Infof("MicrophoneSource: starting stream...")
+		if err := m.stream.Start(); err != nil {
+			logging.Errorf("MicrophoneSource: failed to start stream: %v", err)
+			m.startErr = err
+			return
+		}
+		m.started = true
+		logging.Infof("MicrophoneSource: stream started successfully")
+	})
+	return m.startErr
 }
 
 func newMicrophoneSourceWithStream(stream audioStream, sampleRate, channels, bufferSize int, buffer []int16) *MicrophoneSource {
@@ -73,9 +183,15 @@ func newMicrophoneSourceWithStream(stream audioStream, sampleRate, channels, buf
 }
 
 // Read 读取音频数据
+// The stream is started automatically on first Read() if not already started.
 func (m *MicrophoneSource) Read(ctx context.Context) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+
+	// Start the stream on first read (lazy initialization)
+	if err := m.Start(); err != nil {
+		return nil, err
 	}
 
 	readStart := time.Now()

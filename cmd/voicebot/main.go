@@ -96,6 +96,22 @@ func main() {
 	logging.Infof("Creating AudioOutPipe...")
 	outPipeCfg := audio.DefaultOutPipeConfig()
 	outPipeCfg.Mixer = mixerCfg
+	// 配置 TTS Pipeline
+	outPipeCfg.TTSPipeline = &audio.TTSPipelineConfig{
+		MaxTTSBuffer:     appConfig.Audio.TTSPipeline.MaxTTSBuffer,
+		MaxConcurrentTTS: appConfig.Audio.TTSPipeline.MaxConcurrentTTS,
+		TextQueueSize:    appConfig.Audio.TTSPipeline.TextQueueSize,
+	}
+	// 如果配置值为 0，使用默认值
+	if outPipeCfg.TTSPipeline.MaxTTSBuffer <= 0 {
+		outPipeCfg.TTSPipeline.MaxTTSBuffer = 3
+	}
+	if outPipeCfg.TTSPipeline.MaxConcurrentTTS <= 0 {
+		outPipeCfg.TTSPipeline.MaxConcurrentTTS = 2
+	}
+	if outPipeCfg.TTSPipeline.TextQueueSize <= 0 {
+		outPipeCfg.TTSPipeline.TextQueueSize = 100
+	}
 	outPipeCfg.TTS = tts.Config{
 		APIKey:               appConfig.TTS.APIKey,
 		Endpoint:             appConfig.TTS.Endpoint,
@@ -116,7 +132,8 @@ func main() {
 	}
 	audioOutPipe := audio.NewOutPipeWithConfig(outPipeCfg)
 	audioOutPipe.SetMixer(mixer)
-	logging.Infof("AudioOutPipe created successfully")
+	logging.Infof("AudioOutPipe created successfully (async TTS pipeline: maxBuffer=%d, maxConcurrent=%d)",
+		outPipeCfg.TTSPipeline.MaxTTSBuffer, outPipeCfg.TTSPipeline.MaxConcurrentTTS)
 
 	logging.Infof("Creating AudioInPipe...")
 	inPipeCfg := &audio.InPipeConfig{
@@ -128,8 +145,21 @@ func main() {
 		ASREndpoint:  appConfig.ASR.Endpoint,
 	}
 
-	logging.Infof("Creating Microphone source...")
-	micSource, err := source.NewMicrophoneSource(inPipeCfg.SampleRate, inPipeCfg.Channels, 3200)
+	// 配置缓冲区大小，默认 3200 样本 (200ms @ 16kHz)
+	bufferSize := appConfig.Audio.InPipe.BufferSize
+	if bufferSize <= 0 {
+		bufferSize = 3200
+	}
+
+	logging.Infof("Creating Microphone source (bufferSize=%d, highLatency=%v, inputDevice=%q)...",
+		bufferSize, appConfig.Audio.InPipe.HighLatency, appConfig.Audio.InPipe.InputDevice)
+	micSource, err := source.NewMicrophoneSourceWithDevice(
+		inPipeCfg.SampleRate,
+		inPipeCfg.Channels,
+		bufferSize,
+		appConfig.Audio.InPipe.HighLatency,
+		appConfig.Audio.InPipe.InputDevice,
+	)
 	if err != nil {
 		logging.Fatalf("Failed to create Microphone source: %v", err)
 	}

@@ -1,4 +1,12 @@
 config/voicebot.json
+cmd/voicebot/config/voicebot.json
 docs-site/node_modules
 docs-site/.vitepress/cache
 docs-site/.vitepress/dist
+
+# Debug binaries
+__debug_bin*
+
+# Compiled binaries
+audiodiag
+voicebot
