@@ -28,7 +28,10 @@ export default defineConfig({
           items: [
             { text: 'ASR 语音识别', link: '/guide/asr' },
             { text: 'TTS 语音合成', link: '/guide/tts' },
+            { text: 'TTS 异步管道', link: '/guide/tts-pipeline' },
             { text: '音频输入管道', link: '/guide/audio-in-pipe' },
+            { text: '音频输出管道', link: '/guide/audio-out-pipe' },
+            { text: '多采样率支持', link: '/guide/multi-sample-rate' },
             { text: '日志系统', link: '/guide/logging' }
           ]
         }

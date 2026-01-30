@@ -50,6 +50,24 @@
 - [x] 实现音色切换逻辑（基于情绪）
 - [x] 修复 TTS 播放阻塞/不出声问题
 
+### 4.1 TTSPipeline 异步管道 (优先级: 高) ⭐
+- [x] 设计并实现 TTSPipeline 接口
+- [x] 实现文本队列（可配置大小）
+- [x] 实现 TTS Worker Pool（可配置并发数）
+- [x] 实现 TTS 音频缓冲区（可配置大小）
+- [x] 实现 Audio Player 播放协程
+- [x] 实现 Interrupt() 快速中断机制
+- [x] 集成到 AudioOutPipe
+- [x] 实现 Agent context 取消联动
+
+### 4.2 多采样率支持 (优先级: 中)
+- [x] 设计 Resampler 接口
+- [x] 实现线性插值重采样算法
+- [x] 实现 ResamplingReader 包装器
+- [x] 扩展 MixerConfig 支持采样率配置
+- [x] TTS Stream 元数据添加采样率信息
+- [x] OutPipe 集成自动重采样
+
 ### 5. AudioInPipe 实现 (优先级: 高)
 - [x] 实现完整的状态机逻辑
 - [x] 实现事件路由
@@ -67,8 +85,6 @@
 - [x] 集成 VAD 检测（可选）
 - [x] 修复 TTS DNS 查询被取消问题
 - [x] 修复 Mixer.Start() 可能阻塞问题
-- [x] 在音频采集源层加入回声消除管线（ReferenceBuffer + EchoCancellingSource）
-- [ ] 接入 WebRTC AEC3（或系统级 AEC）实现真正回声消除
 
 ## 阶段二：工具集成
 

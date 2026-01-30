@@ -11,8 +11,10 @@
                       ↓
             [LLM总结] → [情绪标注] → [Markdown过滤] → [分句]
                       ↓
-              TTS音频 ────┐
-                      ↓   ↓
+         TTSPipeline.EnqueueText() ← 非阻塞入队
+                      ↓
+              [TTS异步生成] → [音频预缓冲]
+                      ↓
                    AudioMixer → 播放
                       ↑
                资源音频 ─────┘
@@ -90,13 +92,14 @@ type ToolExecutor interface {
 - `err`: 错误信息
 
 ### 4. AudioOutPipe（音频输出管道）
-**职责**: 音频混合播放、队列管理、中断处理
+**职责**: 音频混合播放、异步 TTS 处理、队列管理、中断处理
 
 **架构**:
 ```
 ┌─────────────┐    ┌─────────────┐
-│ TTS音频源   │    │ 资源音频源   │
-└──────┬──────┘    └──────┬──────┘
+│ TTSPipeline │    │ 资源音频源   │
+│ (异步处理)   │    └──────┬──────┘
+└──────┬──────┘           │
        │                  │
        └────────┬─────────┘
                 ▼
@@ -105,8 +108,6 @@ type ToolExecutor interface {
          └──────┬──────┘
                 ▼
             音频播放器
-                │
-                └──► ReferenceBuffer (播放参考信号)
 ```
 
 **混音逻辑**:
@@ -115,21 +116,37 @@ type ToolExecutor interface {
   - 无TTS时: 正常音量 (100%)
   - 有TTS时: 降低音量 (50%)
 
-**TTS播放流程（关键）**:
-- `AudioOutPipe.PlayTTS()` 先将 `AudioReader` 接入 `AudioMixer`，再写入文本并 `Close()`
-- `AudioReader` 读到 EOF 后再触发 `RemoveTTSStream()` 与音量恢复，避免提前移除导致不出声
-- TTS输出格式使用 `pcm`，采样率与 Mixer 一致（当前 16000），避免解码不一致导致阻塞
+**TTS 播放流程（异步）**:
+- `AudioOutPipe.PlayTTS()` 将文本入队到 `TTSPipeline`，立即返回
+- TTSPipeline 内部维护文本队列、TTS Worker Pool、音频缓冲区
+- 支持预缓冲最多 N 句已生成的音频（默认 3 句）
+- 用户打断时，调用 `Interrupt()` 清空所有队列
 
-### 5. TTSManager（TTS管理器）
+### 5. TTSPipeline（TTS 异步管道）
+**职责**: 异步 TTS 生成、音频预缓冲、播放协调
+
+**核心组件**:
+- **Text Queue**: 待处理文本队列（容量 100）
+- **TTS Worker Pool**: 并发生成 TTS（默认 2 个 worker）
+- **TTS Buffer**: 已生成音频缓冲区（默认 3 句）
+- **Audio Player**: 从缓冲区取出并播放
+
+**优势**:
+- Agent 输出句子后立即继续，不阻塞在 TTS 播放上
+- 提前生成多个 TTS，避免播放间隙
+- 播放间隙 < 100ms，打断响应 < 200ms
+
+### 6. TTSManager（TTS管理器）
 **职责**: TTS连接管理、音色切换
 
 **特性**:
 - 音色映射: `map[string]string` (情绪 → 音色)
 - 流式文本 → 音频转换
 - 支持动态音色切换
+- 支持多采样率输出（16k/22k/24k/48k）
 
-### 6. AudioMixer（音频混音器）⭐
-**职责**: 音频混合、音量控制
+### 7. AudioMixer（音频混音器）
+**职责**: 音频混合、音量控制、采样率转换
 
 **接口**:
 ```go
@@ -156,7 +173,7 @@ if isTTSPlaying {
 }
 ```
 
-### 7. EventBus（事件总线）
+### 8. EventBus（事件总线）
 **职责**: 组件间异步通信
 
 **事件类型**:
@@ -328,6 +345,9 @@ internal/
 ├── audio/
 │   ├── mixer.go             # AudioMixer
 │   ├── outpipe.go           # AudioOutPipe
+│   ├── tts_pipeline.go      # TTSPipeline
+│   ├── tts_pipeline_impl.go # TTSPipeline 实现
+│   ├── resampler.go         # 重采样器
 │   └── inpipe.go            # AudioInPipe (基于ASR)
 ├── text/
 │   ├── segmenter.go         # 已有
@@ -367,21 +387,9 @@ cmd/voicebot/
 2. 实现 ConversationOrchestrator 和状态机
 3. 实现 VoiceAgent（集成现有工具调用逻辑）
 4. 实现 AudioMixer（双通道混音）
-5. 实现 AudioOutPipe（集成混音器）
-6. 实现 ToolExecutor（工具执行器）
-7. 实现事件总线
-8. 集成测试和调优
-### 8. EchoCanceller（回声消除器）⭐
-**职责**: 在音频采集源层消除播放端回声
-
-**数据流**:
-```
-麦克风 → EchoCancellingSource → ASR
-              ↑
-        ReferenceBuffer
-```
-
-**关键点**:
-- 回声消除发生在 AudioSource 层（不改 Orchestrator）
-- ReferenceBuffer 接收播放端 PCM 参考信号
-- 不可用时可降级为“门控”(播放期间抑制 ASR)
+5. 实现 TTSPipeline（异步 TTS 处理）
+6. 实现 AudioOutPipe（集成 TTSPipeline）
+7. 实现 Resampler（多采样率支持）
+8. 实现 ToolExecutor（工具执行器）
+9. 实现事件总线
+10. 集成测试和调优
