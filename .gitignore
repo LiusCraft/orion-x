@@ -6,7 +6,3 @@ docs-site/.vitepress/dist
 
 # Debug binaries
 __debug_bin*
-
-# Compiled binaries
-audiodiag
-voicebot
