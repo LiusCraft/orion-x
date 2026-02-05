@@ -17,7 +17,6 @@ type AudioOutPipe interface {
 	// Interrupt 中断所有任务（清空队列、停止播放）
 	Interrupt() error
 	SetMixer(mixer AudioMixer)
-	SetReferenceSink(sink ReferenceSink)
 	// SetOnPlaybackFinished 设置播放完成回调（每个 TTS 播放完成时调用）
 	SetOnPlaybackFinished(callback PlaybackFinishedCallback)
 	// Stats 获取 Pipeline 统计信息

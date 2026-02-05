@@ -66,29 +66,21 @@ type TTSPipelineConfig struct {
 }
 
 type MixerConfig struct {
-	TTSVolume      float64 `json:"tts_volume"`
-	ResourceVolume float64 `json:"resource_volume"`
-	SampleRate     int     `json:"sample_rate"`
-	Channels       int     `json:"channels"`
+	TTSVolume       float64 `json:"tts_volume"`
+	ResourceVolume  float64 `json:"resource_volume"`
+	SampleRate      int     `json:"sample_rate"`
+	Channels        int     `json:"channels"`
+	FramesPerBuffer int     `json:"frames_per_buffer"`
 }
 
 type InPipeConfig struct {
-	SampleRate   int       `json:"sample_rate"`
-	Channels     int       `json:"channels"`
-	EnableVAD    bool      `json:"enable_vad"`
-	VADThreshold float64   `json:"vad_threshold"`
-	BufferSize   int       `json:"buffer_size"`  // 缓冲区大小（样本数），默认 3200
-	HighLatency  bool      `json:"high_latency"` // 高延迟模式，适合蓝牙设备
-	InputDevice  string    `json:"input_device"` // 输入设备名称，空字符串表示使用默认设备
-	AEC          AECConfig `json:"aec"`
-}
-
-type AECConfig struct {
-	Enable                  bool   `json:"enable"`
-	Mode                    string `json:"mode"`
-	FrameMs                 int    `json:"frame_ms"`
-	FarEndDelayMs           int    `json:"far_end_delay_ms"`
-	ReferenceActiveWindowMs int    `json:"reference_active_window_ms"`
+	SampleRate   int     `json:"sample_rate"`
+	Channels     int     `json:"channels"`
+	EnableVAD    bool    `json:"enable_vad"`
+	VADThreshold float64 `json:"vad_threshold"`
+	BufferSize   int     `json:"buffer_size"`  // 缓冲区大小（样本数），默认 3200
+	HighLatency  bool    `json:"high_latency"` // 高延迟模式，适合蓝牙设备
+	InputDevice  string  `json:"input_device"` // 输入设备名称，空字符串表示使用默认设备
 }
 
 type ToolsConfig struct {
@@ -129,8 +121,9 @@ func DefaultConfig() *AppConfig {
 		},
 		Audio: AudioConfig{
 			Mixer: MixerConfig{
-				TTSVolume:      1.0,
-				ResourceVolume: 1.0,
+				TTSVolume:       1.0,
+				ResourceVolume:  1.0,
+				FramesPerBuffer: 1024,
 			},
 			TTSPipeline: TTSPipelineConfig{
 				MaxTTSBuffer:     3,
@@ -142,13 +135,6 @@ func DefaultConfig() *AppConfig {
 				Channels:     1,
 				EnableVAD:    true,
 				VADThreshold: 0.5,
-				AEC: AECConfig{
-					Enable:                  true,
-					Mode:                    "gate",
-					FrameMs:                 10,
-					FarEndDelayMs:           50,
-					ReferenceActiveWindowMs: 200,
-				},
 			},
 		},
 		Tools: ToolsConfig{
@@ -221,6 +207,9 @@ func (c *AppConfig) Validate() error {
 	if c.TTS.SampleRate <= 0 {
 		return errors.New("tts.sample_rate must be positive")
 	}
+	if c.Audio.Mixer.FramesPerBuffer < 0 {
+		return errors.New("audio.mixer.frames_per_buffer must be non-negative")
+	}
 
 	for name, value := range c.Tools.Types {
 		lower := strings.ToLower(strings.TrimSpace(value))
@@ -230,16 +219,6 @@ func (c *AppConfig) Validate() error {
 		default:
 			return fmt.Errorf("invalid tool type for %s: %s", name, value)
 		}
-	}
-
-	if c.Audio.InPipe.AEC.FrameMs < 0 {
-		return errors.New("audio.in_pipe.aec.frame_ms must be non-negative")
-	}
-	if c.Audio.InPipe.AEC.FarEndDelayMs < 0 {
-		return errors.New("audio.in_pipe.aec.far_end_delay_ms must be non-negative")
-	}
-	if c.Audio.InPipe.AEC.ReferenceActiveWindowMs < 0 {
-		return errors.New("audio.in_pipe.aec.reference_active_window_ms must be non-negative")
 	}
 
 	return nil

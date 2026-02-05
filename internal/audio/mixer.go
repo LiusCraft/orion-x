@@ -1,8 +1,6 @@
 package audio
 
-import (
-	"io"
-)
+import "io"
 
 // AudioMixer 音频混音器，负责音频混合和音量控制
 type AudioMixer interface {
@@ -14,16 +12,18 @@ type AudioMixer interface {
 	SetResourceVolume(volume float64)
 	OnTTSStarted()
 	OnTTSFinished()
-	Start()
-	Stop()
+	SetSink(sink AudioSink)
+	Start() error
+	Stop() error
 }
 
 // MixerConfig Mixer配置
 type MixerConfig struct {
-	TTSVolume      float64 // 默认TTS音量
-	ResourceVolume float64 // 默认资源音频音量
-	SampleRate     int     // 系统采样率 (Hz)，默认 16000
-	Channels       int     // 输出声道数，默认 2 (立体声)
+	TTSVolume       float64 // 默认TTS音量
+	ResourceVolume  float64 // 默认资源音频音量
+	SampleRate      int     // 系统采样率 (Hz)，默认 16000
+	Channels        int     // 输出声道数，默认 2 (立体声)
+	FramesPerBuffer int     // 每次输出的采样帧数，默认 1024
 	// 当TTS播放时，资源音频自动降为50%
 }
 
@@ -34,9 +34,10 @@ type MixerConfig struct {
 // - TTS 播放时：Resource 音量降为 7.5%（15% * 0.5）
 func DefaultMixerConfig() *MixerConfig {
 	return &MixerConfig{
-		TTSVolume:      1.0,
-		ResourceVolume: 1.0,
-		SampleRate:     16000, // 默认 16kHz
-		Channels:       2,     // 默认立体声
+		TTSVolume:       1.0,
+		ResourceVolume:  1.0,
+		SampleRate:      16000, // 默认 16kHz
+		Channels:        2,     // 默认立体声
+		FramesPerBuffer: 1024,
 	}
 }

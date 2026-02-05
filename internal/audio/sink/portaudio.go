@@ -1,0 +1,103 @@
+package sink
+
+import (
+	"context"
+	"errors"
+	"sync"
+
+	"github.com/gordonklaus/portaudio"
+	"github.com/liuscraft/orion-x/internal/audio"
+	"github.com/liuscraft/orion-x/internal/logging"
+)
+
+// PortAudioSink plays PCM16 samples through the system audio device.
+// Note: PortAudio must be initialized by the caller before Start().
+type PortAudioSink struct {
+	mu      sync.Mutex
+	stream  *portaudio.Stream
+	buffer  []int16
+	started bool
+}
+
+func NewPortAudioSink() *PortAudioSink {
+	return &PortAudioSink{}
+}
+
+func (s *PortAudioSink) Start(ctx context.Context, format audio.AudioFormat) error {
+	_ = ctx
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.started {
+		return errors.New("PortAudioSink: already started")
+	}
+
+	sampleRate := format.SampleRate
+	if sampleRate <= 0 {
+		return errors.New("PortAudioSink: invalid sample rate")
+	}
+	channels := format.Channels
+	if channels <= 0 {
+		return errors.New("PortAudioSink: invalid channels")
+	}
+	frames := format.FramesPerBuffer
+	if frames <= 0 {
+		frames = 1024
+	}
+
+	s.buffer = make([]int16, frames*channels)
+	stream, err := portaudio.OpenDefaultStream(0, channels, float64(sampleRate), frames, &s.buffer)
+	if err != nil {
+		return err
+	}
+
+	if err := stream.Start(); err != nil {
+		_ = stream.Close()
+		return err
+	}
+
+	s.stream = stream
+	s.started = true
+	logging.Infof("PortAudioSink: started (sampleRate=%d, channels=%d, frames=%d)", sampleRate, channels, frames)
+	return nil
+}
+
+func (s *PortAudioSink) WritePCM(samples []int16) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.started || s.stream == nil {
+		return errors.New("PortAudioSink: not started")
+	}
+
+	n := copy(s.buffer, samples)
+	for i := n; i < len(s.buffer); i++ {
+		s.buffer[i] = 0
+	}
+
+	return s.stream.Write()
+}
+
+func (s *PortAudioSink) Stop() error {
+	s.mu.Lock()
+	if !s.started {
+		s.mu.Unlock()
+		return nil
+	}
+	stream := s.stream
+	s.stream = nil
+	s.started = false
+	s.mu.Unlock()
+
+	if stream != nil {
+		if err := stream.Stop(); err != nil {
+			logging.Errorf("PortAudioSink: failed to stop stream: %v", err)
+		}
+		if err := stream.Close(); err != nil {
+			logging.Errorf("PortAudioSink: failed to close stream: %v", err)
+		}
+	}
+	logging.Infof("PortAudioSink: stopped")
+	return nil
+}

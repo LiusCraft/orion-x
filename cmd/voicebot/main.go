@@ -7,11 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/gordonklaus/portaudio"
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
+	audiosink "github.com/liuscraft/orion-x/internal/audio/sink"
 	"github.com/liuscraft/orion-x/internal/audio/source"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
@@ -71,8 +71,11 @@ func main() {
 
 	logging.Infof("Creating AudioMixer...")
 	mixerCfg := &audio.MixerConfig{
-		TTSVolume:      appConfig.Audio.Mixer.TTSVolume,
-		ResourceVolume: appConfig.Audio.Mixer.ResourceVolume,
+		TTSVolume:       appConfig.Audio.Mixer.TTSVolume,
+		ResourceVolume:  appConfig.Audio.Mixer.ResourceVolume,
+		SampleRate:      appConfig.Audio.Mixer.SampleRate,
+		Channels:        appConfig.Audio.Mixer.Channels,
+		FramesPerBuffer: appConfig.Audio.Mixer.FramesPerBuffer,
 	}
 	// Initialize PortAudio once for all audio components
 	logging.Infof("Initializing PortAudio...")
@@ -90,7 +93,11 @@ func main() {
 	logging.Infof("AudioMixer created successfully")
 
 	logging.Infof("Starting AudioMixer...")
-	mixer.Start()
+	mixerSink := audiosink.NewPortAudioSink()
+	mixer.SetSink(mixerSink)
+	if err := mixer.Start(); err != nil {
+		logging.Fatalf("Failed to start AudioMixer: %v", err)
+	}
 	logging.Infof("AudioMixer started")
 
 	logging.Infof("Creating AudioOutPipe...")
@@ -165,38 +172,7 @@ func main() {
 	}
 	logging.Infof("Microphone source created successfully")
 
-	aecCfg := audio.DefaultEchoCancelConfig()
-	aecCfg.Enabled = appConfig.Audio.InPipe.AEC.Enable
-	aecCfg.Mode = appConfig.Audio.InPipe.AEC.Mode
-	if appConfig.Audio.InPipe.AEC.FrameMs > 0 {
-		aecCfg.FrameMs = appConfig.Audio.InPipe.AEC.FrameMs
-	}
-	if appConfig.Audio.InPipe.AEC.FarEndDelayMs > 0 {
-		aecCfg.FarEndDelayMs = appConfig.Audio.InPipe.AEC.FarEndDelayMs
-	}
-	if appConfig.Audio.InPipe.AEC.ReferenceActiveWindowMs > 0 {
-		aecCfg.ReferenceActiveWindowMs = appConfig.Audio.InPipe.AEC.ReferenceActiveWindowMs
-	}
-
 	audioSource := audio.AudioSource(micSource)
-	if aecCfg.Enabled {
-		frameBytes := audio.FrameBytes(inPipeCfg.SampleRate, inPipeCfg.Channels, aecCfg.FrameMs)
-		delayFrames := 0
-		if aecCfg.FrameMs > 0 {
-			delayFrames = aecCfg.FarEndDelayMs / aecCfg.FrameMs
-		}
-		referenceBuffer := audio.NewReferenceBuffer(frameBytes, 200, delayFrames)
-		referenceBuffer.SetActiveWindow(time.Duration(aecCfg.ReferenceActiveWindowMs) * time.Millisecond)
-		audioOutPipe.SetReferenceSink(referenceBuffer)
-		audioSource = audio.NewEchoCancellingSource(
-			micSource,
-			aecCfg,
-			referenceBuffer,
-			audio.NewNoopEchoCanceller(),
-			inPipeCfg.SampleRate,
-			inPipeCfg.Channels,
-		)
-	}
 
 	audioInPipe, err := audio.NewInPipeWithAudioSource(appConfig.ASR.APIKey, inPipeCfg, audioSource)
 	if err != nil {
@@ -235,7 +211,9 @@ func main() {
 		}
 
 		logging.Infof("Stopping Mixer...")
-		mixer.Stop()
+		if err := mixer.Stop(); err != nil {
+			logging.Errorf("Error stopping mixer: %v", err)
+		}
 
 		// 取消 context，让 main 函数自然退出
 		// 不使用 os.Exit(0)，这样 defer 语句（如 portaudio.Terminate()）才会被执行

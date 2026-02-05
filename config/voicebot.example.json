@@ -41,7 +41,8 @@
             "tts_volume": 1.0,
             "resource_volume": 1.0,
             "sample_rate": 16000,
-            "channels": 2
+            "channels": 2,
+            "frames_per_buffer": 1024
         },
         "tts_pipeline": {
             "max_tts_buffer": 3,

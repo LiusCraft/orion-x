@@ -29,9 +29,6 @@ type TTSPipeline interface {
 	// SetMixer 设置音频混音器
 	SetMixer(mixer AudioMixer)
 
-	// SetReferenceSink 设置参考音频输出（用于 AEC）
-	SetReferenceSink(sink ReferenceSink)
-
 	// SetOnPlaybackFinished 设置播放完成回调
 	// 当所有队列清空且播放完成时触发
 	SetOnPlaybackFinished(callback PlaybackFinishedCallback)

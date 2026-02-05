@@ -455,7 +455,6 @@ sed -i 's|internal/audio"|internal/audio/source"|g' *.go
 2. **音频增强**：
    - 噪声抑制
    - 自动增益控制（AGC）
-   - 回声消除（AEC）
 
 3. **多源混音**：
    - 支持多个 AudioSource 混音

@@ -115,13 +115,6 @@ func (p *outPipeImpl) SetMixer(mixer AudioMixer) {
 	p.pipeline.SetMixer(mixer)
 }
 
-func (p *outPipeImpl) SetReferenceSink(sink ReferenceSink) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.pipeline.SetReferenceSink(sink)
-}
-
 func (p *outPipeImpl) SetOnPlaybackFinished(callback PlaybackFinishedCallback) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -260,9 +260,11 @@ func (m *mockMixer) OnTTSFinished() {
 	})
 }
 
-func (m *mockMixer) Start() {}
+func (m *mockMixer) SetSink(sink AudioSink) {}
 
-func (m *mockMixer) Stop() {}
+func (m *mockMixer) Start() error { return nil }
+
+func (m *mockMixer) Stop() error { return nil }
 
 func (m *mockMixer) getTTSStartedCount() int {
 	m.mu.Lock()
@@ -294,26 +296,52 @@ func (m *mockMixer) getTTSStream() io.Reader {
 	return m.ttsStream
 }
 
-// mockReferenceSink 模拟 ReferenceSink
-type mockReferenceSink struct {
-	mu   sync.Mutex
-	data []byte
+// mockAudioSink 模拟 AudioSink
+type mockAudioSink struct {
+	mu       sync.Mutex
+	format   AudioFormat
+	writes   int
+	lastPCM  []int16
+	writeCh  chan struct{}
+	startErr error
+	writeErr error
 }
 
-func newMockReferenceSink() *mockReferenceSink {
-	return &mockReferenceSink{}
+func newMockAudioSink() *mockAudioSink {
+	return &mockAudioSink{
+		writeCh: make(chan struct{}, 1),
+	}
 }
 
-func (s *mockReferenceSink) WriteReference(data []byte) {
+func (s *mockAudioSink) Start(ctx context.Context, format AudioFormat) error {
+	_ = ctx
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.data = append(s.data, data...)
+	s.format = format
+	return s.startErr
 }
 
-func (s *mockReferenceSink) getData() []byte {
+func (s *mockAudioSink) WritePCM(samples []int16) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	result := make([]byte, len(s.data))
-	copy(result, s.data)
-	return result
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	s.writes++
+	s.lastPCM = append(s.lastPCM[:0], samples...)
+	select {
+	case s.writeCh <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (s *mockAudioSink) Stop() error {
+	return nil
+}
+
+func (s *mockAudioSink) getWrites() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writes
 }

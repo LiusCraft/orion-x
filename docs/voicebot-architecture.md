@@ -104,9 +104,7 @@ type ToolExecutor interface {
          │ AudioMixer  │  ← 音量控制逻辑
          └──────┬──────┘
                 ▼
-            音频播放器
-                │
-                └──► ReferenceBuffer (播放参考信号)
+           AudioSink
 ```
 
 **混音逻辑**:
@@ -138,14 +136,15 @@ type AudioMixer interface {
     AddResourceStream(audio io.Reader)
     SetTTSVolume(volume float64)
     SetResourceVolume(volume float64)
-    Start()
-    Stop()
+    SetSink(sink AudioSink)
+    Start() error
+    Stop() error
 }
 ```
 
 **启动约束**:
-- `Start()` 采用异步启动，避免底层设备初始化阻塞主流程
-- 启动失败会记录日志，不阻塞 Orchestrator 启动
+- `Start()` 会启动混音循环并初始化 Sink
+- 启动失败会返回错误，由上层处理
 
 **音量控制**:
 ```go
@@ -371,17 +370,3 @@ cmd/voicebot/
 6. 实现 ToolExecutor（工具执行器）
 7. 实现事件总线
 8. 集成测试和调优
-### 8. EchoCanceller（回声消除器）⭐
-**职责**: 在音频采集源层消除播放端回声
-
-**数据流**:
-```
-麦克风 → EchoCancellingSource → ASR
-              ↑
-        ReferenceBuffer
-```
-
-**关键点**:
-- 回声消除发生在 AudioSource 层（不改 Orchestrator）
-- ReferenceBuffer 接收播放端 PCM 参考信号
-- 不可用时可降级为“门控”(播放期间抑制 ASR)

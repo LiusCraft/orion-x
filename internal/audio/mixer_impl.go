@@ -2,15 +2,16 @@ package audio
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sync"
 
-	"github.com/gordonklaus/portaudio"
 	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 type mixerImpl struct {
 	config                *MixerConfig
+	sink                  AudioSink
 	ttsStream             io.Reader
 	resourceStream        io.Reader
 	currentTTSVolume      float64
@@ -18,7 +19,7 @@ type mixerImpl struct {
 	mu                    sync.Mutex
 	ctx                   context.Context
 	cancel                context.CancelFunc
-	player                *portaudio.Stream
+	wg                    sync.WaitGroup
 	started               bool
 }
 
@@ -26,32 +27,12 @@ func NewMixer(config *MixerConfig) (AudioMixer, error) {
 	if config == nil {
 		config = DefaultMixerConfig()
 	}
-	// Note: PortAudio should be initialized by the caller before creating Mixer
-	// This avoids multiple Initialize() calls which can cause device conflicts
-	ctx, cancel := context.WithCancel(context.Background())
+
 	m := &mixerImpl{
 		config:                config,
 		currentTTSVolume:      config.TTSVolume,
 		currentResourceVolume: config.ResourceVolume,
-		ctx:                   ctx,
-		cancel:                cancel,
 	}
-	// Use sample rate and channels from config
-	sampleRate := config.SampleRate
-	if sampleRate == 0 {
-		sampleRate = 16000 // fallback to default
-	}
-	channels := config.Channels
-	if channels == 0 {
-		channels = 2 // fallback to stereo
-	}
-
-	stream, err := portaudio.OpenDefaultStream(0, channels, float64(sampleRate), 1024, m.audioCallback)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	m.player = stream
 	return m, nil
 }
 
@@ -105,69 +86,170 @@ func (m *mixerImpl) OnTTSFinished() {
 	m.currentResourceVolume = m.config.ResourceVolume
 }
 
-func (m *mixerImpl) Start() {
+func (m *mixerImpl) SetSink(sink AudioSink) {
 	m.mu.Lock()
-	if m.player == nil || m.started {
-		m.mu.Unlock()
+	defer m.mu.Unlock()
+	if m.started {
+		logging.Warnf("AudioMixer: SetSink called after Start; ignoring")
 		return
 	}
-	player := m.player
+	m.sink = sink
+}
+
+func (m *mixerImpl) Start() error {
+	m.mu.Lock()
+	if m.started {
+		m.mu.Unlock()
+		return nil
+	}
+	if m.sink == nil {
+		m.mu.Unlock()
+		return errors.New("AudioMixer: sink not set")
+	}
+
+	sampleRate := m.config.SampleRate
+	if sampleRate <= 0 {
+		sampleRate = 16000
+	}
+	channels := m.config.Channels
+	if channels <= 0 {
+		channels = 2
+	}
+	framesPerBuffer := m.config.FramesPerBuffer
+	if framesPerBuffer <= 0 {
+		framesPerBuffer = 1024
+	}
+
+	m.ctx, m.cancel = context.WithCancel(context.Background())
+	sink := m.sink
 	m.started = true
 	m.mu.Unlock()
 
-	go func() {
-		if err := player.Start(); err != nil {
-			logging.Errorf("AudioMixer: failed to start stream: %v", err)
-			m.mu.Lock()
-			m.started = false
-			m.mu.Unlock()
-		}
-	}()
+	format := AudioFormat{
+		SampleRate:      sampleRate,
+		Channels:        channels,
+		FramesPerBuffer: framesPerBuffer,
+	}
+	if err := sink.Start(m.ctx, format); err != nil {
+		m.mu.Lock()
+		m.started = false
+		m.cancel = nil
+		m.mu.Unlock()
+		return err
+	}
+
+	m.wg.Add(1)
+	go m.mixLoop(m.ctx, sink, format)
+
+	return nil
 }
 
-func (m *mixerImpl) Stop() {
+func (m *mixerImpl) Stop() error {
 	m.mu.Lock()
-	if m.cancel != nil {
-		m.cancel()
+	if !m.started {
+		m.mu.Unlock()
+		return nil
 	}
-	player := m.player
-	m.player = nil
+	cancel := m.cancel
+	sink := m.sink
 	m.started = false
+	m.cancel = nil
 	m.mu.Unlock()
 
-	if player != nil {
-		if err := player.Stop(); err != nil {
-			logging.Errorf("AudioMixer: failed to stop stream: %v", err)
-		}
-		if err := player.Close(); err != nil {
-			logging.Errorf("AudioMixer: failed to close stream: %v", err)
+	if cancel != nil {
+		cancel()
+	}
+
+	if sink != nil {
+		if err := sink.Stop(); err != nil {
+			logging.Errorf("AudioMixer: failed to stop sink: %v", err)
 		}
 	}
 
-	// 注意：不在这里调用 portaudio.Terminate()
-	// PortAudio 的生命周期由 main.go 统一管理
-	// Mixer 只是 PortAudio 的使用者，不负责其初始化和终止
+	m.wg.Wait()
+	return nil
 }
 
-func (m *mixerImpl) audioCallback(out [][]float32) {
-	for i := range out[0] {
-		out[0][i] = 0
-		out[1][i] = 0
+func (m *mixerImpl) mixLoop(ctx context.Context, sink AudioSink, format AudioFormat) {
+	defer m.wg.Done()
+
+	if format.Channels <= 0 || format.FramesPerBuffer <= 0 {
+		return
 	}
-	m.mu.Lock()
-	ttsStream := m.ttsStream
-	resourceStream := m.resourceStream
-	ttsVolume := m.currentTTSVolume
-	resourceVolume := m.currentResourceVolume
-	m.mu.Unlock()
-	mixFromStream(ttsStream, out, float32(ttsVolume))
-	mixFromStream(resourceStream, out, float32(resourceVolume))
+
+	out := make([][]float32, format.Channels)
+	for ch := range out {
+		out[ch] = make([]float32, format.FramesPerBuffer)
+	}
+	interleaved := make([]int16, format.FramesPerBuffer*format.Channels)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		zeroOut(out)
+
+		m.mu.Lock()
+		ttsStream := m.ttsStream
+		resourceStream := m.resourceStream
+		ttsVolume := m.currentTTSVolume
+		resourceVolume := m.currentResourceVolume
+		m.mu.Unlock()
+
+		mixFromStream(ttsStream, out, float32(ttsVolume))
+		mixFromStream(resourceStream, out, float32(resourceVolume))
+		interleaveToInt16(out, interleaved)
+
+		if err := sink.WritePCM(interleaved); err != nil {
+			logging.Errorf("AudioMixer: sink write failed: %v", err)
+			return
+		}
+	}
+}
+
+func zeroOut(buf [][]float32) {
+	for ch := range buf {
+		for i := range buf[ch] {
+			buf[ch][i] = 0
+		}
+	}
+}
+
+func interleaveToInt16(src [][]float32, dst []int16) {
+	if len(src) == 0 || len(src[0]) == 0 || len(dst) == 0 {
+		return
+	}
+
+	frames := len(src[0])
+	channels := len(src)
+	maxFrames := len(dst) / channels
+	if frames > maxFrames {
+		frames = maxFrames
+	}
+
+	idx := 0
+	for i := 0; i < frames; i++ {
+		for ch := 0; ch < channels; ch++ {
+			sample := src[ch][i]
+			if sample > 1.0 {
+				sample = 1.0
+			} else if sample < -1.0 {
+				sample = -1.0
+			}
+			dst[idx] = int16(sample * 32767.0)
+			idx++
+		}
+	}
 }
 
 func mixFromStream(stream io.Reader, buf [][]float32, volume float32) {
-	if stream == nil {
+	if stream == nil || len(buf) == 0 || len(buf[0]) == 0 {
 		return
 	}
+
 	// 16-bit PCM uses 2 bytes per sample; read exactly the frame size to avoid dropping data
 	samples := make([]byte, len(buf[0])*2)
 	n, err := io.ReadFull(stream, samples)
@@ -179,19 +261,13 @@ func mixFromStream(stream io.Reader, buf [][]float32, volume float32) {
 		sample := int16(samples[i*2]) | int16(samples[i*2+1])<<8
 		normalized := float32(sample) / 32768.0
 
-		buf[0][i] += normalized * volume
-		buf[1][i] += normalized * volume
-
-		if buf[0][i] > 1.0 {
-			buf[0][i] = 1.0
-		} else if buf[0][i] < -1.0 {
-			buf[0][i] = -1.0
-		}
-
-		if buf[1][i] > 1.0 {
-			buf[1][i] = 1.0
-		} else if buf[1][i] < -1.0 {
-			buf[1][i] = -1.0
+		for ch := range buf {
+			buf[ch][i] += normalized * volume
+			if buf[ch][i] > 1.0 {
+				buf[ch][i] = 1.0
+			} else if buf[ch][i] < -1.0 {
+				buf[ch][i] = -1.0
+			}
 		}
 	}
 }

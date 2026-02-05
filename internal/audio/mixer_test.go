@@ -2,7 +2,6 @@ package audio
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"testing"
 	"time"
@@ -35,7 +34,9 @@ func TestNewMixer(t *testing.T) {
 	if mixer == nil {
 		t.Fatal("NewMixer returned nil mixer")
 	}
-	mixer.Stop()
+	if err := mixer.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
 }
 
 func TestMixerVolumeControl(t *testing.T) {
@@ -124,15 +125,18 @@ func TestMixerMixing(t *testing.T) {
 	mixer.AddTTSStream(ttsReader)
 	mixer.AddResourceStream(resourceReader)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+	sink := newMockAudioSink()
+	mixer.SetSink(sink)
 
-	go func() {
-		mixer.Start()
-	}()
+	if err := mixer.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
 
-	<-ctx.Done()
-	mixer.Stop()
+	select {
+	case <-sink.writeCh:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected mixer to write to sink")
+	}
 }
 
 func TestMixerStartStop(t *testing.T) {
@@ -141,9 +145,16 @@ func TestMixerStartStop(t *testing.T) {
 		t.Fatalf("NewMixer failed: %v", err)
 	}
 
-	mixer.Start()
+	sink := newMockAudioSink()
+	mixer.SetSink(sink)
+
+	if err := mixer.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
 	time.Sleep(10 * time.Millisecond)
-	mixer.Stop()
+	if err := mixer.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
 }
 
 func TestMixFromStream(t *testing.T) {
@@ -258,13 +269,16 @@ func TestMixerEOFHandling(t *testing.T) {
 	mixer.AddTTSStream(emptyReader)
 	mixer.AddResourceStream(emptyReader)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
+	sink := newMockAudioSink()
+	mixer.SetSink(sink)
 
-	go func() {
-		mixer.Start()
-	}()
+	if err := mixer.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
 
-	<-ctx.Done()
-	mixer.Stop()
+	select {
+	case <-sink.writeCh:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected mixer to write to sink")
+	}
 }

@@ -115,7 +115,13 @@ internal/
 - `SetResourceVolume(volume float64)`
 - `OnTTSStarted()` - 资源音频自动降为50%
 - `OnTTSFinished()` - 资源音频恢复正常
-- `Start()`, `Stop()`
+- `SetSink(sink AudioSink)`
+- `Start() error`, `Stop() error`
+
+#### AudioSink (接口)
+- `Start(ctx context.Context, format AudioFormat) error`
+- `WritePCM(samples []int16) error`
+- `Stop() error`
 
 #### AudioOutPipe (接口)
 - `Start(ctx context.Context) error`
@@ -124,7 +130,6 @@ internal/
 - `PlayResource(audio io.Reader) error`
 - `Interrupt() error`
 - `SetMixer(mixer AudioMixer)`
-- `SetReferenceSink(sink ReferenceSink)`
 
 **实现细节**：
 - 集成 `tts.DashScopeProvider` 进行文本到音频的转换

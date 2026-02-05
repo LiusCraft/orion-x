@@ -40,6 +40,7 @@
 - [x] 实现动态音量控制（TTS播放时资源音频降为50%）
 - [x] 实现音频流添加/移除
 - [x] 集成音频播放器（PortAudio或其他）
+- [x] 引入 AudioSink 解耦音频输出（Mixer → Sink）
 
 ### 4. AudioOutPipe 实现 (优先级: 高)
 - [x] 实现 `PlayTTS()` 方法
@@ -70,8 +71,6 @@
 - [x] 集成 VAD 检测（可选）
 - [x] 修复 TTS DNS 查询被取消问题
 - [x] 修复 Mixer.Start() 可能阻塞问题
-- [x] 在音频采集源层加入回声消除管线（ReferenceBuffer + EchoCancellingSource）
-- [ ] 接入 WebRTC AEC3（或系统级 AEC）实现真正回声消除
 
 ### 5.1 音频源模块重构 (优先级: 高) ⭐️ 已完成
 - [x] 创建 `internal/audio/source/` 独立包

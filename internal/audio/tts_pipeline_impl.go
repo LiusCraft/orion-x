@@ -66,7 +66,6 @@ type ttsPipelineImpl struct {
 
 	// 外部依赖（可动态设置）
 	mixer              AudioMixer
-	reference          ReferenceSink
 	onPlaybackFinished PlaybackFinishedCallback
 
 	// 队列
@@ -352,12 +351,6 @@ func (p *ttsPipelineImpl) SetMixer(mixer AudioMixer) {
 	p.mixer = mixer
 }
 
-func (p *ttsPipelineImpl) SetReferenceSink(sink ReferenceSink) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.reference = sink
-}
-
 func (p *ttsPipelineImpl) SetOnPlaybackFinished(callback PlaybackFinishedCallback) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -586,15 +579,6 @@ func (p *ttsPipelineImpl) generateTTS(ctx context.Context, text string, emotion 
 		reader = NewResamplingReader(audioReader, ttsSampleRate, systemSampleRate, ttsChannels, resampler)
 	}
 
-	// 添加 reference sink（用于 AEC）
-	p.mu.Lock()
-	reference := p.reference
-	p.mu.Unlock()
-
-	if reference != nil {
-		reader = &referenceTeeReader{reader: reader, sink: reference}
-	}
-
 	return reader, nil
 }
 
@@ -659,18 +643,4 @@ func truncateText(text string, maxLen int) string {
 		return text
 	}
 	return string(runes[:maxLen])
-}
-
-// referenceTeeReader 将读取的数据同时写入 reference sink
-type referenceTeeReader struct {
-	reader io.Reader
-	sink   ReferenceSink
-}
-
-func (r *referenceTeeReader) Read(p []byte) (int, error) {
-	n, err := r.reader.Read(p)
-	if n > 0 && r.sink != nil {
-		r.sink.WriteReference(p[:n])
-	}
-	return n, err
 }

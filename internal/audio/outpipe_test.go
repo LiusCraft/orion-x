@@ -32,12 +32,6 @@ func TestOutPipe_SetMixer(t *testing.T) {
 	pipe.SetMixer(mixer)
 }
 
-func TestOutPipe_SetReferenceSink(t *testing.T) {
-	pipe := NewOutPipe("test-api-key")
-	sink := newMockReferenceSink()
-	pipe.SetReferenceSink(sink)
-}
-
 func TestOutPipe_StartStop(t *testing.T) {
 	pipe := NewOutPipe("test-api-key")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

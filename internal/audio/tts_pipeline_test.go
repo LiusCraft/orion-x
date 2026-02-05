@@ -801,8 +801,9 @@ func (m *orderTrackingMixer) SetTTSVolume(volume float64)       {}
 func (m *orderTrackingMixer) SetResourceVolume(volume float64)  {}
 func (m *orderTrackingMixer) OnTTSStarted()                     {}
 func (m *orderTrackingMixer) OnTTSFinished()                    {}
-func (m *orderTrackingMixer) Start()                            {}
-func (m *orderTrackingMixer) Stop()                             {}
+func (m *orderTrackingMixer) SetSink(sink AudioSink)            {}
+func (m *orderTrackingMixer) Start() error                      { return nil }
+func (m *orderTrackingMixer) Stop() error                       { return nil }
 
 func (m *orderTrackingMixer) getPlayedOrder() []string {
 	m.mu.Lock()

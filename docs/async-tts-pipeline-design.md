@@ -109,9 +109,6 @@ type TTSPipeline interface {
     
     // SetMixer 设置音频混音器
     SetMixer(mixer AudioMixer)
-    
-    // SetReferenceSink 设置参考音频输出（用于 AEC）
-    SetReferenceSink(sink ReferenceSink)
 }
 ```
 
@@ -230,7 +227,6 @@ type AudioOutPipe interface {
     // Interrupt 中断所有任务（清空队列、停止播放）
     Interrupt() error
     SetMixer(mixer AudioMixer)
-    SetReferenceSink(sink ReferenceSink)
     // Stats 获取 Pipeline 统计信息
     Stats() PipelineStats
 }

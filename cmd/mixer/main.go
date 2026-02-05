@@ -10,7 +10,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/gordonklaus/portaudio"
 	"github.com/liuscraft/orion-x/internal/audio"
+	audiosink "github.com/liuscraft/orion-x/internal/audio/sink"
 )
 
 var (
@@ -37,6 +39,16 @@ func main() {
 		return
 	}
 	defer mixer.Stop()
+
+	fmt.Println("初始化 PortAudio...")
+	if err := portaudio.Initialize(); err != nil {
+		fmt.Printf("PortAudio 初始化失败: %v\n", err)
+		return
+	}
+	defer portaudio.Terminate()
+
+	mixerSink := audiosink.NewPortAudioSink()
+	mixer.SetSink(mixerSink)
 
 	var ttsReader, resourceReader io.Reader
 	var ttsSource, resourceSource string
@@ -82,7 +94,10 @@ func main() {
 	fmt.Println()
 
 	fmt.Println("4. 开始播放...")
-	mixer.Start()
+	if err := mixer.Start(); err != nil {
+		fmt.Printf("启动 Mixer 失败: %v\n", err)
+		return
+	}
 	time.Sleep(time.Duration(*duration) * time.Second)
 
 	fmt.Println("5. TTS 开始，Resource 音量降为 50%...")
@@ -95,7 +110,7 @@ func main() {
 
 	fmt.Println("7. 停止播放")
 	time.Sleep(500 * time.Millisecond)
-	mixer.Stop()
+	_ = mixer.Stop()
 
 	fmt.Println()
 	fmt.Println("=== 验证完成 ===")
