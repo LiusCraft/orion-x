@@ -19,6 +19,7 @@ import (
 	audiosink "github.com/liuscraft/orion-x/internal/audio/sink"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/metrics"
 	"github.com/liuscraft/orion-x/internal/tools"
 	"github.com/liuscraft/orion-x/internal/tts"
 	"github.com/liuscraft/orion-x/internal/voicebot"
@@ -55,24 +56,34 @@ type Session struct {
 	audioSink    *audiosink.WebSocketSink
 	opusDecoder  *codec.OpusDecoder
 
+	wsMetrics       *metrics.WSServerMetrics
+	voicebotMetrics *metrics.VoicebotMetrics
+
+	startedAt      time.Time
+	lastASRFinalAt time.Time
+	asrMu          sync.Mutex
+
 	listening bool
 	mu        sync.Mutex
 }
 
-func NewSession(cfg *config.AppConfig, conn *websocket.Conn, deviceID, clientID, sessionID string) *Session {
+func NewSession(cfg *config.AppConfig, conn *websocket.Conn, deviceID, clientID, sessionID string, wsMetrics *metrics.WSServerMetrics, voicebotMetrics *metrics.VoicebotMetrics) *Session {
 	readTimeout := time.Duration(cfg.Server.ReadTimeoutMs) * time.Millisecond
 	writeTimeout := time.Duration(cfg.Server.WriteTimeoutMs) * time.Millisecond
 
 	return &Session{
-		cfg:          cfg,
-		conn:         conn,
-		deviceID:     deviceID,
-		clientID:     clientID,
-		sessionID:    sessionID,
-		audioParams:  audioParamsFromConfig(cfg),
-		writeCh:      make(chan outboundMessage, 256),
-		readTimeout:  readTimeout,
-		writeTimeout: writeTimeout,
+		cfg:             cfg,
+		conn:            conn,
+		deviceID:        deviceID,
+		clientID:        clientID,
+		sessionID:       sessionID,
+		audioParams:     audioParamsFromConfig(cfg),
+		writeCh:         make(chan outboundMessage, 256),
+		readTimeout:     readTimeout,
+		writeTimeout:    writeTimeout,
+		wsMetrics:       wsMetrics,
+		voicebotMetrics: voicebotMetrics,
+		startedAt:       time.Now(),
 	}
 }
 
@@ -187,6 +198,9 @@ func (s *Session) initPipeline() error {
 	if err != nil {
 		return err
 	}
+	if s.voicebotMetrics != nil {
+		voiceAgent = metrics.NewInstrumentedVoiceAgent(voiceAgent, s.voicebotMetrics)
+	}
 	s.voiceAgent = voiceAgent
 
 	mixerConfig := &audio.MixerConfig{
@@ -240,14 +254,22 @@ func (s *Session) initPipeline() error {
 
 	audioOutPipe := audio.NewOutPipeWithConfig(outPipeCfg)
 	audioOutPipe.SetMixer(mixer)
+	if s.voicebotMetrics != nil {
+		audioOutPipe = metrics.NewInstrumentedAudioOutPipe(audioOutPipe, s.voicebotMetrics)
+	}
 	audioOutPipe.SetOnTTSItemStarted(func(text string, emotion string) {
-		_ = s.sendTTSSentence(text)
+		if shouldDisplayOnlySentence(text) {
+			_ = s.sendTTSSentence(text)
+		}
 	})
 	s.audioOutPipe = audioOutPipe
 
 	toolExecutor := tools.NewToolExecutor()
 	toolExecutor.RegisterTool("getTime", tools.GetTimeTool)
 	toolExecutor.RegisterTool("getWeather", tools.GetWeatherTool)
+	if s.voicebotMetrics != nil {
+		toolExecutor = metrics.NewInstrumentedToolExecutor(toolExecutor, s.voicebotMetrics)
+	}
 	s.toolExecutor = toolExecutor
 
 	observer := &sessionObserver{session: s}
@@ -277,6 +299,9 @@ func (s *Session) initPipeline() error {
 	if err != nil {
 		return err
 	}
+	if s.voicebotMetrics != nil {
+		audioInPipe = metrics.NewInstrumentedAudioInPipe(audioInPipe, s.voicebotMetrics)
+	}
 	s.audioInPipe = audioInPipe
 
 	audioInPipe.OnASRResult(func(text string, isFinal bool) {
@@ -284,6 +309,7 @@ func (s *Session) initPipeline() error {
 			return
 		}
 		if isFinal {
+			s.markASRFinal()
 			_ = s.sendSTT(text, 0)
 			s.orchestrator.OnASRFinal(text)
 		} else {
@@ -318,6 +344,9 @@ func (s *Session) readLoop() {
 	for {
 		msgType, data, err := s.readMessage()
 		if err != nil {
+			if s.wsMetrics != nil {
+				s.wsMetrics.IncReadError(wsErrorKind(err))
+			}
 			if s.ctx != nil && s.ctx.Err() != nil {
 				return
 			}
@@ -336,6 +365,10 @@ func (s *Session) readLoop() {
 			return
 		}
 		consecutiveTimeouts = 0
+
+		if s.wsMetrics != nil {
+			s.wsMetrics.IncMessagesIn(messageTypeLabel(msgType))
+		}
 
 		switch msgType {
 		case websocket.TextMessage:
@@ -393,6 +426,10 @@ func (s *Session) handleBinaryMessage(data []byte) {
 		return
 	}
 
+	if s.wsMetrics != nil {
+		s.wsMetrics.AddAudioInBytes(len(data))
+	}
+
 	s.mu.Lock()
 	listening := s.listening
 	s.mu.Unlock()
@@ -433,6 +470,7 @@ func (s *Session) handleListen(msg ListenMessage) {
 				// 新输入触发打断，确保切到新的 TTS
 				s.orchestrator.OnUserSpeakingDetected()
 			}
+			s.markASRFinal()
 			_ = s.sendSTT(msg.Text, 0)
 			s.orchestrator.OnASRFinal(msg.Text)
 		}
@@ -482,7 +520,6 @@ func (s *Session) playTTSDirect(text string) {
 		return
 	}
 	_ = s.sendTTSStart()
-	_ = s.sendTTSSentence(text)
 	if err := s.audioOutPipe.PlayTTS(text, ""); err != nil {
 		logging.Errorf("Session %s: play tts direct failed: %v", s.sessionID, err)
 		_ = s.sendTTSStop(true)
@@ -589,6 +626,9 @@ func (s *Session) enqueue(msgType int, data []byte) error {
 	case s.writeCh <- outboundMessage{msgType: msgType, data: data}:
 		return nil
 	default:
+		if s.wsMetrics != nil {
+			s.wsMetrics.IncWriteQueueDropped()
+		}
 		return fmt.Errorf("session %s: write queue full", s.sessionID)
 	}
 }
@@ -607,15 +647,27 @@ func (s *Session) writeLoop() {
 			}
 			if err := s.conn.WriteMessage(msg.msgType, msg.data); err != nil {
 				logging.Errorf("Session %s: write error: %v", s.sessionID, err)
+				if s.wsMetrics != nil {
+					s.wsMetrics.IncWriteError(wsErrorKind(err))
+				}
 				s.Close()
 				return
+			}
+			if s.wsMetrics != nil {
+				s.wsMetrics.IncMessagesOut(messageTypeLabel(msg.msgType))
 			}
 		}
 	}
 }
 
 func (s *Session) SendBinary(data []byte) error {
-	return s.enqueue(websocket.BinaryMessage, data)
+	if err := s.enqueue(websocket.BinaryMessage, data); err != nil {
+		return err
+	}
+	if s.wsMetrics != nil {
+		s.wsMetrics.AddAudioOutBytes(len(data))
+	}
+	return nil
 }
 
 func (s *Session) pingLoop() {
@@ -648,13 +700,11 @@ func (o *sessionObserver) OnLLMTextChunk(text, emotion string) {
 }
 
 func (o *sessionObserver) OnTTSSentence(text, emotion string) {
-	if !shouldDisplayOnlySentence(text) {
-		return
-	}
-	_ = o.session.sendTTSSentence(text)
+	// sentence_start 在音频真正开始播放时发送，避免重复。
 }
 
 func (o *sessionObserver) OnTTSStart() {
+	o.session.observeTurnASRToTTSStart()
 	_ = o.session.sendTTSStart()
 }
 
@@ -695,4 +745,61 @@ func int16ToBytes(samples []int16) []byte {
 		binary.LittleEndian.PutUint16(payload[i*2:], uint16(v))
 	}
 	return payload
+}
+
+func (s *Session) markASRFinal() {
+	s.asrMu.Lock()
+	s.lastASRFinalAt = time.Now()
+	s.asrMu.Unlock()
+}
+
+func (s *Session) observeTurnASRToTTSStart() {
+	if s.voicebotMetrics == nil {
+		return
+	}
+	s.asrMu.Lock()
+	last := s.lastASRFinalAt
+	if !last.IsZero() {
+		s.lastASRFinalAt = time.Time{}
+	}
+	s.asrMu.Unlock()
+	if !last.IsZero() {
+		s.voicebotMetrics.ObserveTurnASRToTTSStart(time.Since(last))
+	}
+}
+
+func messageTypeLabel(msgType int) string {
+	switch msgType {
+	case websocket.TextMessage:
+		return "text"
+	case websocket.BinaryMessage:
+		return "binary"
+	case websocket.PingMessage:
+		return "ping"
+	case websocket.PongMessage:
+		return "pong"
+	case websocket.CloseMessage:
+		return "close"
+	default:
+		return "unknown"
+	}
+}
+
+func wsErrorKind(err error) string {
+	if err == nil {
+		return "other"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	if errors.Is(err, websocket.ErrCloseSent) || websocket.IsCloseError(err,
+		websocket.CloseNormalClosure,
+		websocket.CloseGoingAway,
+		websocket.CloseAbnormalClosure,
+		websocket.CloseNoStatusReceived,
+	) {
+		return "closed"
+	}
+	return "other"
 }

@@ -84,3 +84,19 @@ func TestValidateOriginCheck(t *testing.T) {
 		t.Fatalf("expected invalid origin error")
 	}
 }
+
+func TestValidateMetrics(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Metrics.Enabled = true
+	cfg.Metrics.Path = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected invalid metrics path error")
+	}
+
+	cfg = DefaultConfig()
+	cfg.Metrics.Enabled = true
+	cfg.Metrics.Address = "not-a-host-port"
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected invalid metrics address error")
+	}
+}

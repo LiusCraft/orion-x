@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/metrics"
 )
 
 type Server struct {
@@ -23,12 +24,17 @@ type Server struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	server   *http.Server
+
+	wsMetrics       *metrics.WSServerMetrics
+	voicebotMetrics *metrics.VoicebotMetrics
 }
 
-func NewServer(cfg *config.AppConfig) *Server {
+func NewServer(cfg *config.AppConfig, wsMetrics *metrics.WSServerMetrics, voicebotMetrics *metrics.VoicebotMetrics) *Server {
 	server := &Server{
-		cfg:      cfg,
-		sessions: make(map[string]*Session),
+		cfg:             cfg,
+		sessions:        make(map[string]*Session),
+		wsMetrics:       wsMetrics,
+		voicebotMetrics: voicebotMetrics,
 	}
 	server.upgrader = websocket.Upgrader{
 		CheckOrigin: server.isOriginAllowed,
@@ -71,9 +77,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logging.Errorf("WebSocket upgrade failed: %v", err)
+		s.recordHandshake("upgrade_error", start)
 		return
 	}
 
@@ -81,12 +89,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(deviceID) == "" {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("参数错误!请检查header以及body参数"))
 		_ = conn.Close()
+		s.recordHandshake("invalid_device", start)
 		return
 	}
 
 	if !s.isAuthorized(r, deviceID) {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("unauthorized"))
 		_ = conn.Close()
+		s.recordHandshake("unauthorized", start)
 		return
 	}
 
@@ -99,12 +109,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		sessionID = uuid.New().String()
 	}
 
-	session := NewSession(s.cfg, conn, deviceID, clientID, sessionID)
+	session := NewSession(s.cfg, conn, deviceID, clientID, sessionID, s.wsMetrics, s.voicebotMetrics)
 	if !s.registerSession(session) {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("session id already exists"))
 		_ = conn.Close()
+		s.recordHandshake("duplicate_session", start)
 		return
 	}
+	s.recordHandshake("success", start)
 	go func() {
 		defer s.unregisterSession(sessionID)
 		session.Run()
@@ -118,13 +130,31 @@ func (s *Server) registerSession(session *Session) bool {
 		return false
 	}
 	s.sessions[session.ID()] = session
+	if s.wsMetrics != nil {
+		s.wsMetrics.SetActiveSessions(len(s.sessions))
+	}
 	return true
 }
 
 func (s *Server) unregisterSession(sessionID string) {
 	s.mu.Lock()
+	session := s.sessions[sessionID]
 	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
+	if s.wsMetrics != nil {
+		if session != nil && !session.startedAt.IsZero() {
+			s.wsMetrics.ObserveSessionDuration(time.Since(session.startedAt))
+		}
+		s.wsMetrics.SetActiveSessions(len(s.sessions))
+	}
+}
+
+func (s *Server) recordHandshake(result string, startedAt time.Time) {
+	if s.wsMetrics == nil {
+		return
+	}
+	s.wsMetrics.IncConnection(result)
+	s.wsMetrics.ObserveHandshake(result, time.Since(startedAt))
 }
 
 func (s *Server) isOriginAllowed(r *http.Request) bool {

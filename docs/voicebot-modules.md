@@ -25,6 +25,11 @@ internal/
 │   ├── executor.go    # ToolExecutor接口
 │   ├── music.go       # 音乐工具示例
 │   └── weather.go     # 天气工具示例
+├── metrics/           # 监控指标模块
+│   ├── registry.go    # Prometheus registry
+│   ├── ws.go          # WebSocket指标
+│   ├── voicebot.go    # 语音链路指标
+│   └── instrumentation.go # 指标包装器
 ├── config/            # 配置管理模块
 │   ├── config.go       # 配置结构与加载
 ├── asr/               # ASR模块（已存在）
