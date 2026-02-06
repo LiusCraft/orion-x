@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
@@ -29,6 +30,11 @@ type WebSocketSink struct {
 	format  audio.AudioFormat
 	encoder *codec.OpusEncoder
 	started bool
+
+	sendSilence bool
+
+	paceMu   sync.Mutex
+	nextSend time.Time
 }
 
 func NewWebSocketSink(sender BinarySender, config WebSocketSinkConfig) *WebSocketSink {
@@ -76,6 +82,10 @@ func (s *WebSocketSink) Start(ctx context.Context, format audio.AudioFormat) err
 		s.encoder = encoder
 	}
 
+	s.paceMu.Lock()
+	s.nextSend = time.Time{}
+	s.paceMu.Unlock()
+
 	return nil
 }
 
@@ -86,9 +96,25 @@ func (s *WebSocketSink) WritePCM(samples []int16) error {
 		return errors.New("WebSocketSink: not started")
 	}
 	encoder := s.encoder
+	format := s.format
+	sendSilence := s.sendSilence
 	s.mu.Unlock()
 
-	if len(samples) == 0 || isSilentPCM(samples) {
+	s.paceWrite(format, samples)
+
+	s.mu.Lock()
+	if !s.started {
+		s.mu.Unlock()
+		return errors.New("WebSocketSink: not started")
+	}
+	encoder = s.encoder
+	sendSilence = s.sendSilence
+	s.mu.Unlock()
+
+	if len(samples) == 0 {
+		return nil
+	}
+	if isSilentPCM(samples) && !sendSilence {
 		return nil
 	}
 
@@ -124,11 +150,58 @@ func isSilentPCM(samples []int16) bool {
 	return true
 }
 
+func (s *WebSocketSink) SetSendSilence(enabled bool) {
+	s.mu.Lock()
+	s.sendSilence = enabled
+	s.mu.Unlock()
+}
+
 func (s *WebSocketSink) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.started = false
 	s.encoder = nil
+
+	s.paceMu.Lock()
+	s.nextSend = time.Time{}
+	s.paceMu.Unlock()
+
 	return nil
+}
+
+func (s *WebSocketSink) paceWrite(format audio.AudioFormat, samples []int16) {
+	if len(samples) == 0 {
+		return
+	}
+	if format.SampleRate <= 0 || format.Channels <= 0 {
+		return
+	}
+	frames := len(samples) / format.Channels
+	if frames <= 0 {
+		return
+	}
+
+	duration := time.Duration(frames) * time.Second / time.Duration(format.SampleRate)
+	if duration <= 0 {
+		return
+	}
+
+	s.paceMu.Lock()
+	now := time.Now()
+	if s.nextSend.IsZero() {
+		s.nextSend = now
+	}
+
+	sleepFor := s.nextSend.Sub(now)
+	if sleepFor < 0 {
+		s.nextSend = now
+		sleepFor = 0
+	}
+	s.nextSend = s.nextSend.Add(duration)
+	s.paceMu.Unlock()
+
+	if sleepFor > 0 {
+		time.Sleep(sleepFor)
+	}
 }

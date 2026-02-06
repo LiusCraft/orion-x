@@ -130,7 +130,7 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 
 				newContent, nextLength := deltaFromBufferedContent(cleanBufferedContent, lastFilteredLength)
 				if newContent != "" {
-					logging.Infof("VoiceAgent: text chunk: %s (emotion: %s)", newContent, currentEmotion)
+					// logging.Infof("VoiceAgent: text chunk: %s (emotion: %s)", newContent, currentEmotion)
 					eventChan <- &TextChunkEvent{Chunk: newContent, Emotion: currentEmotion}
 					fullText += newContent
 				}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gorilla/websocket"
 	"github.com/liuscraft/orion-x/internal/agent"
@@ -51,6 +52,7 @@ type Session struct {
 	audioOutPipe audio.AudioOutPipe
 	audioInPipe  audio.AudioInPipe
 	mixer        audio.AudioMixer
+	audioSink    *audiosink.WebSocketSink
 	opusDecoder  *codec.OpusDecoder
 
 	listening bool
@@ -210,6 +212,7 @@ func (s *Session) initPipeline() error {
 		Channels:        s.audioParams.Channels,
 		FrameDurationMs: s.audioParams.FrameDuration,
 	})
+	s.audioSink = sink
 	mixer.SetSink(sink)
 	if err := mixer.Start(); err != nil {
 		return err
@@ -254,7 +257,13 @@ func (s *Session) initPipeline() error {
 		audioOutPipe,
 		nil,
 		toolExecutor,
-		&voicebot.OrchestratorOptions{Observer: observer},
+		&voicebot.OrchestratorOptions{
+			Observer: observer,
+			TTSScheduler: voicebot.TTSSchedulerConfig{
+				MaxInFlightSentences: s.cfg.Audio.TTSScheduler.MaxInFlightSentences,
+				MaxCacheSentences:    s.cfg.Audio.TTSScheduler.MaxCacheSentences,
+			},
+		},
 	)
 	s.orchestrator = orchestrator
 
@@ -507,6 +516,7 @@ func (s *Session) sendSTT(text string, code int) error {
 }
 
 func (s *Session) sendTTSStart() error {
+	s.setSendSilence(true)
 	msg := TTSMessage{
 		Type:      "tts",
 		State:     "start",
@@ -526,6 +536,7 @@ func (s *Session) sendTTSSentence(text string) error {
 }
 
 func (s *Session) sendTTSStop(isAborted bool) error {
+	s.setSendSilence(false)
 	msg := TTSMessage{
 		Type:      "tts",
 		State:     "stop",
@@ -533,6 +544,13 @@ func (s *Session) sendTTSStop(isAborted bool) error {
 		IsAborted: isAborted,
 	}
 	return s.sendJSON(msg)
+}
+
+func (s *Session) setSendSilence(enabled bool) {
+	if s.audioSink == nil {
+		return
+	}
+	s.audioSink.SetSendSilence(enabled)
 }
 
 func (s *Session) sendServerStatus(status, message string, content map[string]string) error {
@@ -545,7 +563,7 @@ func (s *Session) sendServerStatus(status, message string, content map[string]st
 	return s.sendJSON(msg)
 }
 
-func (s *Session) sendJSON(message interface{}) error {
+func (s *Session) sendJSON(message any) error {
 	payload, err := json.Marshal(message)
 	if err != nil {
 		return err
@@ -611,11 +629,14 @@ type sessionObserver struct {
 }
 
 func (o *sessionObserver) OnLLMTextChunk(text, emotion string) {
-	_ = o.session.sendLLM(text, emotion)
+	// _ = o.session.sendLLM(text, emotion)
 }
 
 func (o *sessionObserver) OnTTSSentence(text, emotion string) {
-	// sentence_start 在实际播放开始时发送（由 AudioOutPipe 回调触发）
+	if !shouldDisplayOnlySentence(text) {
+		return
+	}
+	_ = o.session.sendTTSSentence(text)
 }
 
 func (o *sessionObserver) OnTTSStart() {
@@ -624,6 +645,18 @@ func (o *sessionObserver) OnTTSStart() {
 
 func (o *sessionObserver) OnTTSStop(isAborted bool) {
 	_ = o.session.sendTTSStop(isAborted)
+}
+
+func shouldDisplayOnlySentence(text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func audioParamsFromConfig(cfg *config.AppConfig) AudioParams {

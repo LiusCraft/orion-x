@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
@@ -62,7 +64,8 @@ type OrchestratorObserver interface {
 
 // OrchestratorOptions 可选配置
 type OrchestratorOptions struct {
-	Observer OrchestratorObserver
+	Observer     OrchestratorObserver
+	TTSScheduler TTSSchedulerConfig
 }
 
 // orchestratorImpl Orchestrator 实现
@@ -87,6 +90,16 @@ type orchestratorImpl struct {
 
 	// TTS 播放计数（用于追踪是否有 TTS 正在播放）
 	ttsPendingCount int
+
+	// 句子缓存与调度
+	sentenceCache   []*SentenceRecord
+	sentenceIndex   map[int64]*SentenceRecord
+	pendingQueue    []int64
+	inFlightQueue   []int64
+	nextSentenceID  int64
+	currentTurnID   int64
+	ttsSchedulerCfg TTSSchedulerConfig
+	scheduleMu      sync.Mutex
 
 	wg sync.WaitGroup
 	mu sync.Mutex
@@ -116,16 +129,27 @@ func NewOrchestratorWithOptions(
 	if opts != nil {
 		observer = opts.Observer
 	}
+	schedulerCfg := defaultTTSSchedulerConfig()
+	if opts != nil {
+		if opts.TTSScheduler.MaxInFlightSentences > 0 {
+			schedulerCfg.MaxInFlightSentences = opts.TTSScheduler.MaxInFlightSentences
+		}
+		if opts.TTSScheduler.MaxCacheSentences >= 0 {
+			schedulerCfg.MaxCacheSentences = opts.TTSScheduler.MaxCacheSentences
+		}
+	}
 	return &orchestratorImpl{
-		stateMachine:   NewStateMachine(),
-		eventBus:       NewEventBus(),
-		voiceAgent:     voiceAgent,
-		audioOutPipe:   audioOutPipe,
-		audioInPipe:    audioInPipe,
-		toolExecutor:   toolExecutor,
-		segmenter:      text.NewSegmenter(120),
-		markdownFilter: agent.NewMarkdownFilter(),
-		observer:       observer,
+		stateMachine:    NewStateMachine(),
+		eventBus:        NewEventBus(),
+		voiceAgent:      voiceAgent,
+		audioOutPipe:    audioOutPipe,
+		audioInPipe:     audioInPipe,
+		toolExecutor:    toolExecutor,
+		segmenter:       text.NewSegmenter(120),
+		markdownFilter:  agent.NewMarkdownFilter(),
+		observer:        observer,
+		sentenceIndex:   make(map[int64]*SentenceRecord),
+		ttsSchedulerCfg: schedulerCfg,
 	}
 }
 
@@ -254,7 +278,7 @@ func (o *orchestratorImpl) OnToolAudioReady(audio io.Reader) {
 
 // OnLLMTextChunk 处理LLM文本流
 func (o *orchestratorImpl) OnLLMTextChunk(chunk string) {
-	logging.Infof("LLM chunk: %s", chunk)
+	// logging.Infof("LLM chunk: %s", chunk)
 }
 
 // OnLLMFinished 处理LLM完成
@@ -275,13 +299,16 @@ func (o *orchestratorImpl) handleUserSpeakingDetected(event Event) {
 
 	// 检查是否有 TTS 正在播放
 	o.mu.Lock()
-	ttsPending := o.ttsPendingCount > 0
+	ttsPending := o.ttsPendingCount > 0 || len(o.pendingQueue) > 0 || len(o.inFlightQueue) > 0
 	o.mu.Unlock()
 
 	// 只在 Processing、Speaking 状态或有 TTS pending 时才需要打断
 	needInterrupt := currentState == StateSpeaking || currentState == StateProcessing || ttsPending
 	if needInterrupt {
-		logging.Infof("Orchestrator: UserSpeakingDetected - interrupting (state=%s, ttsPending=%d)", currentState, o.ttsPendingCount)
+		o.mu.Lock()
+		pendingCount := o.ttsPendingCount
+		o.mu.Unlock()
+		logging.Infof("Orchestrator: UserSpeakingDetected - interrupting (state=%s, ttsPending=%d)", currentState, pendingCount)
 
 		// 1. 取消 Agent（停止 LLM 生成）
 		o.mu.Lock()
@@ -301,10 +328,8 @@ func (o *orchestratorImpl) handleUserSpeakingDetected(event Event) {
 		// 3. 重置分句器
 		o.segmenter.Flush()
 
-		// 4. 重置 TTS 计数
-		o.mu.Lock()
-		o.ttsPendingCount = 0
-		o.mu.Unlock()
+		// 4. 清理 TTS 调度队列与计数
+		o.abortPendingSentences()
 
 		if o.observer != nil && ttsPending {
 			o.observer.OnTTSStop(true)
@@ -315,20 +340,211 @@ func (o *orchestratorImpl) handleUserSpeakingDetected(event Event) {
 	}
 }
 
+func (o *orchestratorImpl) cacheSentence(text, emotion string) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return
+	}
+
+	o.mu.Lock()
+	o.nextSentenceID++
+	id := o.nextSentenceID
+	rec := &SentenceRecord{
+		ID:      id,
+		TurnID:  o.currentTurnID,
+		Text:    trimmed,
+		Emotion: emotion,
+		Status:  SentencePending,
+	}
+	o.sentenceCache = append(o.sentenceCache, rec)
+	o.sentenceIndex[id] = rec
+	skipTTS := shouldSkipTTSSentence(trimmed)
+	if skipTTS {
+		rec.Status = SentenceSkipped
+	} else {
+		o.pendingQueue = append(o.pendingQueue, id)
+	}
+	o.enforceCacheLimitLocked()
+	observer := o.observer
+	o.mu.Unlock()
+
+	if skipTTS {
+		if observer != nil {
+			observer.OnTTSSentence(trimmed, emotion)
+		}
+		return
+	}
+
+	o.tryScheduleTTS()
+}
+
+func shouldSkipTTSSentence(text string) bool {
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func (o *orchestratorImpl) tryScheduleTTS() {
+	if o.audioOutPipe == nil {
+		return
+	}
+
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+
+	for {
+		o.mu.Lock()
+		maxInFlight := o.ttsSchedulerCfg.MaxInFlightSentences
+		if maxInFlight <= 0 {
+			maxInFlight = 1
+		}
+		if o.ttsPendingCount >= maxInFlight || len(o.pendingQueue) == 0 {
+			o.mu.Unlock()
+			return
+		}
+
+		id := o.pendingQueue[0]
+		o.pendingQueue = o.pendingQueue[1:]
+		rec := o.sentenceIndex[id]
+		if rec == nil || rec.Status != SentencePending || rec.TurnID != o.currentTurnID {
+			o.mu.Unlock()
+			continue
+		}
+
+		rec.Status = SentenceEnqueued
+		o.inFlightQueue = append(o.inFlightQueue, id)
+		shouldStart := o.ttsPendingCount == 0
+		o.ttsPendingCount++
+		text := rec.Text
+		emotion := rec.Emotion
+		observer := o.observer
+		o.mu.Unlock()
+
+		if shouldStart && observer != nil {
+			observer.OnTTSStart()
+		}
+		if observer != nil {
+			observer.OnTTSSentence(text, emotion)
+		}
+
+		if err := o.audioOutPipe.PlayTTS(text, emotion); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				logging.Infof("Orchestrator: PlayTTS cancelled (normal interruption)")
+			} else {
+				logging.Errorf("Orchestrator: PlayTTS error: %v", err)
+			}
+
+			o.mu.Lock()
+			o.markSentenceStatusLocked(id, SentenceAborted)
+			o.removeInFlightLocked(id)
+			if o.ttsPendingCount > 0 {
+				o.ttsPendingCount--
+			}
+			pending := o.ttsPendingCount
+			hasPendingQueue := len(o.pendingQueue) > 0
+			obs := o.observer
+			o.mu.Unlock()
+
+			if pending <= 0 && !hasPendingQueue && obs != nil {
+				obs.OnTTSStop(false)
+			}
+			continue
+		}
+
+		o.transitionTo(StateSpeaking)
+	}
+}
+
+func (o *orchestratorImpl) removeInFlightLocked(id int64) {
+	for i, val := range o.inFlightQueue {
+		if val == id {
+			o.inFlightQueue = append(o.inFlightQueue[:i], o.inFlightQueue[i+1:]...)
+			return
+		}
+	}
+}
+
+func (o *orchestratorImpl) markSentenceStatusLocked(id int64, status SentenceStatus) {
+	if rec := o.sentenceIndex[id]; rec != nil {
+		rec.Status = status
+	}
+}
+
+func (o *orchestratorImpl) abortPendingSentencesLocked() {
+	for _, id := range o.pendingQueue {
+		o.markSentenceStatusLocked(id, SentenceAborted)
+	}
+	for _, id := range o.inFlightQueue {
+		o.markSentenceStatusLocked(id, SentenceAborted)
+	}
+	o.pendingQueue = nil
+	o.inFlightQueue = nil
+	o.ttsPendingCount = 0
+}
+
+func (o *orchestratorImpl) abortPendingSentences() {
+	o.scheduleMu.Lock()
+	o.mu.Lock()
+	o.abortPendingSentencesLocked()
+	o.mu.Unlock()
+	o.scheduleMu.Unlock()
+}
+
+func (o *orchestratorImpl) enforceCacheLimitLocked() {
+	maxCache := o.ttsSchedulerCfg.MaxCacheSentences
+	if maxCache <= 0 {
+		return
+	}
+	for len(o.sentenceCache) > maxCache {
+		dropIndex := -1
+		for i, rec := range o.sentenceCache {
+			if rec.Status == SentenceDone || rec.Status == SentenceAborted {
+				dropIndex = i
+				break
+			}
+		}
+		if dropIndex == -1 {
+			return
+		}
+		rec := o.sentenceCache[dropIndex]
+		delete(o.sentenceIndex, rec.ID)
+		o.sentenceCache = append(o.sentenceCache[:dropIndex], o.sentenceCache[dropIndex+1:]...)
+	}
+}
+
 // onTTSPlaybackFinished TTS 播放完成回调（由 TTSPipeline 调用）
 func (o *orchestratorImpl) onTTSPlaybackFinished() {
 	o.mu.Lock()
-	o.ttsPendingCount--
+	if o.ttsPendingCount > 0 {
+		o.ttsPendingCount--
+	}
 	pending := o.ttsPendingCount
-	if pending <= 0 {
-		o.ttsPendingCount = 0
+	var finishedID int64
+	if len(o.inFlightQueue) > 0 {
+		finishedID = o.inFlightQueue[0]
+		o.inFlightQueue = o.inFlightQueue[1:]
+	}
+	if finishedID != 0 {
+		if rec := o.sentenceIndex[finishedID]; rec != nil && rec.Status == SentenceEnqueued {
+			rec.Status = SentenceDone
+		}
 	}
 	o.mu.Unlock()
 
 	logging.Infof("Orchestrator: TTS playback finished, pending count: %d", pending)
 
-	// 如果所有 TTS 都播放完成，转为 Idle
-	if pending <= 0 {
+	// 尝试补位调度下一句
+	o.tryScheduleTTS()
+
+	// 如果所有 TTS 都播放完成且没有待调度，转为 Idle
+	o.mu.Lock()
+	pending = o.ttsPendingCount
+	hasPendingQueue := len(o.pendingQueue) > 0
+	o.mu.Unlock()
+	if pending <= 0 && !hasPendingQueue {
 		currentState := o.stateMachine.GetCurrentState()
 		if currentState == StateSpeaking {
 			logging.Infof("Orchestrator: All TTS finished, transitioning to Idle")
@@ -347,16 +563,21 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 	}
 
 	// 如果之前有 Agent 在运行，先取消
+	o.scheduleMu.Lock()
 	o.mu.Lock()
 	if o.agentCancel != nil {
 		logging.Infof("Orchestrator: cancelling previous Agent before starting new one...")
 		o.agentCancel()
 	}
+	// 新 turn：清理 pending/inFlight，避免旧句子继续调度
+	o.currentTurnID++
+	o.abortPendingSentencesLocked()
 
 	// 为新的 Agent 调用创建独立的 context
 	o.agentCtx, o.agentCancel = context.WithCancel(o.ctx)
 	agentCtx := o.agentCtx
 	o.mu.Unlock()
+	o.scheduleMu.Unlock()
 
 	logging.StartTurn()
 	logging.Infof("Orchestrator: ASR final event received: %s", asrEvent.Text)
@@ -466,34 +687,8 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 			if sentence != "" {
 				// 移除 Markdown 格式，避免 TTS 播放特殊符号
 				sentence = o.markdownFilter.Filter(sentence)
-				logging.Infof("Orchestrator: enqueuing TTS for sentence: %s", sentence)
-				shouldStart := false
-				o.mu.Lock()
-				if o.ttsPendingCount == 0 {
-					shouldStart = true
-				}
-				o.mu.Unlock()
-				if shouldStart && o.observer != nil {
-					o.observer.OnTTSStart()
-				}
-				if o.observer != nil {
-					o.observer.OnTTSSentence(sentence, o.currentEmotion)
-				}
-				// PlayTTS 现在是异步的，立即返回
-				err := o.audioOutPipe.PlayTTS(sentence, o.currentEmotion)
-				if err != nil {
-					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-						logging.Infof("Orchestrator: PlayTTS cancelled (normal interruption)")
-						return // 被打断，停止处理
-					} else {
-						logging.Errorf("Orchestrator: PlayTTS error: %v", err)
-					}
-				}
-				// 增加 TTS 计数
-				o.mu.Lock()
-				o.ttsPendingCount++
-				o.mu.Unlock()
-				o.transitionTo(StateSpeaking)
+				logging.Infof("Orchestrator: caching TTS sentence: %s", sentence)
+				o.cacheSentence(sentence, o.currentEmotion)
 			}
 		}
 	case *agent.EmotionChangedEvent:
@@ -505,35 +700,13 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 		if last := o.segmenter.Flush(); last != "" {
 			// 移除 Markdown 格式，避免 TTS 播放特殊符号
 			last = o.markdownFilter.Filter(last)
-			logging.Infof("Orchestrator: enqueuing final TTS sentence: %s", last)
-			shouldStart := false
-			o.mu.Lock()
-			if o.ttsPendingCount == 0 {
-				shouldStart = true
-			}
-			o.mu.Unlock()
-			if shouldStart && o.observer != nil {
-				o.observer.OnTTSStart()
-			}
-			if o.observer != nil {
-				o.observer.OnTTSSentence(last, o.currentEmotion)
-			}
-			// PlayTTS 现在是异步的，立即返回
-			err := o.audioOutPipe.PlayTTS(last, o.currentEmotion)
-			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					logging.Infof("Orchestrator: PlayTTS cancelled (normal interruption)")
-				} else {
-					logging.Errorf("Orchestrator: PlayTTS error: %v", err)
-				}
-			}
-			// 增加 TTS 计数
-			o.mu.Lock()
-			o.ttsPendingCount++
-			o.mu.Unlock()
-			o.transitionTo(StateSpeaking)
+			logging.Infof("Orchestrator: caching final TTS sentence: %s", last)
+			o.cacheSentence(last, o.currentEmotion)
 		}
-		logging.Infof("Orchestrator: VoiceAgent finished (TTS pending: %d)", o.ttsPendingCount)
+		o.mu.Lock()
+		pending := o.ttsPendingCount
+		o.mu.Unlock()
+		logging.Infof("Orchestrator: VoiceAgent finished (TTS pending: %d)", pending)
 		// 注意：不转为 Idle，保持 Speaking 状态直到所有 TTS 播放完成
 		// onTTSPlaybackFinished 会在每个 TTS 播放完成时被调用
 	}

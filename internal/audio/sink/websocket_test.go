@@ -50,3 +50,32 @@ func TestWebSocketSinkWritePCM(t *testing.T) {
 		t.Fatalf("sample mismatch: got %d want %d", got, samples[0])
 	}
 }
+
+func TestWebSocketSinkSendSilenceWhenEnabled(t *testing.T) {
+	sender := &fakeSender{}
+	sink := NewWebSocketSink(sender, WebSocketSinkConfig{
+		Format:          "pcm",
+		SampleRate:      16000,
+		Channels:        1,
+		FrameDurationMs: 60,
+	})
+
+	format := audio.AudioFormat{
+		SampleRate:      16000,
+		Channels:        1,
+		FramesPerBuffer: 4,
+	}
+
+	if err := sink.Start(context.Background(), format); err != nil {
+		t.Fatalf("start sink failed: %v", err)
+	}
+
+	sink.SetSendSilence(true)
+	silent := make([]int16, 4)
+	if err := sink.WritePCM(silent); err != nil {
+		t.Fatalf("write silent pcm failed: %v", err)
+	}
+	if len(sender.last) == 0 {
+		t.Fatal("expected silent pcm to be sent when enabled")
+	}
+}

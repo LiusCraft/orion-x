@@ -55,15 +55,21 @@ type LLMConfig struct {
 }
 
 type AudioConfig struct {
-	Mixer       MixerConfig       `json:"mixer"`
-	InPipe      InPipeConfig      `json:"in_pipe"`
-	TTSPipeline TTSPipelineConfig `json:"tts_pipeline"`
+	Mixer        MixerConfig        `json:"mixer"`
+	InPipe       InPipeConfig       `json:"in_pipe"`
+	TTSPipeline  TTSPipelineConfig  `json:"tts_pipeline"`
+	TTSScheduler TTSSchedulerConfig `json:"tts_scheduler"`
 }
 
 type TTSPipelineConfig struct {
 	MaxTTSBuffer     int `json:"max_tts_buffer"`
 	MaxConcurrentTTS int `json:"max_concurrent_tts"`
 	TextQueueSize    int `json:"text_queue_size"`
+}
+
+type TTSSchedulerConfig struct {
+	MaxInFlightSentences int `json:"max_in_flight_sentences"`
+	MaxCacheSentences    int `json:"max_cache_sentences"`
 }
 
 type MixerConfig struct {
@@ -154,6 +160,10 @@ func DefaultConfig() *AppConfig {
 				MaxTTSBuffer:     3,
 				MaxConcurrentTTS: 2,
 				TextQueueSize:    100,
+			},
+			TTSScheduler: TTSSchedulerConfig{
+				MaxInFlightSentences: 2,
+				MaxCacheSentences:    0,
 			},
 			InPipe: InPipeConfig{
 				SampleRate:   16000,
@@ -286,6 +296,12 @@ func (c *AppConfig) Validate() error {
 	}
 	if ap.PlayBufferDurationMs < 100 {
 		return fmt.Errorf("server.audio_params.play_buffer_duration_ms must be >= 100")
+	}
+	if c.Audio.TTSScheduler.MaxInFlightSentences <= 0 {
+		return errors.New("audio.tts_scheduler.max_in_flight_sentences must be positive")
+	}
+	if c.Audio.TTSScheduler.MaxCacheSentences < 0 {
+		return errors.New("audio.tts_scheduler.max_cache_sentences must be >= 0")
 	}
 
 	for name, value := range c.Tools.Types {

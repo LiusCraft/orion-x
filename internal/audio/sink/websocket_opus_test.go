@@ -39,6 +39,7 @@ func TestWebSocketSinkWriteOpus(t *testing.T) {
 		t.Fatalf("start sink failed: %v", err)
 	}
 
+	sink.SetSendSilence(true)
 	samples := make([]int16, 320)
 	if err := sink.WritePCM(samples); err != nil {
 		t.Fatalf("write opus failed: %v", err)
