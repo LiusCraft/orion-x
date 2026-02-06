@@ -68,3 +68,19 @@ func TestValidateToolTypes(t *testing.T) {
 		t.Fatalf("expected invalid tool type error")
 	}
 }
+
+func TestValidateOriginCheck(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Server.OriginCheck.Enabled = true
+	cfg.Server.OriginCheck.AllowedOrigins = []string{"https://example.com"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected origin validation error: %v", err)
+	}
+
+	cfg = DefaultConfig()
+	cfg.Server.OriginCheck.Enabled = true
+	cfg.Server.OriginCheck.AllowedOrigins = []string{"example.com"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected invalid origin error")
+	}
+}

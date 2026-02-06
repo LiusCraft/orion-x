@@ -138,7 +138,6 @@ func (s *Session) Close() {
 		if s.conn != nil {
 			_ = s.conn.Close()
 		}
-		close(s.writeCh)
 	})
 }
 
@@ -314,6 +313,8 @@ func (s *Session) initPipeline() error {
 }
 
 func (s *Session) readLoop() {
+	consecutiveTimeouts := 0
+	const maxConsecutiveTimeouts = 3
 	for {
 		msgType, data, err := s.readMessage()
 		if err != nil {
@@ -322,6 +323,11 @@ func (s *Session) readLoop() {
 			}
 			var netErr net.Error
 			if errors.As(err, &netErr) && netErr.Timeout() {
+				consecutiveTimeouts++
+				if consecutiveTimeouts >= maxConsecutiveTimeouts {
+					logging.Warnf("Session %s: read timeout threshold reached, closing", s.sessionID)
+					return
+				}
 				continue
 			}
 			if !errors.Is(err, websocket.ErrCloseSent) && !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
@@ -329,6 +335,7 @@ func (s *Session) readLoop() {
 			}
 			return
 		}
+		consecutiveTimeouts = 0
 
 		switch msgType {
 		case websocket.TextMessage:
@@ -587,14 +594,22 @@ func (s *Session) enqueue(msgType int, data []byte) error {
 }
 
 func (s *Session) writeLoop() {
-	for msg := range s.writeCh {
-		if s.writeTimeout > 0 {
-			_ = s.conn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
-		}
-		if err := s.conn.WriteMessage(msg.msgType, msg.data); err != nil {
-			logging.Errorf("Session %s: write error: %v", s.sessionID, err)
-			s.Close()
+	for {
+		select {
+		case <-s.ctx.Done():
 			return
+		case msg, ok := <-s.writeCh:
+			if !ok {
+				return
+			}
+			if s.writeTimeout > 0 {
+				_ = s.conn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
+			}
+			if err := s.conn.WriteMessage(msg.msgType, msg.data); err != nil {
+				logging.Errorf("Session %s: write error: %v", s.sessionID, err)
+				s.Close()
+				return
+			}
 		}
 	}
 }
@@ -653,10 +668,10 @@ func shouldDisplayOnlySentence(text string) bool {
 	}
 	for _, r := range text {
 		if unicode.IsLetter(r) || unicode.IsNumber(r) {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func audioParamsFromConfig(cfg *config.AppConfig) AudioParams {

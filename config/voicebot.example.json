@@ -85,6 +85,10 @@
             "token": "",
             "allowed_devices": []
         },
+        "origin_check": {
+            "enabled": false,
+            "allowed_origins": []
+        },
         "audio_params": {
             "format": "opus",
             "sample_rate": 16000,

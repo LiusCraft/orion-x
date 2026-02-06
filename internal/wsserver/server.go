@@ -3,7 +3,9 @@ package wsserver
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -24,13 +26,14 @@ type Server struct {
 }
 
 func NewServer(cfg *config.AppConfig) *Server {
-	return &Server{
-		cfg: cfg,
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
-		},
+	server := &Server{
+		cfg:      cfg,
 		sessions: make(map[string]*Session),
 	}
+	server.upgrader = websocket.Upgrader{
+		CheckOrigin: server.isOriginAllowed,
+	}
+	return server
 }
 
 func (s *Server) Start() error {
@@ -97,23 +100,145 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session := NewSession(s.cfg, conn, deviceID, clientID, sessionID)
-	s.registerSession(session)
+	if !s.registerSession(session) {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("session id already exists"))
+		_ = conn.Close()
+		return
+	}
 	go func() {
 		defer s.unregisterSession(sessionID)
 		session.Run()
 	}()
 }
 
-func (s *Server) registerSession(session *Session) {
+func (s *Server) registerSession(session *Session) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.sessions[session.ID()]; exists {
+		return false
+	}
 	s.sessions[session.ID()] = session
+	return true
 }
 
 func (s *Server) unregisterSession(sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
+}
+
+func (s *Server) isOriginAllowed(r *http.Request) bool {
+	originConfig := s.cfg.Server.OriginCheck
+	if !originConfig.Enabled {
+		return true
+	}
+
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return false
+	}
+	parsedOrigin, ok := parseOrigin(origin)
+	if !ok {
+		return false
+	}
+	if isSameOrigin(r, parsedOrigin) {
+		return true
+	}
+	if len(originConfig.AllowedOrigins) == 0 {
+		return false
+	}
+
+	for _, allowed := range originConfig.AllowedOrigins {
+		parsedAllowed, ok := parseOrigin(allowed)
+		if !ok {
+			continue
+		}
+		if originMatches(parsedOrigin, parsedAllowed) {
+			return true
+		}
+	}
+	return false
+}
+
+func requestScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+func defaultPort(scheme string) string {
+	switch strings.ToLower(strings.TrimSpace(scheme)) {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
+}
+
+func splitHostPort(hostport string) (string, string) {
+	hostport = strings.TrimSpace(hostport)
+	if hostport == "" {
+		return "", ""
+	}
+	host, port, err := net.SplitHostPort(hostport)
+	if err == nil {
+		return host, port
+	}
+	return hostport, ""
+}
+
+type originParts struct {
+	scheme string
+	host   string
+	port   string
+}
+
+func parseOrigin(origin string) (originParts, bool) {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return originParts{}, false
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return originParts{}, false
+	}
+	host, port := splitHostPort(parsed.Host)
+	if port == "" {
+		port = defaultPort(parsed.Scheme)
+	}
+	if host == "" || port == "" {
+		return originParts{}, false
+	}
+	return originParts{
+		scheme: strings.ToLower(parsed.Scheme),
+		host:   strings.ToLower(host),
+		port:   port,
+	}, true
+}
+
+func originMatches(a, b originParts) bool {
+	return a.scheme == b.scheme && a.host == b.host && a.port == b.port
+}
+
+func isSameOrigin(r *http.Request, origin originParts) bool {
+	reqHost := strings.TrimSpace(r.Host)
+	if reqHost == "" {
+		return false
+	}
+	reqHostOnly, reqPort := splitHostPort(reqHost)
+	if reqPort == "" {
+		reqPort = defaultPort(requestScheme(r))
+	}
+	if reqHostOnly == "" || reqPort == "" {
+		return false
+	}
+	reqScheme := strings.ToLower(requestScheme(r))
+	return origin.scheme == reqScheme &&
+		strings.EqualFold(origin.host, reqHostOnly) &&
+		origin.port == reqPort
 }
 
 func (s *Server) isAuthorized(r *http.Request, deviceID string) bool {

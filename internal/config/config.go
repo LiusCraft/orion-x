@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -101,6 +102,7 @@ type ServerConfig struct {
 	ReadTimeoutMs  int               `json:"read_timeout_ms"`
 	WriteTimeoutMs int               `json:"write_timeout_ms"`
 	Auth           AuthConfig        `json:"auth"`
+	OriginCheck    OriginCheckConfig `json:"origin_check"`
 	AudioParams    AudioParamsConfig `json:"audio_params"`
 }
 
@@ -108,6 +110,11 @@ type AuthConfig struct {
 	Enabled        bool     `json:"enabled"`
 	Token          string   `json:"token"`
 	AllowedDevices []string `json:"allowed_devices"`
+}
+
+type OriginCheckConfig struct {
+	Enabled        bool     `json:"enabled"`
+	AllowedOrigins []string `json:"allowed_origins"`
 }
 
 type AudioParamsConfig struct {
@@ -196,6 +203,10 @@ func DefaultConfig() *AppConfig {
 				Enabled:        false,
 				Token:          "",
 				AllowedDevices: nil,
+			},
+			OriginCheck: OriginCheckConfig{
+				Enabled:        false,
+				AllowedOrigins: nil,
 			},
 			AudioParams: AudioParamsConfig{
 				Format:               "opus",
@@ -302,6 +313,19 @@ func (c *AppConfig) Validate() error {
 	}
 	if c.Audio.TTSScheduler.MaxCacheSentences < 0 {
 		return errors.New("audio.tts_scheduler.max_cache_sentences must be >= 0")
+	}
+
+	if c.Server.OriginCheck.Enabled && len(c.Server.OriginCheck.AllowedOrigins) > 0 {
+		for _, raw := range c.Server.OriginCheck.AllowedOrigins {
+			origin := strings.TrimSpace(raw)
+			if origin == "" {
+				return errors.New("server.origin_check.allowed_origins must not contain empty values")
+			}
+			parsed, err := url.Parse(origin)
+			if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+				return fmt.Errorf("invalid origin in server.origin_check.allowed_origins: %s", raw)
+			}
+		}
 	}
 
 	for name, value := range c.Tools.Types {
