@@ -52,6 +52,19 @@ type Orchestrator interface {
 	OnLLMFinished()
 }
 
+// OrchestratorObserver 可选观察者，用于外部订阅 LLM/TTS 事件
+type OrchestratorObserver interface {
+	OnLLMTextChunk(text string, emotion string)
+	OnTTSSentence(text string, emotion string)
+	OnTTSStart()
+	OnTTSStop(isAborted bool)
+}
+
+// OrchestratorOptions 可选配置
+type OrchestratorOptions struct {
+	Observer OrchestratorObserver
+}
+
 // orchestratorImpl Orchestrator 实现
 type orchestratorImpl struct {
 	stateMachine *StateMachine
@@ -77,6 +90,8 @@ type orchestratorImpl struct {
 
 	wg sync.WaitGroup
 	mu sync.Mutex
+
+	observer OrchestratorObserver
 }
 
 // NewOrchestrator 创建新的Orchestrator
@@ -86,6 +101,21 @@ func NewOrchestrator(
 	audioInPipe audio.AudioInPipe,
 	toolExecutor tools.ToolExecutor,
 ) Orchestrator {
+	return NewOrchestratorWithOptions(voiceAgent, audioOutPipe, audioInPipe, toolExecutor, nil)
+}
+
+// NewOrchestratorWithOptions 创建新的Orchestrator（带可选参数）
+func NewOrchestratorWithOptions(
+	voiceAgent agent.VoiceAgent,
+	audioOutPipe audio.AudioOutPipe,
+	audioInPipe audio.AudioInPipe,
+	toolExecutor tools.ToolExecutor,
+	opts *OrchestratorOptions,
+) Orchestrator {
+	var observer OrchestratorObserver
+	if opts != nil {
+		observer = opts.Observer
+	}
 	return &orchestratorImpl{
 		stateMachine:   NewStateMachine(),
 		eventBus:       NewEventBus(),
@@ -95,6 +125,7 @@ func NewOrchestrator(
 		toolExecutor:   toolExecutor,
 		segmenter:      text.NewSegmenter(120),
 		markdownFilter: agent.NewMarkdownFilter(),
+		observer:       observer,
 	}
 }
 
@@ -207,7 +238,8 @@ func (o *orchestratorImpl) OnASRFinal(text string) {
 
 // OnUserSpeakingDetected 处理用户说话检测
 func (o *orchestratorImpl) OnUserSpeakingDetected() {
-	o.eventBus.Publish(NewUserSpeakingDetectedEvent())
+	// Handle synchronously to preserve ordering vs ASR final and avoid self-cancel.
+	o.handleUserSpeakingDetected(NewUserSpeakingDetectedEvent())
 }
 
 // OnToolCall 处理工具调用
@@ -274,6 +306,10 @@ func (o *orchestratorImpl) handleUserSpeakingDetected(event Event) {
 		o.ttsPendingCount = 0
 		o.mu.Unlock()
 
+		if o.observer != nil && ttsPending {
+			o.observer.OnTTSStop(true)
+		}
+
 		// 5. 状态转换
 		o.transitionTo(StateListening)
 	}
@@ -284,6 +320,9 @@ func (o *orchestratorImpl) onTTSPlaybackFinished() {
 	o.mu.Lock()
 	o.ttsPendingCount--
 	pending := o.ttsPendingCount
+	if pending <= 0 {
+		o.ttsPendingCount = 0
+	}
 	o.mu.Unlock()
 
 	logging.Infof("Orchestrator: TTS playback finished, pending count: %d", pending)
@@ -294,6 +333,9 @@ func (o *orchestratorImpl) onTTSPlaybackFinished() {
 		if currentState == StateSpeaking {
 			logging.Infof("Orchestrator: All TTS finished, transitioning to Idle")
 			o.transitionTo(StateIdle)
+		}
+		if o.observer != nil {
+			o.observer.OnTTSStop(false)
 		}
 	}
 }
@@ -410,6 +452,9 @@ func (o *orchestratorImpl) handleLLMEmotionChanged(event Event) {
 func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 	switch e := event.(type) {
 	case *agent.TextChunkEvent:
+		if o.observer != nil {
+			o.observer.OnLLMTextChunk(e.Chunk, e.Emotion)
+		}
 		o.OnLLMTextChunk(e.Chunk)
 		if e.Emotion != "" && e.Emotion != o.currentEmotion {
 			o.currentEmotion = e.Emotion
@@ -422,6 +467,18 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 				// 移除 Markdown 格式，避免 TTS 播放特殊符号
 				sentence = o.markdownFilter.Filter(sentence)
 				logging.Infof("Orchestrator: enqueuing TTS for sentence: %s", sentence)
+				shouldStart := false
+				o.mu.Lock()
+				if o.ttsPendingCount == 0 {
+					shouldStart = true
+				}
+				o.mu.Unlock()
+				if shouldStart && o.observer != nil {
+					o.observer.OnTTSStart()
+				}
+				if o.observer != nil {
+					o.observer.OnTTSSentence(sentence, o.currentEmotion)
+				}
 				// PlayTTS 现在是异步的，立即返回
 				err := o.audioOutPipe.PlayTTS(sentence, o.currentEmotion)
 				if err != nil {
@@ -449,6 +506,18 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 			// 移除 Markdown 格式，避免 TTS 播放特殊符号
 			last = o.markdownFilter.Filter(last)
 			logging.Infof("Orchestrator: enqueuing final TTS sentence: %s", last)
+			shouldStart := false
+			o.mu.Lock()
+			if o.ttsPendingCount == 0 {
+				shouldStart = true
+			}
+			o.mu.Unlock()
+			if shouldStart && o.observer != nil {
+				o.observer.OnTTSStart()
+			}
+			if o.observer != nil {
+				o.observer.OnTTSSentence(last, o.currentEmotion)
+			}
 			// PlayTTS 现在是异步的，立即返回
 			err := o.audioOutPipe.PlayTTS(last, o.currentEmotion)
 			if err != nil {

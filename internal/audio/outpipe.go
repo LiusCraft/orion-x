@@ -19,6 +19,8 @@ type AudioOutPipe interface {
 	SetMixer(mixer AudioMixer)
 	// SetOnPlaybackFinished 设置播放完成回调（每个 TTS 播放完成时调用）
 	SetOnPlaybackFinished(callback PlaybackFinishedCallback)
+	// SetOnTTSItemStarted 设置单条 TTS 开始播放回调
+	SetOnTTSItemStarted(callback TTSItemStartedCallback)
 	// Stats 获取 Pipeline 统计信息
 	Stats() PipelineStats
 }

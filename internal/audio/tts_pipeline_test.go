@@ -104,6 +104,40 @@ func TestTTSPipelineEnqueueText(t *testing.T) {
 	}
 }
 
+func TestTTSPipelineOnItemStarted(t *testing.T) {
+	provider := newMockTTSProvider()
+	config := DefaultTTSPipelineConfig()
+	ttsConfig := tts.Config{APIKey: "test"}
+
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	mixer := newMockMixer()
+	pipeline.SetMixer(mixer)
+
+	startedCh := make(chan string, 1)
+	pipeline.SetOnItemStarted(func(text string, emotion string) {
+		startedCh <- text
+	})
+
+	ctx := context.Background()
+	if err := pipeline.Start(ctx); err != nil {
+		t.Fatalf("Failed to start pipeline: %v", err)
+	}
+	defer pipeline.Stop()
+
+	if err := pipeline.EnqueueText("Hello", "happy"); err != nil {
+		t.Fatalf("Failed to enqueue text: %v", err)
+	}
+
+	select {
+	case got := <-startedCh:
+		if got != "Hello" {
+			t.Fatalf("unexpected text: %s", got)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for OnItemStarted")
+	}
+}
+
 // TestTTSPipelineEnqueueEmpty 测试入队空文本
 func TestTTSPipelineEnqueueEmpty(t *testing.T) {
 	provider := newMockTTSProvider()

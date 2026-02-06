@@ -122,6 +122,13 @@ func (p *outPipeImpl) SetOnPlaybackFinished(callback PlaybackFinishedCallback) {
 	p.pipeline.SetOnPlaybackFinished(callback)
 }
 
+func (p *outPipeImpl) SetOnTTSItemStarted(callback TTSItemStartedCallback) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.pipeline.SetOnItemStarted(callback)
+}
+
 // PlayTTS 播放 TTS（异步，立即返回）
 // 文本会被加入队列，由 TTSPipeline 异步处理
 func (p *outPipeImpl) PlayTTS(text string, emotion string) error {

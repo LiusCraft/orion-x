@@ -70,5 +70,24 @@
             "setVolume": "已将音量设置为{{level}}",
             "pauseMusic": "音乐已暂停"
         }
+    },
+    "server": {
+        "address": ":8000",
+        "path": "/xiaozhi/v1/",
+        "read_timeout_ms": 10000,
+        "write_timeout_ms": 10000,
+        "auth": {
+            "enabled": false,
+            "token": "",
+            "allowed_devices": []
+        },
+        "audio_params": {
+            "format": "opus",
+            "sample_rate": 16000,
+            "channels": 1,
+            "frame_duration_ms": 60,
+            "bits_per_sample": 16,
+            "play_buffer_duration_ms": 300
+        }
     }
 }

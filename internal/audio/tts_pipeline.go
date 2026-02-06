@@ -7,6 +7,9 @@ import (
 // PlaybackFinishedCallback 播放完成回调
 type PlaybackFinishedCallback func()
 
+// TTSItemStartedCallback 单条 TTS 开始播放回调
+type TTSItemStartedCallback func(text string, emotion string)
+
 // TTSPipeline TTS 异步处理管道
 // 负责管理文本队列、TTS 生成队列、播放队列
 // 支持快速中断（清空所有队列）
@@ -32,6 +35,9 @@ type TTSPipeline interface {
 	// SetOnPlaybackFinished 设置播放完成回调
 	// 当所有队列清空且播放完成时触发
 	SetOnPlaybackFinished(callback PlaybackFinishedCallback)
+
+	// SetOnItemStarted 设置单条 TTS 开始播放回调
+	SetOnItemStarted(callback TTSItemStartedCallback)
 }
 
 // PipelineStats Pipeline 统计信息

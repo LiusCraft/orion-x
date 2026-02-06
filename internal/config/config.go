@@ -17,6 +17,7 @@ type AppConfig struct {
 	LLM     LLMConfig     `json:"llm"`
 	Audio   AudioConfig   `json:"audio"`
 	Tools   ToolsConfig   `json:"tools"`
+	Server  ServerConfig  `json:"server"`
 }
 
 type LoggingConfig struct {
@@ -88,6 +89,30 @@ type ToolsConfig struct {
 	ActionResponses map[string]string `json:"action_responses"`
 }
 
+type ServerConfig struct {
+	Address        string            `json:"address"`
+	Path           string            `json:"path"`
+	ReadTimeoutMs  int               `json:"read_timeout_ms"`
+	WriteTimeoutMs int               `json:"write_timeout_ms"`
+	Auth           AuthConfig        `json:"auth"`
+	AudioParams    AudioParamsConfig `json:"audio_params"`
+}
+
+type AuthConfig struct {
+	Enabled        bool     `json:"enabled"`
+	Token          string   `json:"token"`
+	AllowedDevices []string `json:"allowed_devices"`
+}
+
+type AudioParamsConfig struct {
+	Format               string `json:"format"`
+	SampleRate           int    `json:"sample_rate"`
+	Channels             int    `json:"channels"`
+	FrameDurationMs      int    `json:"frame_duration_ms"`
+	BitsPerSample        int    `json:"bits_per_sample"`
+	PlayBufferDurationMs int    `json:"play_buffer_duration_ms"`
+}
+
 func DefaultConfig() *AppConfig {
 	enableDataInspection := true
 
@@ -152,6 +177,25 @@ func DefaultConfig() *AppConfig {
 				"pauseMusic": "音乐已暂停",
 			},
 		},
+		Server: ServerConfig{
+			Address:        ":8000",
+			Path:           "/xiaozhi/v1/",
+			ReadTimeoutMs:  10000,
+			WriteTimeoutMs: 10000,
+			Auth: AuthConfig{
+				Enabled:        false,
+				Token:          "",
+				AllowedDevices: nil,
+			},
+			AudioParams: AudioParamsConfig{
+				Format:               "opus",
+				SampleRate:           16000,
+				Channels:             1,
+				FrameDurationMs:      60,
+				BitsPerSample:        16,
+				PlayBufferDurationMs: 300,
+			},
+		},
 	}
 }
 
@@ -209,6 +253,39 @@ func (c *AppConfig) Validate() error {
 	}
 	if c.Audio.Mixer.FramesPerBuffer < 0 {
 		return errors.New("audio.mixer.frames_per_buffer must be non-negative")
+	}
+	if strings.TrimSpace(c.Server.Address) == "" {
+		return errors.New("server.address must not be empty")
+	}
+	if strings.TrimSpace(c.Server.Path) == "" {
+		return errors.New("server.path must not be empty")
+	}
+
+	ap := c.Server.AudioParams
+	if ap.Format != "opus" && ap.Format != "pcm" {
+		return fmt.Errorf("server.audio_params.format must be opus or pcm")
+	}
+	if ap.SampleRate != 16000 {
+		return fmt.Errorf("server.audio_params.sample_rate must be 16000")
+	}
+	if ap.Channels != 1 && ap.Channels != 2 {
+		return fmt.Errorf("server.audio_params.channels must be 1 or 2")
+	}
+	switch ap.FrameDurationMs {
+	case 20, 40, 60, 100:
+	default:
+		return fmt.Errorf("server.audio_params.frame_duration_ms must be 20, 40, 60, or 100")
+	}
+	switch ap.BitsPerSample {
+	case 16, 24, 32:
+	default:
+		return fmt.Errorf("server.audio_params.bits_per_sample must be 16, 24, or 32")
+	}
+	if ap.Format == "pcm" && ap.BitsPerSample != 16 {
+		return fmt.Errorf("server.audio_params.bits_per_sample must be 16 when format is pcm")
+	}
+	if ap.PlayBufferDurationMs < 100 {
+		return fmt.Errorf("server.audio_params.play_buffer_duration_ms must be >= 100")
 	}
 
 	for name, value := range c.Tools.Types {

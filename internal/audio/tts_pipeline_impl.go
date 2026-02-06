@@ -50,6 +50,7 @@ func (r *eofNotifyReader) Close() {
 type ttsItem struct {
 	Reader     *eofNotifyReader // 带 EOF 通知的 reader
 	OrigReader io.Reader        // 原始 reader（用于关闭）
+	Text       string
 	Emotion    string
 	DoneCh     chan struct{} // 播放完成信号
 	StreamID   int64         // 用于追踪
@@ -67,6 +68,7 @@ type ttsPipelineImpl struct {
 	// 外部依赖（可动态设置）
 	mixer              AudioMixer
 	onPlaybackFinished PlaybackFinishedCallback
+	onItemStarted      TTSItemStartedCallback
 
 	// 队列
 	textQueue chan textItem
@@ -357,6 +359,12 @@ func (p *ttsPipelineImpl) SetOnPlaybackFinished(callback PlaybackFinishedCallbac
 	p.onPlaybackFinished = callback
 }
 
+func (p *ttsPipelineImpl) SetOnItemStarted(callback TTSItemStartedCallback) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onItemStarted = callback
+}
+
 // textConsumer 文本消费者 goroutine
 // 从 textQueue 取出文本，分配序号，启动 TTS Worker 生成音频
 func (p *ttsPipelineImpl) textConsumer() {
@@ -415,6 +423,7 @@ func (p *ttsPipelineImpl) ttsWorker(item textItem, seqNum int64) {
 	ttsItem := &ttsItem{
 		Reader:     notifyReader,
 		OrigReader: reader,
+		Text:       item.Text,
 		Emotion:    item.Emotion,
 		DoneCh:     make(chan struct{}),
 		StreamID:   streamID,
@@ -486,7 +495,12 @@ func (p *ttsPipelineImpl) playItem(item *ttsItem) {
 	p.mu.Lock()
 	p.currentItem = item
 	mixer := p.mixer
+	startedCallback := p.onItemStarted
 	p.mu.Unlock()
+
+	if startedCallback != nil {
+		startedCallback(item.Text, item.Emotion)
+	}
 
 	if mixer != nil {
 		mixer.OnTTSStarted()
@@ -527,10 +541,10 @@ func (p *ttsPipelineImpl) playItem(item *ttsItem) {
 
 	// 通知播放完成
 	p.mu.Lock()
-	callback := p.onPlaybackFinished
+	finishedCallback := p.onPlaybackFinished
 	p.mu.Unlock()
-	if callback != nil {
-		callback()
+	if finishedCallback != nil {
+		finishedCallback()
 	}
 }
 
