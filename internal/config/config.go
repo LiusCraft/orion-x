@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -19,6 +20,7 @@ type AppConfig struct {
 	Audio   AudioConfig   `json:"audio"`
 	Tools   ToolsConfig   `json:"tools"`
 	Server  ServerConfig  `json:"server"`
+	Metrics MetricsConfig `json:"metrics"`
 }
 
 type LoggingConfig struct {
@@ -104,6 +106,15 @@ type ServerConfig struct {
 	Auth           AuthConfig        `json:"auth"`
 	OriginCheck    OriginCheckConfig `json:"origin_check"`
 	AudioParams    AudioParamsConfig `json:"audio_params"`
+}
+
+type MetricsConfig struct {
+	Enabled             bool   `json:"enabled"`
+	Address             string `json:"address"`
+	Path                string `json:"path"`
+	EnableOpenMetrics   bool   `json:"enable_open_metrics"`
+	MaxRequestsInFlight int    `json:"max_requests_in_flight"`
+	BearerToken         string `json:"bearer_token"`
 }
 
 type AuthConfig struct {
@@ -217,6 +228,14 @@ func DefaultConfig() *AppConfig {
 				PlayBufferDurationMs: 300,
 			},
 		},
+		Metrics: MetricsConfig{
+			Enabled:             true,
+			Address:             "127.0.0.1:9100",
+			Path:                "/metrics",
+			EnableOpenMetrics:   true,
+			MaxRequestsInFlight: 5,
+			BearerToken:         "",
+		},
 	}
 }
 
@@ -280,6 +299,18 @@ func (c *AppConfig) Validate() error {
 	}
 	if strings.TrimSpace(c.Server.Path) == "" {
 		return errors.New("server.path must not be empty")
+	}
+
+	if c.Metrics.Enabled {
+		if strings.TrimSpace(c.Metrics.Path) == "" {
+			return errors.New("metrics.path must not be empty")
+		}
+		if strings.TrimSpace(c.Metrics.Address) == "" {
+			return errors.New("metrics.address must not be empty")
+		}
+		if _, _, err := net.SplitHostPort(strings.TrimSpace(c.Metrics.Address)); err != nil {
+			return fmt.Errorf("metrics.address must be host:port")
+		}
 	}
 
 	ap := c.Server.AudioParams

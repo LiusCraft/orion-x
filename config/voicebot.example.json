@@ -97,5 +97,13 @@
             "bits_per_sample": 16,
             "play_buffer_duration_ms": 300
         }
+    },
+    "metrics": {
+        "enabled": true,
+        "address": "127.0.0.1:9100",
+        "path": "/metrics",
+        "enable_open_metrics": true,
+        "max_requests_in_flight": 5,
+        "bearer_token": ""
     }
 }

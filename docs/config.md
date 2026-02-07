@@ -80,6 +80,14 @@
       "playMusic": "正在为您播放{{song}}",
       "setVolume": "已将音量设置为{{level}}"
     }
+  },
+  "metrics": {
+    "enabled": true,
+    "address": "127.0.0.1:9100",
+    "path": "/metrics",
+    "enable_open_metrics": true,
+    "max_requests_in_flight": 5,
+    "bearer_token": ""
   }
 }
 ```
@@ -91,9 +99,11 @@
 - `audio.in_pipe.sample_rate` 与 `tts.sample_rate` 必须是正数。
 - `audio.in_pipe.sample_rate` 同时用于 ASR 请求采样率。
 - `tools.types` 仅接受 `query` 或 `action`。
+- `metrics.enabled=true` 时必须设置 `metrics.address`（host:port）与非空 `metrics.path`。
 
 ## 行为说明
 
 - 未设置的字段将使用默认值，保持当前运行行为。
 - 同名环境变量会覆盖配置文件值，便于部署时注入密钥。
 - `tools.action_responses` 支持 `{{key}}` 形式的简单模板替换。
+- Metrics 默认独立端口暴露 `/metrics`，可通过 `bearer_token` 简单鉴权。

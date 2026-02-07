@@ -49,3 +49,8 @@ S -> C: hello (确认后的 audio_params)
 - WebSocket: `github.com/gorilla/websocket`
 - Opus 编解码: `github.com/hraban/opus`
   - 需要系统安装 `libopus`
+
+## 监控
+
+- 独立端口暴露 Prometheus `/metrics`。
+- 指标详见 `docs/metrics-design.md`。
