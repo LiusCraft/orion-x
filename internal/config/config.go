@@ -96,6 +96,17 @@ type InPipeConfig struct {
 type ToolsConfig struct {
 	Types           map[string]string `json:"types"`
 	ActionResponses map[string]string `json:"action_responses"`
+	MCP             []MCPServerConfig `json:"mcp"`
+}
+
+type MCPServerConfig struct {
+	ID           string   `json:"id"`
+	Transport    string   `json:"transport"` // stdio | sse | streamable
+	Command      string   `json:"command"`
+	Args         []string `json:"args"`
+	Endpoint     string   `json:"endpoint"`
+	ToolNameList []string `json:"tool_name_list"`
+	TimeoutMs    int      `json:"timeout_ms"`
 }
 
 type ServerConfig struct {
@@ -204,6 +215,7 @@ func DefaultConfig() *AppConfig {
 				"setVolume":  "已将音量设置为{{level}}",
 				"pauseMusic": "音乐已暂停",
 			},
+			MCP: nil,
 		},
 		Server: ServerConfig{
 			Address:        ":8000",
@@ -366,6 +378,38 @@ func (c *AppConfig) Validate() error {
 			continue
 		default:
 			return fmt.Errorf("invalid tool type for %s: %s", name, value)
+		}
+	}
+
+	mcpIDs := make(map[string]struct{})
+	for i, server := range c.Tools.MCP {
+		id := strings.TrimSpace(server.ID)
+		if id == "" {
+			return fmt.Errorf("tools.mcp[%d].id must not be empty", i)
+		}
+		if _, exists := mcpIDs[id]; exists {
+			return fmt.Errorf("duplicate tools.mcp.id: %s", id)
+		}
+		mcpIDs[id] = struct{}{}
+
+		transport := strings.ToLower(strings.TrimSpace(server.Transport))
+		switch transport {
+		case "stdio", "sse", "streamable":
+		default:
+			return fmt.Errorf("invalid tools.mcp[%d].transport: %s", i, server.Transport)
+		}
+
+		if transport == "stdio" {
+			if strings.TrimSpace(server.Command) == "" {
+				return fmt.Errorf("tools.mcp[%d].command must not be empty", i)
+			}
+		} else {
+			if strings.TrimSpace(server.Endpoint) == "" {
+				return fmt.Errorf("tools.mcp[%d].endpoint must not be empty", i)
+			}
+		}
+		if server.TimeoutMs < 0 {
+			return fmt.Errorf("tools.mcp[%d].timeout_ms must be >= 0", i)
 		}
 	}
 

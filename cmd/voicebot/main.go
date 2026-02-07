@@ -50,20 +50,29 @@ func main() {
 	logging.Infof("========================================")
 
 	logging.Infof("Config loaded successfully")
-
-	toolTypes, err := agent.ParseToolTypes(appConfig.Tools.Types)
-	if err != nil {
-		logging.Fatalf("Invalid tool types: %v", err)
-	}
-
-	logging.Infof("Creating VoiceAgent...")
-	voiceAgent, err := agent.NewVoiceAgentWithConfig(context.Background(), agent.Config{
+	toolCfg := tools.ManagerConfig{
 		APIKey:          appConfig.LLM.APIKey,
 		BaseURL:         appConfig.LLM.BaseURL,
 		Model:           appConfig.LLM.Model,
-		ToolTypes:       toolTypes,
+		ToolTypes:       appConfig.Tools.Types,
 		ActionResponses: appConfig.Tools.ActionResponses,
-	})
+		MCPServers:      toToolsMCPServers(appConfig.Tools.MCP),
+	}
+
+	logging.Infof("Creating ToolManager...")
+	toolManager, err := tools.NewToolManager(context.Background(), toolCfg)
+	if err != nil {
+		logging.Fatalf("Failed to create ToolManager: %v", err)
+	}
+	defer func() {
+		if err := toolManager.Close(); err != nil {
+			logging.Warnf("Close ToolManager failed: %v", err)
+		}
+	}()
+	logging.Infof("ToolManager created successfully")
+
+	logging.Infof("Creating VoiceAgent...")
+	voiceAgent, err := agent.NewVoiceAgentWithToolManager(context.Background(), toolCfg, toolManager)
 	if err != nil {
 		logging.Fatalf("Failed to create VoiceAgent: %v", err)
 	}
@@ -180,11 +189,8 @@ func main() {
 	}
 	logging.Infof("AudioInPipe created successfully")
 
-	logging.Infof("Creating ToolExecutor and registering tools...")
-	toolExecutor := tools.NewToolExecutor()
-	toolExecutor.RegisterTool("getTime", tools.GetTimeTool)
-	toolExecutor.RegisterTool("getWeather", tools.GetWeatherTool)
-	logging.Infof("Tools registered successfully")
+	// 创建工具执行器适配器
+	toolExecutor := tools.NewExecutorAdapter(context.Background(), toolManager)
 
 	logging.Infof("Creating Orchestrator...")
 	orchestrator := voicebot.NewOrchestrator(voiceAgent, audioOutPipe, audioInPipe, toolExecutor)
@@ -239,4 +245,20 @@ func main() {
 
 	// PortAudio 会在 defer portaudio.Terminate() 中被清理
 	logging.Infof("VoiceBot stopped.")
+}
+
+func toToolsMCPServers(cfgs []config.MCPServerConfig) []tools.MCPServerConfig {
+	servers := make([]tools.MCPServerConfig, 0, len(cfgs))
+	for _, cfg := range cfgs {
+		servers = append(servers, tools.MCPServerConfig{
+			ID:           cfg.ID,
+			Transport:    cfg.Transport,
+			Command:      cfg.Command,
+			Args:         cfg.Args,
+			Endpoint:     cfg.Endpoint,
+			ToolNameList: cfg.ToolNameList,
+			TimeoutMs:    cfg.TimeoutMs,
+		})
+	}
+	return servers
 }

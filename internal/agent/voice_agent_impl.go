@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -12,14 +13,15 @@ import (
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/schema"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/tools"
 )
 
 type voiceAgentImpl struct {
 	chatModel         *openai.ChatModel
 	emotionExtractor  EmotionExtractor
 	markdownFilter    MarkdownFilter
-	toolClassifier    *ToolClassifier
 	actionResponseGen *ActionResponseGenerator
+	toolManager       tools.ToolManager
 }
 
 const (
@@ -32,15 +34,38 @@ func NewVoiceAgent(ctx context.Context) (VoiceAgent, error) {
 	if key == "" {
 		key = os.Getenv("DASHSCOPE_API_KEY")
 	}
-	return NewVoiceAgentWithConfig(ctx, Config{
+	return NewVoiceAgentWithConfig(ctx, tools.ManagerConfig{
 		APIKey: key,
 	})
 }
 
-func NewVoiceAgentWithConfig(ctx context.Context, cfg Config) (VoiceAgent, error) {
+func NewVoiceAgentWithConfig(ctx context.Context, cfg tools.ManagerConfig) (VoiceAgent, error) {
 	normalized, err := normalizeConfig(cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	toolManager, err := tools.NewToolManager(ctx, normalized)
+	if err != nil {
+		return nil, err
+	}
+
+	agent, err := NewVoiceAgentWithToolManager(ctx, normalized, toolManager)
+	if err != nil {
+		_ = toolManager.Close()
+		return nil, err
+	}
+
+	return agent, nil
+}
+
+func NewVoiceAgentWithToolManager(ctx context.Context, cfg tools.ManagerConfig, toolManager tools.ToolManager) (VoiceAgent, error) {
+	normalized, err := normalizeConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if toolManager == nil {
+		return nil, errors.New("tool manager is required")
 	}
 
 	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
@@ -52,15 +77,18 @@ func NewVoiceAgentWithConfig(ctx context.Context, cfg Config) (VoiceAgent, error
 		return nil, err
 	}
 
-	classifier := NewToolClassifierWithTypes(normalized.ToolTypes)
-	responseGen := NewActionResponseGeneratorWithTemplates(normalized.ActionResponses)
+	if err := chatModel.BindTools(toolManager.ToolInfos()); err != nil {
+		return nil, err
+	}
+
+	responseGen := NewActionResponseGeneratorWithToolManager(toolManager)
 
 	return &voiceAgentImpl{
 		chatModel:         chatModel,
 		emotionExtractor:  NewEmotionExtractor(),
 		markdownFilter:    NewMarkdownFilter(),
-		toolClassifier:    classifier,
 		actionResponseGen: responseGen,
+		toolManager:       toolManager,
 	}, nil
 }
 
@@ -77,14 +105,8 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 		messages := []*schema.Message{
 			schema.SystemMessage(`你是一个语音助手。
 
-规则：
-1. 当用户询问时间时，请使用 getTime 工具获取准确时间。
-
-2. 当用户询问天气时，请使用 getWeather 工具。
-
-工具定义：
-- getTime: 获取当前时间，返回日期、时间、星期、时区等信息
-- getWeather: 获取指定城市的天气信息，需要参数 city（城市名称）`),
+当用户请求需要外部能力时，请调用合适的工具。
+工具名称必须与提供的工具列表完全一致。`),
 			schema.UserMessage(input),
 		}
 
@@ -117,20 +139,8 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 			if msg.Content != "" {
 				bufferedContent += msg.Content
 
-				// emotion := v.emotionExtractor.Extract(bufferedContent)
-				// if emotion != "" && emotion != currentEmotion {
-				// 	currentEmotion = emotion
-				// 	log.Printf("VoiceAgent: emotion changed to: %s", emotion)
-				// 	eventChan <- &EmotionChangedEvent{Emotion: emotion}
-				// }
-
-				// 移除缓冲内容中的情绪标签
-				// cleanBufferedContent := v.markdownFilter.RemoveEmotionTags(bufferedContent)
-				cleanBufferedContent := bufferedContent
-
-				newContent, nextLength := deltaFromBufferedContent(cleanBufferedContent, lastFilteredLength)
+				newContent, nextLength := deltaFromBufferedContent(bufferedContent, lastFilteredLength)
 				if newContent != "" {
-					// logging.Infof("VoiceAgent: text chunk: %s (emotion: %s)", newContent, currentEmotion)
 					eventChan <- &TextChunkEvent{Chunk: newContent, Emotion: currentEmotion}
 					fullText += newContent
 				}
@@ -138,17 +148,23 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 			}
 
 			for _, toolCall := range msg.ToolCalls {
-				toolType := v.toolClassifier.GetToolType(toolCall.Function.Name)
+				if v.toolManager != nil && !v.toolManager.Has(toolCall.Function.Name) {
+					err := fmt.Errorf("unknown tool: %s", toolCall.Function.Name)
+					logging.Errorf("VoiceAgent: %v", err)
+					eventChan <- &FinishedEvent{Error: err}
+					return
+				}
+				toolType := v.toolManager.GetToolType(toolCall.Function.Name)
 				args := parseToolArgs(toolCall.Function.Arguments)
 
 				logging.Infof("VoiceAgent: tool call requested: %s (type: %s), args: %v", toolCall.Function.Name, toolType, args)
 				eventChan <- &ToolCallRequestedEvent{
 					Tool:     toolCall.Function.Name,
 					Args:     args,
-					ToolType: toolType,
+					ToolType: toAgentToolType(toolType),
 				}
 
-				if toolType == ToolTypeAction {
+				if toolType == tools.ToolTypeAction {
 					response := v.actionResponseGen.GenerateResponse(toolCall.Function.Name, args)
 					filtered := v.markdownFilter.Filter(response)
 					emotion := v.emotionExtractor.Extract(response)
@@ -174,8 +190,75 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 	return eventChan, nil
 }
 
+func (v *voiceAgentImpl) SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan AgentEvent, error) {
+	if v.chatModel == nil {
+		return nil, errors.New("llm chat model is not initialized")
+	}
+
+	eventChan := make(chan AgentEvent)
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(eventChan)
+
+		messages := buildToolSummaryMessages(tool, args, result)
+
+		logging.Infof("VoiceAgent: starting tool summary stream (tool=%s)...", tool)
+		stream, err := v.chatModel.Stream(ctx, messages)
+		if err != nil {
+			logging.Errorf("VoiceAgent: tool summary stream error: %v", err)
+			eventChan <- &FinishedEvent{Error: err}
+			return
+		}
+		defer stream.Close()
+
+		currentEmotion := "default"
+		fullText := ""
+		bufferedContent := ""
+		lastFilteredLength := 0
+
+		for {
+			msg, err := stream.Recv()
+			if err == io.EOF {
+				logging.Infof("VoiceAgent: tool summary completed, total text length: %d", len(fullText))
+				break
+			}
+			if err != nil {
+				logging.Errorf("VoiceAgent: tool summary receive error: %v", err)
+				eventChan <- &FinishedEvent{Error: err}
+				return
+			}
+
+			if len(msg.ToolCalls) > 0 {
+				err := fmt.Errorf("tool summary should not call tools: %s", msg.ToolCalls[0].Function.Name)
+				logging.Errorf("VoiceAgent: %v", err)
+				eventChan <- &FinishedEvent{Error: err}
+				return
+			}
+
+			if msg.Content != "" {
+				bufferedContent += msg.Content
+				cleanBufferedContent := bufferedContent
+
+				newContent, nextLength := deltaFromBufferedContent(cleanBufferedContent, lastFilteredLength)
+				if newContent != "" {
+					eventChan <- &TextChunkEvent{Chunk: newContent, Emotion: currentEmotion}
+					fullText += newContent
+				}
+				lastFilteredLength = nextLength
+			}
+		}
+
+		eventChan <- &FinishedEvent{Error: nil}
+	}()
+
+	return eventChan, nil
+}
+
 func (v *voiceAgentImpl) GetToolType(tool string) ToolType {
-	return v.toolClassifier.GetToolType(tool)
+	return toAgentToolType(v.toolManager.GetToolType(tool))
 }
 
 func deltaFromBufferedContent(content string, lastLength int) (string, int) {
@@ -188,15 +271,21 @@ func deltaFromBufferedContent(content string, lastLength int) (string, int) {
 	return content[lastLength:], len(content)
 }
 
-func normalizeConfig(cfg Config) (Config, error) {
+func normalizeConfig(cfg tools.ManagerConfig) (tools.ManagerConfig, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
-		return Config{}, errors.New("llm api_key is required")
+		return tools.ManagerConfig{}, errors.New("llm api_key is required")
 	}
 	if strings.TrimSpace(cfg.BaseURL) == "" {
 		cfg.BaseURL = defaultLLMBaseURL
 	}
 	if strings.TrimSpace(cfg.Model) == "" {
 		cfg.Model = defaultLLMModel
+	}
+	if cfg.ToolTypes == nil {
+		cfg.ToolTypes = make(map[string]string)
+	}
+	if cfg.ActionResponses == nil {
+		cfg.ActionResponses = make(map[string]string)
 	}
 	return cfg, nil
 }
@@ -214,4 +303,35 @@ func parseToolArgs(argsJSON string) map[string]interface{} {
 	}
 
 	return args
+}
+
+func buildToolSummaryMessages(tool string, args map[string]interface{}, result interface{}) []*schema.Message {
+	argsText := stringifyJSONOrValue(args)
+	resultText := stringifyJSONOrValue(result)
+
+	userContent := fmt.Sprintf("工具: %s\n参数: %s\n结果: %s\n请用简洁中文向用户总结结果，必要时分点说明，不要调用工具。", tool, argsText, resultText)
+
+	return []*schema.Message{
+		schema.SystemMessage(`你是一个语音助手，请根据工具结果生成对用户可听的简洁回复。
+不要调用任何工具。`),
+		schema.UserMessage(userContent),
+	}
+}
+
+func stringifyJSONOrValue(value interface{}) string {
+	if value == nil {
+		return "null"
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprint(value)
+	}
+	return string(data)
+}
+
+func toAgentToolType(tt tools.ToolType) ToolType {
+	if tt == tools.ToolTypeAction {
+		return ToolTypeAction
+	}
+	return ToolTypeQuery
 }

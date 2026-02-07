@@ -52,35 +52,15 @@ func CreateToolCallGraph(ctx context.Context) (compose.Runnable[[]*schema.Messag
 		return nil, err
 	}
 
-	// 4. 创建所有工具
-	mockTools, err := CreateMockTools()
-	if err != nil {
-		return nil, fmt.Errorf("create mock tools failed: %w", err)
-	}
-
 	// 转换为 tool.BaseTool 切片
-	allTools := make([]tool.BaseTool, 0, len(mockTools))
-	for _, t := range mockTools {
-		if bt, ok := t.(tool.BaseTool); ok {
-			allTools = append(allTools, bt)
-		}
-	}
+	allTools := make([]tool.BaseTool, 0)
+
 	getTimeTool, _ := utils.InferTool("getTime", "获取当前时间", func(_ context.Context, _ struct{}) (string, error) {
 		result := time.Now().Format("2006-01-02 15:04:05")
 		logging.Infof("[Tool] getTime 执行完成，结果: %s", result)
 		return result, nil
 	})
 
-	getWeatherTool, _ := utils.InferTool("getWeather", "获取指定城市的天气",
-		func(ctx context.Context, args struct {
-			City string `json:"city"`
-		}) (string, error) {
-			logging.Infof("[ReAct Tool] getWeather 执行，城市: %s", args.City)
-			// 模拟天气数据
-			return fmt.Sprintf("%s的天气：晴天，温度25°C", args.City), nil
-		})
-
-	allTools = append(allTools, getWeatherTool)
 	allTools = append(allTools, getTimeTool)
 
 	// 创建工具 ID -> 工具的映射

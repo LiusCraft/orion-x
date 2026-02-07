@@ -7,6 +7,7 @@ import (
 // VoiceAgent 语音Agent，负责LLM流式调用、工具调用、情绪标注、Markdown过滤
 type VoiceAgent interface {
 	Process(ctx context.Context, text string) (<-chan AgentEvent, error)
+	SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan AgentEvent, error)
 	GetToolType(tool string) ToolType
 }
 
@@ -34,13 +35,4 @@ type ToolInfo struct {
 	Name        string
 	Description string
 	Type        ToolType
-}
-
-// Config VoiceAgent配置
-type Config struct {
-	APIKey          string
-	BaseURL         string
-	Model           string
-	ToolTypes       map[string]ToolType
-	ActionResponses map[string]string
 }

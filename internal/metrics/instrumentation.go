@@ -63,6 +63,10 @@ func (i *instrumentedVoiceAgent) Process(ctx context.Context, input string) (<-c
 	return out, nil
 }
 
+func (i *instrumentedVoiceAgent) SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan agent.AgentEvent, error) {
+	return i.next.SummarizeToolResult(ctx, tool, args, result)
+}
+
 func (i *instrumentedVoiceAgent) GetToolType(tool string) agent.ToolType {
 	return i.next.GetToolType(tool)
 }

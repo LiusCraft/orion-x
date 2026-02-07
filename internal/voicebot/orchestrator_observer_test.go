@@ -26,6 +26,15 @@ func (m *mockVoiceAgent) Process(ctx context.Context, text string) (<-chan agent
 	return ch, nil
 }
 
+func (m *mockVoiceAgent) SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan agent.AgentEvent, error) {
+	ch := make(chan agent.AgentEvent, len(m.events))
+	for _, event := range m.events {
+		ch <- event
+	}
+	close(ch)
+	return ch, nil
+}
+
 func (m *mockVoiceAgent) GetToolType(tool string) agent.ToolType {
 	return agent.ToolTypeQuery
 }

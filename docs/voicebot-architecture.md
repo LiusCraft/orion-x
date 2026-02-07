@@ -246,6 +246,8 @@ var toolTypes = map[string]ToolType{
 }
 ```
 
+> MCP 工具统一使用 `mcp.<id>.<tool>` 命名，加载后也会参与工具分类与调度。
+
 ### 2. 直接播放类工具的回复生成
 ```go
 func generateActionResponse(tool, args string) string {

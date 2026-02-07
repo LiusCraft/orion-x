@@ -100,3 +100,57 @@ func TestValidateMetrics(t *testing.T) {
 		t.Fatalf("expected invalid metrics address error")
 	}
 }
+
+func TestValidateMCPConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Tools.MCP = []MCPServerConfig{
+		{
+			ID:        "demo",
+			Transport: "sse",
+			Endpoint:  "http://localhost:12345/sse",
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected mcp validate error: %v", err)
+	}
+
+	cfg = DefaultConfig()
+	cfg.Tools.MCP = []MCPServerConfig{
+		{
+			ID:        "bad",
+			Transport: "unknown",
+			Endpoint:  "http://localhost:12345/sse",
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected invalid transport error")
+	}
+
+	cfg = DefaultConfig()
+	cfg.Tools.MCP = []MCPServerConfig{
+		{
+			ID:        "stdio",
+			Transport: "stdio",
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected missing command error")
+	}
+
+	cfg = DefaultConfig()
+	cfg.Tools.MCP = []MCPServerConfig{
+		{
+			ID:        "dup",
+			Transport: "sse",
+			Endpoint:  "http://localhost:12345/sse",
+		},
+		{
+			ID:        "dup",
+			Transport: "sse",
+			Endpoint:  "http://localhost:12345/sse",
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected duplicate id error")
+	}
+}

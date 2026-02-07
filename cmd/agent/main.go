@@ -9,6 +9,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/tools"
 )
 
 func main() {
@@ -37,18 +38,14 @@ func main() {
 
 	ctx := context.Background()
 
-	toolTypes, err := agent.ParseToolTypes(appConfig.Tools.Types)
-	if err != nil {
-		logging.Fatalf("Invalid tool types: %v", err)
-	}
-
 	// 创建 VoiceAgent
-	voiceAgent, err := agent.NewVoiceAgentWithConfig(ctx, agent.Config{
+	voiceAgent, err := agent.NewVoiceAgentWithConfig(ctx, tools.ManagerConfig{
 		APIKey:          appConfig.LLM.APIKey,
 		BaseURL:         appConfig.LLM.BaseURL,
 		Model:           appConfig.LLM.Model,
-		ToolTypes:       toolTypes,
+		ToolTypes:       appConfig.Tools.Types,
 		ActionResponses: appConfig.Tools.ActionResponses,
+		MCPServers:      toToolsMCPServers(appConfig.Tools.MCP),
 	})
 	if err != nil {
 		logging.Fatalf("NewVoiceAgent failed: %v", err)
@@ -87,4 +84,20 @@ func main() {
 	}
 
 	logging.Infof("=== 测试完成 ===")
+}
+
+func toToolsMCPServers(cfgs []config.MCPServerConfig) []tools.MCPServerConfig {
+	servers := make([]tools.MCPServerConfig, 0, len(cfgs))
+	for _, cfg := range cfgs {
+		servers = append(servers, tools.MCPServerConfig{
+			ID:           cfg.ID,
+			Transport:    cfg.Transport,
+			Command:      cfg.Command,
+			Args:         cfg.Args,
+			Endpoint:     cfg.Endpoint,
+			ToolNameList: cfg.ToolNameList,
+			TimeoutMs:    cfg.TimeoutMs,
+		})
+	}
+	return servers
 }

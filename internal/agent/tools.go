@@ -3,46 +3,9 @@ package agent
 import (
 	"fmt"
 	"strings"
+
+	"github.com/liuscraft/orion-x/internal/tools"
 )
-
-// ToolClassifier 工具分类器
-type ToolClassifier struct {
-	toolTypes map[string]ToolType
-}
-
-func NewToolClassifier() *ToolClassifier {
-	return NewToolClassifierWithTypes(nil)
-}
-
-func NewToolClassifierWithTypes(types map[string]ToolType) *ToolClassifier {
-	classifier := &ToolClassifier{
-		toolTypes: map[string]ToolType{
-			"getWeather": ToolTypeQuery,
-			"getTime":    ToolTypeQuery,
-			"search":     ToolTypeQuery,
-			"playMusic":  ToolTypeAction,
-			"setVolume":  ToolTypeAction,
-			"pauseMusic": ToolTypeAction,
-		},
-	}
-	for name, toolType := range types {
-		classifier.toolTypes[name] = toolType
-	}
-	return classifier
-}
-
-// GetToolType 获取工具类型
-func (c *ToolClassifier) GetToolType(tool string) ToolType {
-	if t, ok := c.toolTypes[tool]; ok {
-		return t
-	}
-	return ToolTypeQuery // 默认为查询类
-}
-
-// RegisterTool 注册工具
-func (c *ToolClassifier) RegisterTool(name string, toolType ToolType) {
-	c.toolTypes[name] = toolType
-}
 
 // ActionResponseGenerator 动作类工具回复生成器
 type ActionResponseGenerator struct {
@@ -76,6 +39,34 @@ func NewActionResponseGeneratorWithTemplates(templates map[string]string) *Actio
 		}
 	}
 	return generator
+}
+
+// NewActionResponseGeneratorWithToolManager 使用 ToolManager 创建回复生成器
+func NewActionResponseGeneratorWithToolManager(tm tools.ToolManager) *ActionResponseGenerator {
+	generator := &ActionResponseGenerator{
+		responses: make(map[string]func(args map[string]interface{}) string),
+	}
+
+	// 从 ToolManager 获取所有工具的动作响应模板
+	for _, name := range getToolNames(tm) {
+		if template, ok := tm.GetActionResponse(name); ok {
+			tmpl := template
+			generator.responses[name] = func(args map[string]interface{}) string {
+				return applyTemplate(tmpl, args)
+			}
+		}
+	}
+
+	return generator
+}
+
+func getToolNames(tm tools.ToolManager) []string {
+	infos := tm.ToolInfos()
+	names := make([]string, len(infos))
+	for i, info := range infos {
+		names[i] = info.Name
+	}
+	return names
 }
 
 // GenerateResponse 生成动作类工具的回复

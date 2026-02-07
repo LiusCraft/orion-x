@@ -74,12 +74,23 @@
     "types": {
       "getTime": "query",
       "getWeather": "query",
-      "playMusic": "action"
+      "playMusic": "action",
+      "mcp.demo.get_device_status": "query"
     },
     "action_responses": {
       "playMusic": "正在为您播放{{song}}",
-      "setVolume": "已将音量设置为{{level}}"
-    }
+      "setVolume": "已将音量设置为{{level}}",
+      "mcp.demo.play_music": "开始播放: {{song}}"
+    },
+    "mcp": [
+      {
+        "id": "demo",
+        "transport": "sse",
+        "endpoint": "http://localhost:12345/mcp/sse",
+        "tool_name_list": ["get_device_status"],
+        "timeout_ms": 30000
+      }
+    ]
   },
   "metrics": {
     "enabled": true,
@@ -99,6 +110,7 @@
 - `audio.in_pipe.sample_rate` 与 `tts.sample_rate` 必须是正数。
 - `audio.in_pipe.sample_rate` 同时用于 ASR 请求采样率。
 - `tools.types` 仅接受 `query` 或 `action`。
+- `tools.mcp.transport` 仅接受 `stdio` / `sse` / `streamable`，`stdio` 必须提供 `command`，其余必须提供 `endpoint`。
 - `metrics.enabled=true` 时必须设置 `metrics.address`（host:port）与非空 `metrics.path`。
 
 ## 行为说明
@@ -106,4 +118,9 @@
 - 未设置的字段将使用默认值，保持当前运行行为。
 - 同名环境变量会覆盖配置文件值，便于部署时注入密钥。
 - `tools.action_responses` 支持 `{{key}}` 形式的简单模板替换。
+- `tools.mcp` 支持 `stdio` / `sse` / `streamable` 三种连接方式，工具会以 `mcp.<id>.<tool>` 作为统一名称前缀。
+  - **重要**：配置 MCP 工具的类型和动作响应时，必须使用完整前缀名称（如 `mcp.demo.get_device_status`），不能使用短名称。
+- **本地工具**：使用短名称配置（如 `getTime`、`getWeather`）。
+- **MCP 工具**：使用完整前缀名称配置（如 `mcp.demo.get_device_status`）。
+- 未配置的工具类型默认为 `query`。
 - Metrics 默认独立端口暴露 `/metrics`，可通过 `bearer_token` 简单鉴权。

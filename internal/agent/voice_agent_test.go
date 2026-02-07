@@ -156,33 +156,6 @@ func TestMarkdownFilter(t *testing.T) {
 	}
 }
 
-func TestToolClassifier(t *testing.T) {
-	classifier := NewToolClassifier()
-
-	tests := []struct {
-		name     string
-		tool     string
-		expected ToolType
-	}{
-		{"getWeather 查询类", "getWeather", ToolTypeQuery},
-		{"getTime 查询类", "getTime", ToolTypeQuery},
-		{"search 查询类", "search", ToolTypeQuery},
-		{"playMusic 动作类", "playMusic", ToolTypeAction},
-		{"setVolume 动作类", "setVolume", ToolTypeAction},
-		{"pauseMusic 动作类", "pauseMusic", ToolTypeAction},
-		{"未知工具", "unknownTool", ToolTypeQuery},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := classifier.GetToolType(tt.tool)
-			if result != tt.expected {
-				t.Errorf("GetToolType() = %v, want %v", result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestActionResponseGenerator(t *testing.T) {
 	generator := NewActionResponseGenerator()
 
@@ -228,15 +201,6 @@ func TestParseToolType(t *testing.T) {
 	}
 	if _, err := ParseToolType("unknown"); err == nil {
 		t.Fatalf("expected error for unknown tool type")
-	}
-}
-
-func TestNewToolClassifierWithTypes(t *testing.T) {
-	classifier := NewToolClassifierWithTypes(map[string]ToolType{
-		"custom": ToolTypeAction,
-	})
-	if classifier.GetToolType("custom") != ToolTypeAction {
-		t.Fatalf("expected custom tool type to be Action")
 	}
 }
 

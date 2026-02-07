@@ -644,6 +644,22 @@ func (o *orchestratorImpl) handleToolCallRequested(event Event) {
 		}
 
 		logging.Infof("Orchestrator: Tool execution result: %v", result)
+
+		if o.voiceAgent == nil {
+			return
+		}
+		if o.voiceAgent.GetToolType(toolEvent.Tool) != agent.ToolTypeQuery {
+			return
+		}
+
+		summaryChan, err := o.voiceAgent.SummarizeToolResult(o.ctx, toolEvent.Tool, toolEvent.Args, result)
+		if err != nil {
+			logging.Errorf("Orchestrator: Tool summary error: %v", err)
+			return
+		}
+		for agentEvent := range summaryChan {
+			o.handleAgentEvent(agentEvent)
+		}
 	}()
 }
 

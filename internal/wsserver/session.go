@@ -48,6 +48,7 @@ type Session struct {
 	writeTimeout time.Duration
 
 	voiceAgent   agent.VoiceAgent
+	toolManager  tools.ToolManager
 	toolExecutor tools.ToolExecutor
 	orchestrator voicebot.Orchestrator
 	audioOutPipe audio.AudioOutPipe
@@ -146,6 +147,11 @@ func (s *Session) Close() {
 		if s.mixer != nil {
 			_ = s.mixer.Stop()
 		}
+		if s.toolManager != nil {
+			if err := s.toolManager.Close(); err != nil {
+				logging.Warnf("Session %s: close tool manager failed: %v", s.sessionID, err)
+			}
+		}
 		if s.conn != nil {
 			_ = s.conn.Close()
 		}
@@ -183,18 +189,22 @@ func (s *Session) waitClientHello() error {
 }
 
 func (s *Session) initPipeline() error {
-	toolTypes, err := agent.ParseToolTypes(s.cfg.Tools.Types)
-	if err != nil {
-		return err
-	}
-
-	voiceAgent, err := agent.NewVoiceAgentWithConfig(s.ctx, agent.Config{
+	toolCfg := tools.ManagerConfig{
 		APIKey:          s.cfg.LLM.APIKey,
 		BaseURL:         s.cfg.LLM.BaseURL,
 		Model:           s.cfg.LLM.Model,
-		ToolTypes:       toolTypes,
+		ToolTypes:       s.cfg.Tools.Types,
 		ActionResponses: s.cfg.Tools.ActionResponses,
-	})
+		MCPServers:      toToolsMCPServers(s.cfg.Tools.MCP),
+	}
+
+	toolManager, err := tools.NewToolManager(s.ctx, toolCfg)
+	if err != nil {
+		return err
+	}
+	s.toolManager = toolManager
+
+	voiceAgent, err := agent.NewVoiceAgentWithToolManager(s.ctx, toolCfg, toolManager)
 	if err != nil {
 		return err
 	}
@@ -264,20 +274,19 @@ func (s *Session) initPipeline() error {
 	})
 	s.audioOutPipe = audioOutPipe
 
-	toolExecutor := tools.NewToolExecutor()
-	toolExecutor.RegisterTool("getTime", tools.GetTimeTool)
-	toolExecutor.RegisterTool("getWeather", tools.GetWeatherTool)
+	toolExecutor := tools.NewExecutorAdapter(s.ctx, toolManager)
 	if s.voicebotMetrics != nil {
-		toolExecutor = metrics.NewInstrumentedToolExecutor(toolExecutor, s.voicebotMetrics)
+		s.toolExecutor = metrics.NewInstrumentedToolExecutor(toolExecutor, s.voicebotMetrics)
+	} else {
+		s.toolExecutor = toolExecutor
 	}
-	s.toolExecutor = toolExecutor
 
 	observer := &sessionObserver{session: s}
 	orchestrator := voicebot.NewOrchestratorWithOptions(
 		voiceAgent,
 		audioOutPipe,
 		nil,
-		toolExecutor,
+		s.toolExecutor,
 		&voicebot.OrchestratorOptions{
 			Observer: observer,
 			TTSScheduler: voicebot.TTSSchedulerConfig{
@@ -802,4 +811,20 @@ func wsErrorKind(err error) string {
 		return "closed"
 	}
 	return "other"
+}
+
+func toToolsMCPServers(cfgs []config.MCPServerConfig) []tools.MCPServerConfig {
+	servers := make([]tools.MCPServerConfig, 0, len(cfgs))
+	for _, cfg := range cfgs {
+		servers = append(servers, tools.MCPServerConfig{
+			ID:           cfg.ID,
+			Transport:    cfg.Transport,
+			Command:      cfg.Command,
+			Args:         cfg.Args,
+			Endpoint:     cfg.Endpoint,
+			ToolNameList: cfg.ToolNameList,
+			TimeoutMs:    cfg.TimeoutMs,
+		})
+	}
+	return servers
 }

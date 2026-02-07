@@ -59,3 +59,13 @@ func TestDeltaFromBufferedContent(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildToolSummaryMessages(t *testing.T) {
+	messages := buildToolSummaryMessages("search", map[string]interface{}{"query": "test"}, map[string]interface{}{"results": []string{"a"}})
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+	if messages[1].Content == "" {
+		t.Fatalf("expected user message content")
+	}
+}
