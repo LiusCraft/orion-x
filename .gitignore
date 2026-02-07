@@ -3,6 +3,7 @@ cmd/voicebot/config/voicebot.json
 docs-site/node_modules
 docs-site/.vitepress/cache
 docs-site/.vitepress/dist
+web-ui/node_modules
 
 # Debug binaries
 __debug_bin*
