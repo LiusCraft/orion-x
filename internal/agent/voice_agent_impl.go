@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/schema"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 
@@ -22,12 +23,19 @@ type voiceAgentImpl struct {
 	markdownFilter    MarkdownFilter
 	actionResponseGen *ActionResponseGenerator
 	toolManager       tools.ToolManager
+	memorySvc         memory.Service
 }
 
 const (
-	defaultLLMBaseURL = "https://open.bigmodel.cn/api/coding/paas/v4"
-	defaultLLMModel   = "glm-4-flash"
+	defaultLLMBaseURL   = "https://open.bigmodel.cn/api/coding/paas/v4"
+	defaultLLMModel     = "glm-4-flash"
+	defaultSystemPrompt = "你是一个语音助手。\n\n当用户请求需要外部能力时，请调用合适的工具。\n工具名称必须与提供的工具列表完全一致。"
 )
+
+// DefaultSystemPrompt 暴露给外部组件使用。
+func DefaultSystemPrompt() string {
+	return defaultSystemPrompt
+}
 
 func NewVoiceAgent(ctx context.Context) (VoiceAgent, error) {
 	key := os.Getenv("ZHIPU_API_KEY")
@@ -60,6 +68,11 @@ func NewVoiceAgentWithConfig(ctx context.Context, cfg tools.ManagerConfig) (Voic
 }
 
 func NewVoiceAgentWithToolManager(ctx context.Context, cfg tools.ManagerConfig, toolManager tools.ToolManager) (VoiceAgent, error) {
+	return NewVoiceAgentWithToolManagerAndMemory(ctx, cfg, toolManager, nil)
+}
+
+// NewVoiceAgentWithToolManagerAndMemory 创建 VoiceAgent（带记忆服务）。
+func NewVoiceAgentWithToolManagerAndMemory(ctx context.Context, cfg tools.ManagerConfig, toolManager tools.ToolManager, memorySvc memory.Service) (VoiceAgent, error) {
 	normalized, err := normalizeConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -89,6 +102,7 @@ func NewVoiceAgentWithToolManager(ctx context.Context, cfg tools.ManagerConfig, 
 		markdownFilter:    NewMarkdownFilter(),
 		actionResponseGen: responseGen,
 		toolManager:       toolManager,
+		memorySvc:         memorySvc,
 	}, nil
 }
 
@@ -102,13 +116,7 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 		defer wg.Done()
 		defer close(eventChan)
 
-		messages := []*schema.Message{
-			schema.SystemMessage(`你是一个语音助手。
-
-当用户请求需要外部能力时，请调用合适的工具。
-工具名称必须与提供的工具列表完全一致。`),
-			schema.UserMessage(input),
-		}
+		messages := v.buildMessages(ctx, input)
 
 		logging.Infof("VoiceAgent: starting LLM stream...")
 		stream, err := v.chatModel.Stream(ctx, messages)
@@ -188,6 +196,22 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 	}()
 
 	return eventChan, nil
+}
+
+func (v *voiceAgentImpl) buildMessages(ctx context.Context, input string) []*schema.Message {
+	if v.memorySvc != nil {
+		messages, err := v.memorySvc.BuildContextMessages(ctx, input)
+		if err != nil {
+			logging.Warnf("VoiceAgent: build memory context failed: %v", err)
+		}
+		if len(messages) > 0 {
+			return messages
+		}
+	}
+	return []*schema.Message{
+		schema.SystemMessage(defaultSystemPrompt),
+		schema.UserMessage(input),
+	}
 }
 
 func (v *voiceAgentImpl) SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan AgentEvent, error) {
