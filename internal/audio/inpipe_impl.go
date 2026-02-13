@@ -163,22 +163,29 @@ func (p *inPipeImpl) Stop() error {
 
 func (p *inPipeImpl) SendAudio(audio []byte) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if p.state == InPipeStateStopping {
+		p.mu.Unlock()
 		return nil
 	}
 
 	if p.state != InPipeStateListening {
+		p.mu.Unlock()
 		return logError("AudioInPipe: not in listening state, current: %s", p.state)
 	}
 
-	if p.recognizer == nil {
+	recognizer := p.recognizer
+	ctx := p.ctx
+	p.mu.Unlock()
+
+	if recognizer == nil {
 		return logError("AudioInPipe: recognizer not initialized")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	if err := p.recognizer.SendAudio(p.ctx, audio); err != nil {
-		if err == context.Canceled {
+	if err := recognizer.SendAudio(ctx, audio); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			return nil
 		}
 		return logError("AudioInPipe: send audio error: %v", err)
