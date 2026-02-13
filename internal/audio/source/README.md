@@ -95,25 +95,30 @@ audioInPipe, err := audio.NewInPipeWithAudioSource(apiKey, config, micSource)
 
 ### 服务端模式（WebSocket）
 
-服务端不使用 AudioSource，而是通过 `SendAudio()` 方法发送音频：
+服务端可使用 `WebSocketSource` 将二进制音频统一接入 `AudioInPipe`：
 
 ```go
-import "github.com/liuscraft/orion-x/internal/audio"
+import (
+    "github.com/liuscraft/orion-x/internal/audio"
+    "github.com/liuscraft/orion-x/internal/audio/source"
+)
 
-// 创建 AudioInPipe（不关联 AudioSource）
+// 创建 WebSocket 音频源
+wsSource, err := source.NewWebSocketSource(nil)
+if err != nil {
+    return err
+}
+defer wsSource.Close()
+
+// 创建 AudioInPipe 并关联 WebSocketSource
 config := audio.DefaultInPipeConfig()
-audioInPipe, err := audio.NewInPipe(apiKey, config)
+audioInPipe, err := audio.NewInPipeWithAudioSource(apiKey, config, wsSource)
+if err != nil {
+    return err
+}
 
-// 从 WebSocket 接收并发送音频
-go func() {
-    for {
-        audioData, err := websocket.ReadMessage()
-        if err != nil {
-            break
-        }
-        audioInPipe.SendAudio(audioData)
-    }
-}()
+// WebSocket 收到音频后，推送到 source
+_ = wsSource.PushPCM(audioData)
 ```
 
 ## 实现新的音频源

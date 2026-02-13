@@ -17,6 +17,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
 	audiosink "github.com/liuscraft/orion-x/internal/audio/sink"
+	audiosource "github.com/liuscraft/orion-x/internal/audio/source"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/metrics"
@@ -53,6 +54,7 @@ type Session struct {
 	orchestrator voicebot.Orchestrator
 	audioOutPipe audio.AudioOutPipe
 	audioInPipe  audio.AudioInPipe
+	wsSource     *audiosource.WebSocketSource
 	mixer        audio.AudioMixer
 	audioSink    *audiosink.WebSocketSink
 	opusDecoder  *codec.OpusDecoder
@@ -297,37 +299,9 @@ func (s *Session) initPipeline() error {
 	)
 	s.orchestrator = orchestrator
 
-	audioInPipe, err := audio.NewInPipe(s.cfg.ASR.APIKey, &audio.InPipeConfig{
-		SampleRate:   s.audioParams.SampleRate,
-		Channels:     s.audioParams.Channels,
-		EnableVAD:    s.cfg.Audio.InPipe.EnableVAD,
-		VADThreshold: s.cfg.Audio.InPipe.VADThreshold,
-		ASRModel:     s.cfg.ASR.Model,
-		ASREndpoint:  s.cfg.ASR.Endpoint,
-	})
-	if err != nil {
+	if err := s.createAudioInPipe(); err != nil {
 		return err
 	}
-	if s.voicebotMetrics != nil {
-		audioInPipe = metrics.NewInstrumentedAudioInPipe(audioInPipe, s.voicebotMetrics)
-	}
-	s.audioInPipe = audioInPipe
-
-	audioInPipe.OnASRResult(func(text string, isFinal bool) {
-		if text == "" {
-			return
-		}
-		if isFinal {
-			s.markASRFinal()
-			_ = s.sendSTT(text, 0)
-			s.orchestrator.OnASRFinal(text)
-		} else {
-			s.orchestrator.OnUserSpeakingDetected()
-		}
-	})
-	audioInPipe.OnUserSpeakingDetected(func() {
-		s.orchestrator.OnUserSpeakingDetected()
-	})
 
 	if s.audioParams.Format == "opus" {
 		decoder, err := codec.NewOpusDecoder(codec.OpusConfig{
@@ -441,17 +415,24 @@ func (s *Session) handleBinaryMessage(data []byte) {
 
 	s.mu.Lock()
 	listening := s.listening
+	wsSource := s.wsSource
 	s.mu.Unlock()
 	if !listening {
 		return
 	}
-	if s.audioInPipe == nil {
+	if wsSource == nil {
 		return
 	}
 
 	switch s.audioParams.Format {
 	case "pcm":
-		_ = s.audioInPipe.SendAudio(data)
+		if err := wsSource.PushPCM(data); err != nil {
+			if errors.Is(err, audiosource.ErrWebSocketSourceQueueFull) {
+				logging.Warnf("Session %s: websocket source queue full, dropping pcm frame", s.sessionID)
+			} else {
+				logging.Warnf("Session %s: push pcm to websocket source failed: %v", s.sessionID, err)
+			}
+		}
 	case "opus":
 		if s.opusDecoder == nil {
 			return
@@ -462,7 +443,13 @@ func (s *Session) handleBinaryMessage(data []byte) {
 			return
 		}
 		payload := int16ToBytes(pcm)
-		_ = s.audioInPipe.SendAudio(payload)
+		if err := wsSource.PushPCM(payload); err != nil {
+			if errors.Is(err, audiosource.ErrWebSocketSourceQueueFull) {
+				logging.Warnf("Session %s: websocket source queue full, dropping opus frame", s.sessionID)
+			} else {
+				logging.Warnf("Session %s: push decoded opus to websocket source failed: %v", s.sessionID, err)
+			}
+		}
 	}
 }
 
@@ -497,16 +484,37 @@ func (s *Session) startListening() {
 		return
 	}
 	s.listening = true
+	audioInPipe := s.audioInPipe
 	s.mu.Unlock()
 
-	if s.audioInPipe != nil {
-		if err := s.audioInPipe.Start(s.ctx); err != nil {
+	if audioInPipe != nil {
+		if err := audioInPipe.Start(s.ctx); err != nil {
 			logging.Errorf("Session %s: start audio in pipe failed: %v", s.sessionID, err)
 			_ = s.sendServerStatus("error", "asr start failed", map[string]string{"reason": err.Error()})
 			s.mu.Lock()
 			s.listening = false
 			s.mu.Unlock()
 		}
+		return
+	}
+
+	if err := s.createAudioInPipe(); err != nil {
+		logging.Errorf("Session %s: create audio in pipe failed: %v", s.sessionID, err)
+		_ = s.sendServerStatus("error", "asr init failed", map[string]string{"reason": err.Error()})
+		s.mu.Lock()
+		s.listening = false
+		s.mu.Unlock()
+		return
+	}
+
+	if err := s.audioInPipe.Start(s.ctx); err != nil {
+		logging.Errorf("Session %s: start audio in pipe failed: %v", s.sessionID, err)
+		_ = s.sendServerStatus("error", "asr start failed", map[string]string{"reason": err.Error()})
+		s.mu.Lock()
+		s.listening = false
+		s.audioInPipe = nil
+		s.wsSource = nil
+		s.mu.Unlock()
 	}
 }
 
@@ -517,11 +525,59 @@ func (s *Session) stopListening() {
 		return
 	}
 	s.listening = false
+	audioInPipe := s.audioInPipe
+	s.audioInPipe = nil
+	s.wsSource = nil
 	s.mu.Unlock()
 
-	if s.audioInPipe != nil {
-		_ = s.audioInPipe.Stop()
+	if audioInPipe != nil {
+		_ = audioInPipe.Stop()
 	}
+}
+
+func (s *Session) createAudioInPipe() error {
+	wsSource, err := audiosource.NewWebSocketSource(nil)
+	if err != nil {
+		return err
+	}
+
+	audioInPipe, err := audio.NewInPipeWithAudioSource(s.cfg.ASR.APIKey, &audio.InPipeConfig{
+		SampleRate:   s.audioParams.SampleRate,
+		Channels:     s.audioParams.Channels,
+		EnableVAD:    s.cfg.Audio.InPipe.EnableVAD,
+		VADThreshold: s.cfg.Audio.InPipe.VADThreshold,
+		ASRModel:     s.cfg.ASR.Model,
+		ASREndpoint:  s.cfg.ASR.Endpoint,
+	}, wsSource)
+	if err != nil {
+		return err
+	}
+
+	if s.voicebotMetrics != nil {
+		audioInPipe = metrics.NewInstrumentedAudioInPipe(audioInPipe, s.voicebotMetrics)
+	}
+
+	audioInPipe.OnASRResult(func(text string, isFinal bool) {
+		if text == "" {
+			return
+		}
+		if isFinal {
+			s.markASRFinal()
+			_ = s.sendSTT(text, 0)
+			s.orchestrator.OnASRFinal(text)
+		} else {
+			s.orchestrator.OnUserSpeakingDetected()
+		}
+	})
+	audioInPipe.OnUserSpeakingDetected(func() {
+		s.orchestrator.OnUserSpeakingDetected()
+	})
+
+	s.mu.Lock()
+	s.audioInPipe = audioInPipe
+	s.wsSource = wsSource
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Session) playTTSDirect(text string) {

@@ -83,7 +83,7 @@
 - [x] 创建 source 包使用说明（source/README.md）
 - [x] 创建重构总结和验证清单文档
 - [x] 为 WebSocket、File 等音频源预留扩展空间
-- [ ] 实现 WebSocketSource（服务端 WebSocket 音频流）
+- [x] 实现 WebSocketSource（服务端 WebSocket 音频流）
 - [ ] 实现 FileSource（文件音频读取，测试用）
 - [ ] 实现 StreamSource（通用 io.Reader 包装器）
 

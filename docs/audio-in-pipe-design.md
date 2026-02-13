@@ -103,10 +103,10 @@ ASR识别
 ### 服务端模式（WebSocket）
 
 ```
-浏览器麦克风 → WebSocket → AudioInPipe.SendAudio() → ASR → 后续处理
+浏览器麦克风 → WebSocketSource → AudioInPipe → ASR → 后续处理
 ```
 
-服务端不使用 AudioSource，而是通过 `SendAudio()` 方法接收来自 WebSocket 的音频流。
+服务端使用 `WebSocketSource` 作为 `AudioSource`，将输入路径统一为 `Read()` + `Close()`。
 
 ## 音频源集成
 
@@ -124,7 +124,7 @@ type AudioSource interface {
 
 **可用的音频源**：
 - `MicrophoneSource` - 本地麦克风（已实现）
-- `WebSocketSource` - WebSocket 音频流（待实现）
+- `WebSocketSource` - WebSocket 音频流（已实现）
 - `FileSource` - 文件音频（待实现）
 
 ## VAD 检测（可选）
@@ -169,28 +169,29 @@ if err != nil {
 audioInPipe.Start(ctx)
 ```
 
-### 服务端模式：使用 SendAudio()
+### 服务端模式：使用 WebSocketSource
 
 ```go
-import "github.com/liuscraft/orion-x/internal/audio"
+import (
+    "github.com/liuscraft/orion-x/internal/audio"
+    "github.com/liuscraft/orion-x/internal/audio/source"
+)
 
-// 1. 创建 AudioInPipe（不关联 AudioSource）
-config := audio.DefaultInPipeConfig()
-audioInPipe, err := audio.NewInPipe(apiKey, config)
+// 1. 创建 WebSocket 音频源
+wsSource, err := source.NewWebSocketSource(nil)
 if err != nil {
     return err
 }
 
-// 2. 从 WebSocket 接收音频并发送到 AudioInPipe
-go func() {
-    for {
-        audioData, err := websocket.ReadMessage()
-        if err != nil {
-            break
-        }
-        audioInPipe.SendAudio(audioData)
-    }
-}()
+// 2. 创建 AudioInPipe（关联 AudioSource）
+config := audio.DefaultInPipeConfig()
+audioInPipe, err := audio.NewInPipeWithAudioSource(apiKey, config, wsSource)
+if err != nil {
+    return err
+}
+
+// 3. 从 WebSocket 接收音频并推送到 source
+_ = wsSource.PushPCM(audioData)
 ```
 
 ### 测试模式：使用自定义 AudioSource
