@@ -270,4 +270,4 @@ type AudioOutPipe interface {
 - `internal/audio/outpipe_impl.go` - AudioOutPipe 集成
 - `internal/voicebot/orchestrator.go` - Orchestrator 更新
 - `internal/config/config.go` - 配置结构
-- `config/voicebot.example.json` - 配置示例
+- `voicebot.example.json` - 配置示例

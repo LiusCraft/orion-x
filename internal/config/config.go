@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const DefaultPath = "config/voicebot.json"
+const DefaultPath = "data/voicebot.json"
 
 type AppConfig struct {
 	Logging LoggingConfig `json:"logging"`

@@ -55,7 +55,7 @@ executor.RegisterTool("playMusic", tools.ToolTypeAction, playMusicFunc)
 
 ### 3. 配置文件注册
 
-在 `config/voicebot.json` 中添加工具类型：
+在 `data/voicebot.json` 中添加工具类型：
 
 ```json
 {
