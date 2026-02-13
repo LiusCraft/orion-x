@@ -19,6 +19,7 @@ import (
 	audiosink "github.com/liuscraft/orion-x/internal/audio/sink"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/metrics"
 	"github.com/liuscraft/orion-x/internal/tools"
 	"github.com/liuscraft/orion-x/internal/tts"
@@ -48,6 +49,7 @@ type Session struct {
 	writeTimeout time.Duration
 
 	voiceAgent   agent.VoiceAgent
+	memorySvc    memory.Service
 	toolManager  tools.ToolManager
 	toolExecutor tools.ToolExecutor
 	orchestrator voicebot.Orchestrator
@@ -94,6 +96,11 @@ func (s *Session) ID() string {
 
 func (s *Session) Run() {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.ctx = memory.WithContext(s.ctx, memory.Context{
+		UserID:    resolveUserID(s.deviceID, s.clientID, s.sessionID),
+		SessionID: s.sessionID,
+		DeviceID:  s.deviceID,
+	})
 
 	if s.readTimeout > 0 {
 		_ = s.conn.SetReadDeadline(time.Now().Add(s.readTimeout))
@@ -152,6 +159,11 @@ func (s *Session) Close() {
 				logging.Warnf("Session %s: close tool manager failed: %v", s.sessionID, err)
 			}
 		}
+		if s.memorySvc != nil {
+			if err := s.memorySvc.Close(); err != nil {
+				logging.Warnf("Session %s: close memory service failed: %v", s.sessionID, err)
+			}
+		}
 		if s.conn != nil {
 			_ = s.conn.Close()
 		}
@@ -189,6 +201,28 @@ func (s *Session) waitClientHello() error {
 }
 
 func (s *Session) initPipeline() error {
+	memCfg := memory.Config{
+		Mode:                 memory.Mode(strings.TrimSpace(s.cfg.Memory.Mode)),
+		SessionMaxTurns:      s.cfg.Memory.SessionMaxTurns,
+		SessionSummaryEveryN: s.cfg.Memory.SessionSummaryEveryN,
+		LongTermDBPath:       s.cfg.Memory.LongTermDBPath,
+		LongTermMaxResults:   s.cfg.Memory.LongTermMaxResults,
+		RetentionDays:        s.cfg.Memory.RetentionDays,
+		FTSMinScore:          s.cfg.Memory.FTSMinScore,
+	}
+	memorySvc, err := memory.NewService(memCfg, memory.Options{
+		SystemPrompt: agent.DefaultSystemPrompt(),
+		LLM: memory.LLMConfig{
+			APIKey:  s.cfg.LLM.APIKey,
+			BaseURL: s.cfg.LLM.BaseURL,
+			Model:   s.cfg.LLM.Model,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	s.memorySvc = memorySvc
+
 	toolCfg := tools.ManagerConfig{
 		APIKey:          s.cfg.LLM.APIKey,
 		BaseURL:         s.cfg.LLM.BaseURL,
@@ -204,7 +238,7 @@ func (s *Session) initPipeline() error {
 	}
 	s.toolManager = toolManager
 
-	voiceAgent, err := agent.NewVoiceAgentWithToolManager(s.ctx, toolCfg, toolManager)
+	voiceAgent, err := agent.NewVoiceAgentWithToolManagerAndMemory(s.ctx, toolCfg, toolManager, memorySvc)
 	if err != nil {
 		return err
 	}
@@ -293,6 +327,7 @@ func (s *Session) initPipeline() error {
 				MaxInFlightSentences: s.cfg.Audio.TTSScheduler.MaxInFlightSentences,
 				MaxCacheSentences:    s.cfg.Audio.TTSScheduler.MaxCacheSentences,
 			},
+			Memory: memorySvc,
 		},
 	)
 	s.orchestrator = orchestrator
@@ -743,6 +778,16 @@ func audioParamsFromConfig(cfg *config.AppConfig) AudioParams {
 		BitsPerSample:        ap.BitsPerSample,
 		PlayBufferDurationMs: ap.PlayBufferDurationMs,
 	}
+}
+
+func resolveUserID(deviceID, clientID, sessionID string) string {
+	if strings.TrimSpace(deviceID) != "" {
+		return deviceID
+	}
+	if strings.TrimSpace(clientID) != "" {
+		return clientID
+	}
+	return sessionID
 }
 
 func int16ToBytes(samples []int16) []byte {

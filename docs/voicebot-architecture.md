@@ -333,6 +333,10 @@ internal/
 ├── text/
 │   ├── segmenter.go         # 已有
 │   └── markdown_filter.go   # Markdown过滤器
+├── memory/
+│   ├── service.go            # 记忆服务
+│   ├── session_buffer.go     # Session 记忆
+│   └── sqlite_store.go       # 长期记忆存储
 ├── asr/
 │   ├── recognizer.go        # 已有
 │   └── dashscope.go         # 已有
@@ -361,6 +365,15 @@ cmd/voicebot/
 - `internal/asr/*`: 现有ASR模块
 - `internal/tts/*`: 现有TTS模块
 - `internal/text/segmenter.go`: 现有分句器
+- `internal/memory/*`: 记忆服务与持久化
+
+## 记忆数据流
+
+```
+ASRFinal → Orchestrator → MemoryContext → VoiceAgent(BuildContextMessages) → LLM
+                                      ↓
+TTS完成 → Orchestrator → MemoryService.RecordTurn → SQLite/SessionBuffer
+```
 
 ## 实现步骤
 

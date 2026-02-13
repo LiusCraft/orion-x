@@ -6,11 +6,13 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/text"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
@@ -66,6 +68,7 @@ type OrchestratorObserver interface {
 type OrchestratorOptions struct {
 	Observer     OrchestratorObserver
 	TTSScheduler TTSSchedulerConfig
+	Memory       memory.Service
 }
 
 // orchestratorImpl Orchestrator 实现
@@ -104,7 +107,15 @@ type orchestratorImpl struct {
 	wg sync.WaitGroup
 	mu sync.Mutex
 
-	observer OrchestratorObserver
+	observer  OrchestratorObserver
+	memorySvc memory.Service
+
+	turnStartedAt      time.Time
+	turnUserText       string
+	turnAssistantBuf   strings.Builder
+	turnAborted        bool
+	turnRecorded       bool
+	activeAgentStreams int
 }
 
 // NewOrchestrator 创建新的Orchestrator
@@ -150,6 +161,12 @@ func NewOrchestratorWithOptions(
 		observer:        observer,
 		sentenceIndex:   make(map[int64]*SentenceRecord),
 		ttsSchedulerCfg: schedulerCfg,
+		memorySvc: func() memory.Service {
+			if opts != nil {
+				return opts.Memory
+			}
+			return nil
+		}(),
 	}
 }
 
@@ -306,6 +323,7 @@ func (o *orchestratorImpl) handleUserSpeakingDetected(event Event) {
 	needInterrupt := currentState == StateSpeaking || currentState == StateProcessing || ttsPending
 	if needInterrupt {
 		o.mu.Lock()
+		o.turnAborted = true
 		pendingCount := o.ttsPendingCount
 		o.mu.Unlock()
 		logging.Infof("Orchestrator: UserSpeakingDetected - interrupting (state=%s, ttsPending=%d)", currentState, pendingCount)
@@ -553,6 +571,7 @@ func (o *orchestratorImpl) onTTSPlaybackFinished() {
 		if o.observer != nil {
 			o.observer.OnTTSStop(false)
 		}
+		o.maybeFinalizeTurn()
 	}
 }
 
@@ -571,6 +590,12 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 	}
 	// 新 turn：清理 pending/inFlight，避免旧句子继续调度
 	o.currentTurnID++
+	o.turnStartedAt = time.Now()
+	o.turnUserText = asrEvent.Text
+	o.turnAssistantBuf.Reset()
+	o.turnAborted = false
+	o.turnRecorded = false
+	o.activeAgentStreams = 0
 	o.abortPendingSentencesLocked()
 
 	// 为新的 Agent 调用创建独立的 context
@@ -585,7 +610,9 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 
 	o.wg.Add(1)
 	go func() {
+		o.incAgentStreams()
 		defer o.wg.Done()
+		defer o.decAgentStreams()
 
 		// 使用 agentCtx 调用 Agent（可被打断）
 		eventChan, err := o.voiceAgent.Process(agentCtx, asrEvent.Text)
@@ -630,7 +657,9 @@ func (o *orchestratorImpl) handleToolCallRequested(event Event) {
 
 	o.wg.Add(1)
 	go func() {
+		o.incAgentStreams()
 		defer o.wg.Done()
+		defer o.decAgentStreams()
 
 		result, audioReader, err := o.toolExecutor.Execute(toolEvent.Tool, toolEvent.Args)
 		if err != nil {
@@ -689,6 +718,7 @@ func (o *orchestratorImpl) handleLLMEmotionChanged(event Event) {
 func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 	switch e := event.(type) {
 	case *agent.TextChunkEvent:
+		o.appendAssistantText(e.Chunk)
 		if o.observer != nil {
 			o.observer.OnLLMTextChunk(e.Chunk, e.Emotion)
 		}
@@ -721,10 +751,71 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 		}
 		o.mu.Lock()
 		pending := o.ttsPendingCount
+		hasPendingQueue := len(o.pendingQueue) > 0
 		o.mu.Unlock()
 		logging.Infof("Orchestrator: VoiceAgent finished (TTS pending: %d)", pending)
 		// 注意：不转为 Idle，保持 Speaking 状态直到所有 TTS 播放完成
 		// onTTSPlaybackFinished 会在每个 TTS 播放完成时被调用
+		if pending <= 0 && !hasPendingQueue {
+			o.maybeFinalizeTurn()
+		}
+	}
+}
+
+func (o *orchestratorImpl) appendAssistantText(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.turnRecorded {
+		return
+	}
+	o.turnAssistantBuf.WriteString(text)
+}
+
+func (o *orchestratorImpl) incAgentStreams() {
+	o.mu.Lock()
+	o.activeAgentStreams++
+	o.mu.Unlock()
+}
+
+func (o *orchestratorImpl) decAgentStreams() {
+	o.mu.Lock()
+	if o.activeAgentStreams > 0 {
+		o.activeAgentStreams--
+	}
+	o.mu.Unlock()
+	o.maybeFinalizeTurn()
+}
+
+func (o *orchestratorImpl) maybeFinalizeTurn() {
+	if o.memorySvc == nil {
+		return
+	}
+	o.mu.Lock()
+	if o.turnRecorded || o.activeAgentStreams > 0 {
+		o.mu.Unlock()
+		return
+	}
+	if strings.TrimSpace(o.turnUserText) == "" {
+		o.turnRecorded = true
+		o.mu.Unlock()
+		return
+	}
+	turn := memory.Turn{
+		TurnID:        o.currentTurnID,
+		UserText:      o.turnUserText,
+		AssistantText: strings.TrimSpace(o.turnAssistantBuf.String()),
+		StartedAt:     o.turnStartedAt,
+		EndedAt:       time.Now(),
+		Aborted:       o.turnAborted,
+	}
+	o.turnRecorded = true
+	o.mu.Unlock()
+
+	if err := o.memorySvc.RecordTurn(o.ctx, turn); err != nil {
+		logging.Warnf("Orchestrator: record memory failed: %v", err)
 	}
 }
 

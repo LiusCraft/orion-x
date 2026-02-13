@@ -21,6 +21,7 @@ type AppConfig struct {
 	Tools   ToolsConfig   `json:"tools"`
 	Server  ServerConfig  `json:"server"`
 	Metrics MetricsConfig `json:"metrics"`
+	Memory  MemoryConfig  `json:"memory"`
 }
 
 type LoggingConfig struct {
@@ -97,6 +98,16 @@ type ToolsConfig struct {
 	Types           map[string]string `json:"types"`
 	ActionResponses map[string]string `json:"action_responses"`
 	MCP             []MCPServerConfig `json:"mcp"`
+}
+
+type MemoryConfig struct {
+	Mode                 string  `json:"mode"`
+	SessionMaxTurns      int     `json:"session_max_turns"`
+	SessionSummaryEveryN int     `json:"session_summary_every_n"`
+	LongTermDBPath       string  `json:"long_term_db_path"`
+	LongTermMaxResults   int     `json:"long_term_max_results"`
+	RetentionDays        int     `json:"retention_days"`
+	FTSMinScore          float64 `json:"fts_min_score"`
 }
 
 type MCPServerConfig struct {
@@ -247,6 +258,15 @@ func DefaultConfig() *AppConfig {
 			EnableOpenMetrics:   true,
 			MaxRequestsInFlight: 5,
 			BearerToken:         "",
+		},
+		Memory: MemoryConfig{
+			Mode:                 "session",
+			SessionMaxTurns:      10,
+			SessionSummaryEveryN: 20,
+			LongTermDBPath:       "data/memory.db",
+			LongTermMaxResults:   6,
+			RetentionDays:        365,
+			FTSMinScore:          0,
 		},
 	}
 }
@@ -411,6 +431,31 @@ func (c *AppConfig) Validate() error {
 		if server.TimeoutMs < 0 {
 			return fmt.Errorf("tools.mcp[%d].timeout_ms must be >= 0", i)
 		}
+	}
+
+	memoryMode := strings.TrimSpace(c.Memory.Mode)
+	if memoryMode == "" {
+		memoryMode = "session"
+	}
+	switch memoryMode {
+	case "none", "session", "long_term":
+	default:
+		return fmt.Errorf("memory.mode must be none, session, or long_term")
+	}
+	if c.Memory.SessionMaxTurns < 0 {
+		return errors.New("memory.session_max_turns must be >= 0")
+	}
+	if c.Memory.SessionSummaryEveryN < 0 {
+		return errors.New("memory.session_summary_every_n must be >= 0")
+	}
+	if c.Memory.LongTermMaxResults < 0 {
+		return errors.New("memory.long_term_max_results must be >= 0")
+	}
+	if c.Memory.RetentionDays < 0 {
+		return errors.New("memory.retention_days must be >= 0")
+	}
+	if memoryMode == "long_term" && strings.TrimSpace(c.Memory.LongTermDBPath) == "" {
+		return errors.New("memory.long_term_db_path must not be empty when long_term mode")
 	}
 
 	return nil

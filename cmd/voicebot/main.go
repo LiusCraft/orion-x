@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/gordonklaus/portaudio"
@@ -15,6 +16,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/audio/source"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/tools"
 	"github.com/liuscraft/orion-x/internal/tts"
 	"github.com/liuscraft/orion-x/internal/voicebot"
@@ -50,6 +52,36 @@ func main() {
 	logging.Infof("========================================")
 
 	logging.Infof("Config loaded successfully")
+	baseCtx := memory.WithContext(context.Background(), memory.Context{
+		UserID:    "local",
+		SessionID: "local",
+	})
+
+	memCfg := memory.Config{
+		Mode:                 memory.Mode(strings.TrimSpace(appConfig.Memory.Mode)),
+		SessionMaxTurns:      appConfig.Memory.SessionMaxTurns,
+		SessionSummaryEveryN: appConfig.Memory.SessionSummaryEveryN,
+		LongTermDBPath:       appConfig.Memory.LongTermDBPath,
+		LongTermMaxResults:   appConfig.Memory.LongTermMaxResults,
+		RetentionDays:        appConfig.Memory.RetentionDays,
+		FTSMinScore:          appConfig.Memory.FTSMinScore,
+	}
+	memorySvc, err := memory.NewService(memCfg, memory.Options{
+		SystemPrompt: agent.DefaultSystemPrompt(),
+		LLM: memory.LLMConfig{
+			APIKey:  appConfig.LLM.APIKey,
+			BaseURL: appConfig.LLM.BaseURL,
+			Model:   appConfig.LLM.Model,
+		},
+	})
+	if err != nil {
+		logging.Fatalf("Failed to create memory service: %v", err)
+	}
+	defer func() {
+		if err := memorySvc.Close(); err != nil {
+			logging.Warnf("Close memory service failed: %v", err)
+		}
+	}()
 	toolCfg := tools.ManagerConfig{
 		APIKey:          appConfig.LLM.APIKey,
 		BaseURL:         appConfig.LLM.BaseURL,
@@ -60,7 +92,7 @@ func main() {
 	}
 
 	logging.Infof("Creating ToolManager...")
-	toolManager, err := tools.NewToolManager(context.Background(), toolCfg)
+	toolManager, err := tools.NewToolManager(baseCtx, toolCfg)
 	if err != nil {
 		logging.Fatalf("Failed to create ToolManager: %v", err)
 	}
@@ -72,7 +104,7 @@ func main() {
 	logging.Infof("ToolManager created successfully")
 
 	logging.Infof("Creating VoiceAgent...")
-	voiceAgent, err := agent.NewVoiceAgentWithToolManager(context.Background(), toolCfg, toolManager)
+	voiceAgent, err := agent.NewVoiceAgentWithToolManagerAndMemory(baseCtx, toolCfg, toolManager, memorySvc)
 	if err != nil {
 		logging.Fatalf("Failed to create VoiceAgent: %v", err)
 	}
@@ -190,13 +222,19 @@ func main() {
 	logging.Infof("AudioInPipe created successfully")
 
 	// 创建工具执行器适配器
-	toolExecutor := tools.NewExecutorAdapter(context.Background(), toolManager)
+	toolExecutor := tools.NewExecutorAdapter(baseCtx, toolManager)
 
 	logging.Infof("Creating Orchestrator...")
-	orchestrator := voicebot.NewOrchestrator(voiceAgent, audioOutPipe, audioInPipe, toolExecutor)
+	orchestrator := voicebot.NewOrchestratorWithOptions(
+		voiceAgent,
+		audioOutPipe,
+		audioInPipe,
+		toolExecutor,
+		&voicebot.OrchestratorOptions{Memory: memorySvc},
+	)
 	logging.Infof("Orchestrator created successfully")
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
 
 	logging.Infof("Setting up signal handler...")
