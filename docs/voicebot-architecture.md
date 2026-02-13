@@ -226,7 +226,7 @@ if isTTSPlaying {
 ### 0. 配置管理
 
 - 配置文件统一管理日志、ASR、TTS、LLM、音频与工具参数。
-- 默认路径 `config/voicebot.json`，支持命令行 `-config` 覆盖。
+- 默认路径 `data/voicebot.json`，支持命令行 `-config` 覆盖。
 - 加载顺序：默认值 → 配置文件 → 环境变量（`LOG_LEVEL`/`LOG_FORMAT`/`DASHSCOPE_API_KEY`/`ZHIPU_API_KEY`）。
 
 ### 1. 工具分类

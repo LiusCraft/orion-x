@@ -53,7 +53,7 @@ internal/audio/
 internal/audio/source/       # 音频源实现（独立包）
   ├── microphone.go          # 本地麦克风源
   ├── microphone_test.go
-  ├── websocket.go           # WebSocket 源（待实现）
+  ├── websocket.go           # WebSocket 源（已实现）
   ├── file.go                # 文件源（待实现）
   └── README.md              # 音频源使用说明
 ```
@@ -152,47 +152,35 @@ audioData, err := micSource.Read(ctx)
 
 ### 2. WebSocketSource（WebSocket 音频流）
 
-**位置**：`internal/audio/source/websocket.go`（待实现）
+**位置**：`internal/audio/source/websocket.go`
 
 **用途**：服务端从 WebSocket 接收浏览器传来的音频流
 
-**依赖**：`github.com/gorilla/websocket` 或类似库
+**依赖**：无（由上层 Session 解码/推送 PCM）
 
 **构造函数**：
 ```go
-func NewWebSocketSource(conn *websocket.Conn, config *WebSocketSourceConfig) (*WebSocketSource, error)
+func NewWebSocketSource(config *WebSocketSourceConfig) (*WebSocketSource, error)
 ```
 
 **特性**：
-- 从 WebSocket 连接读取 PCM 音频数据
-- 支持音频格式协商（采样率、声道数）
-- 处理网络断连和重连
-- 支持背压控制（buffering）
+- 通过 `PushPCM([]byte)` 接收上层喂入的 PCM 帧
+- `Read(ctx)` 阻塞读取，支持 `ctx` 取消
+- `Close()` 幂等，关闭后 `Read` 返回 `io.EOF`
+- 有界队列，队列满时返回错误用于上层丢帧观测
 
-**数据格式**：
-```json
-{
-  "type": "audio",
-  "format": "pcm",
-  "sampleRate": 16000,
-  "channels": 1,
-  "data": "base64-encoded-pcm-data"
-}
-```
-
-**示例**（伪代码）：
+**示例**：
 ```go
 import "github.com/liuscraft/orion-x/internal/audio/source"
 
-// 从 WebSocket 创建音频源
-wsSource, err := source.NewWebSocketSource(conn, nil)
+wsSource, err := source.NewWebSocketSource(nil)
 if err != nil {
     return err
 }
 defer wsSource.Close()
 
-// 读取音频
-audioData, err := wsSource.Read(ctx)
+// WebSocket 消息处理后推送 PCM 到 source
+_ = wsSource.PushPCM(audioData)
 ```
 
 ---
@@ -440,7 +428,7 @@ sed -i 's|internal/audio"|internal/audio/source"|g' *.go
 ### 计划实现的音频源
 
 1. ✅ **MicrophoneSource** - 本地麦克风（已实现）
-2. ⏳ **WebSocketSource** - WebSocket 音频流（待实现）
+2. ✅ **WebSocketSource** - WebSocket 音频流（已实现）
 3. ⏳ **FileSource** - 文件音频读取（待实现）
 4. ⏳ **RTSPSource** - RTSP 网络音频流
 5. ⏳ **StreamSource** - 通用 io.Reader 包装器

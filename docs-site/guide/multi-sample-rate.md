@@ -118,7 +118,7 @@ type Stream interface {
 
 ## 配置方案
 
-### config/voicebot.json
+### data/voicebot.json
 
 ```json
 {

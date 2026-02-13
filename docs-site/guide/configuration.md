@@ -9,9 +9,9 @@
 ## 配置文件格式与位置
 
 - 格式: JSON（不引入额外依赖）
-- 默认路径: `config/voicebot.json`
+- 默认路径: `data/voicebot.json`
 - 通过 `-config` 参数覆盖默认路径
-- 示例配置: `config/voicebot.example.json`
+- 示例配置: `voicebot.example.json`
 
 ## 加载顺序
 

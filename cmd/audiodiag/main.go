@@ -152,7 +152,7 @@ func main() {
 		}
 		bufferSize := sampleRate * bufferMs / 1000
 
-		fmt.Println("Add this to your config/voicebot.json:")
+		fmt.Println("Add this to your data/voicebot.json:")
 		fmt.Println()
 		fmt.Println("\"in_pipe\": {")
 		fmt.Printf("    \"sample_rate\": %d,\n", sampleRate)

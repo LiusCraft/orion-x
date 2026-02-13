@@ -1,4 +1,4 @@
-config/voicebot.json
+data/
 cmd/voicebot/config/voicebot.json
 docs-site/node_modules
 docs-site/.vitepress/cache

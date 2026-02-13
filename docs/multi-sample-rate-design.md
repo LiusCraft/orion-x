@@ -154,7 +154,7 @@ type Stream interface {
 
 ## 配置方案
 
-### config/voicebot.json
+### data/voicebot.json
 
 ```json
 {
@@ -293,7 +293,7 @@ logging.Debugf("Resampling: %d samples @ %d Hz → %d samples @ %d Hz",
 需要更新的文档：
 - `docs/tts.md` - 添加多采样率说明
 - `docs/audio-architecture.md` - 添加重采样模块
-- `config/voicebot.example.json` - 添加采样率配置示例
+- `voicebot.example.json` - 添加采样率配置示例
 - `README.md` - 更新支持的采样率列表
 
 ## 测试计划

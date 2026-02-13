@@ -77,10 +77,10 @@ cd orion-x
 复制示例配置文件并填入你的 API 密钥：
 
 ```bash
-cp config/voicebot.example.json config/voicebot.json
+cp voicebot.example.json data/voicebot.json
 ```
 
-编辑 `config/voicebot.json`，填入：
+编辑 `data/voicebot.json`，填入：
 - 阿里云 Dashscope API Key (ASR/TTS)
 - 智谱 AI API Key (LLM)
 
