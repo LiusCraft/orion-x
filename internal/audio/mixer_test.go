@@ -2,7 +2,10 @@ package audio
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 )
@@ -154,6 +157,119 @@ func TestMixerStartStop(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	if err := mixer.Stop(); err != nil {
 		t.Fatalf("Stop failed: %v", err)
+	}
+}
+
+type stopOrderSink struct {
+	mu               sync.Mutex
+	started          bool
+	writeStartedCh   chan struct{}
+	releaseWriteCh   chan struct{}
+	notStartedWrites int
+	stopCalls        int
+}
+
+func newStopOrderSink() *stopOrderSink {
+	return &stopOrderSink{
+		writeStartedCh: make(chan struct{}, 1),
+		releaseWriteCh: make(chan struct{}),
+	}
+}
+
+func (s *stopOrderSink) Start(ctx context.Context, format AudioFormat) error {
+	_ = ctx
+	_ = format
+	s.mu.Lock()
+	s.started = true
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *stopOrderSink) WritePCM(samples []int16) error {
+	_ = samples
+	s.mu.Lock()
+	if !s.started {
+		s.notStartedWrites++
+		s.mu.Unlock()
+		return errors.New("WebSocketSink: not started")
+	}
+	s.mu.Unlock()
+
+	select {
+	case s.writeStartedCh <- struct{}{}:
+	default:
+	}
+
+	<-s.releaseWriteCh
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.started {
+		s.notStartedWrites++
+		return errors.New("WebSocketSink: not started")
+	}
+	return nil
+}
+
+func (s *stopOrderSink) Stop() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.started = false
+	s.stopCalls++
+	return nil
+}
+
+func TestMixerStopWaitsBeforeStoppingSink(t *testing.T) {
+	config := DefaultMixerConfig()
+	config.FramesPerBuffer = 64
+
+	mixer, err := NewMixer(config)
+	if err != nil {
+		t.Fatalf("NewMixer failed: %v", err)
+	}
+
+	// Ensure mixLoop has data to write.
+	audioData := make([]byte, 4096)
+	mixer.AddTTSStream(newMockReader(audioData))
+
+	sink := newStopOrderSink()
+	mixer.SetSink(sink)
+
+	if err := mixer.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	select {
+	case <-sink.writeStartedCh:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("expected mixer to enter sink.WritePCM")
+	}
+
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- mixer.Stop()
+	}()
+
+	// Give Stop() a chance to run cancel/wait path, then unblock write.
+	time.Sleep(20 * time.Millisecond)
+	close(sink.releaseWriteCh)
+
+	select {
+	case err := <-stopDone:
+		if err != nil {
+			t.Fatalf("Stop failed: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Stop timed out")
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if sink.notStartedWrites != 0 {
+		t.Fatalf("expected no not-started writes during stop, got %d", sink.notStartedWrites)
+	}
+	if sink.stopCalls != 1 {
+		t.Fatalf("expected sink.Stop to be called once, got %d", sink.stopCalls)
 	}
 }
 

@@ -160,13 +160,15 @@ func (m *mixerImpl) Stop() error {
 		cancel()
 	}
 
+	// Wait for mixLoop to exit before stopping sink to avoid
+	// "sink not started" race during shutdown.
+	m.wg.Wait()
+
 	if sink != nil {
 		if err := sink.Stop(); err != nil {
 			logging.Errorf("AudioMixer: failed to stop sink: %v", err)
 		}
 	}
-
-	m.wg.Wait()
 	return nil
 }
 
