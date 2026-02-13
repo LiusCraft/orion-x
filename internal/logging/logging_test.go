@@ -33,12 +33,15 @@ func TestStartTurnAddsLogFields(t *testing.T) {
 		if field.Type == zapcore.Int64Type {
 			fields[field.Key] = field.Integer
 		}
+		if field.Type == zapcore.Uint64Type {
+			fields[field.Key] = uint64(field.Integer)
+		}
 	}
 
 	if fields["trace_id"] != "trace-123" {
 		t.Fatalf("expected trace_id to be trace-123, got %v", fields["trace_id"])
 	}
-	if fields["turn_id"] != int64(1) {
+	if fields["turn_id"] != uint64(1) {
 		t.Fatalf("expected turn_id to be 1, got %v", fields["turn_id"])
 	}
 	if fields["log_id"] != "trace-123-1" {
