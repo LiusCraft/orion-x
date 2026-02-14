@@ -19,16 +19,12 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", config.DefaultPath, "config file path")
+	configPath := flag.String("config", config.DefaultWSServerPath, "config file path")
 	flag.Parse()
 
-	appConfig, err := config.Load(*configPath)
+	appConfig, err := config.LoadWSServer(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
-	if err := appConfig.ValidateKeys(true, true, true); err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid config: %v\n", err)
 		os.Exit(1)
 	}
 

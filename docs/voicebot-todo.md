@@ -172,6 +172,10 @@
 - [ ] 实现HTTP API
 - [ ] 客户端SDK
 
+### 16.1 配置与设备管理服务 (优先级: 中)
+- [ ] 设计并实现 manager 服务（管理设备与 voicebot 配置绑定关系）
+- [ ] ws-server 接入 manager 查询（device-id -> voicebot），并支持超时降级策略
+
 ## 优先级说明
 
 - **高**: 核心功能，必须先实现

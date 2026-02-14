@@ -37,12 +37,26 @@ S -> C: hello (确认后的 audio_params)
 ## Session 生命周期
 
 1. 建立连接并完成 hello 交换
-2. 初始化音频管线（Mixer + WebSocketSink + AudioOutPipe）
+2. 基于 `device-id` 解析会话级 `voicebot` 配置
+3. 初始化音频管线（Mixer + WebSocketSink + AudioOutPipe）
 3. 监听 JSON / 二进制消息
 4. 断开连接后释放：
    - Orchestrator.Stop()
    - AudioInPipe.Stop()
    - Mixer.Stop()
+
+## 配置分层
+
+- 服务端配置（`server`/`metrics`/`logging`）只负责 WS 服务运行。
+- 会话配置放在 `voicebot` 下，包含 ASR/TTS/LLM/Audio/Tools/Memory。
+
+会话配置解析规则：
+
+1. 先查 `voicebot.local_bindings[device-id]`
+2. 未命中则尝试 `voicebot.default`
+3. 若 `voicebot.default = null`，设备未绑定则拒绝连接（未开通）
+
+> manager 服务（设备绑定查询）当前未接入，后续作为扩展。
 
 ## 依赖
 

@@ -13,6 +13,8 @@
 - 通过 `-config` 参数覆盖默认路径
 - 示例配置: `voicebot.example.json`
 
+> `cmd/ws-server` 使用独立配置：默认路径 `data/ws-server.json`，示例 `ws-server.example.json`。
+
 ## 加载顺序
 
 1. 代码默认值（由各模块 `Default*Config` 提供）
@@ -124,3 +126,27 @@
 - **MCP 工具**：使用完整前缀名称配置（如 `mcp.demo.get_device_status`）。
 - 未配置的工具类型默认为 `query`。
 - Metrics 默认独立端口暴露 `/metrics`，可通过 `bearer_token` 简单鉴权。
+
+## ws-server 独立配置
+
+`cmd/ws-server` 不再直接复用 `voicebot.json`，而是使用独立配置模型：
+
+- `logging` / `server` / `metrics`：服务端运行级配置
+- `voicebot`：会话级配置池（ASR/TTS/LLM/Audio/Tools/Memory）
+
+核心字段：
+
+- `voicebot.default`：默认会话配置（可选）
+- `voicebot.profiles`：按 profile id 管理多个 voicebot 配置
+- `voicebot.local_bindings`：`device-id -> profile-id` 本地绑定
+
+解析规则（当前实现）：
+
+1. 命中 `voicebot.local_bindings[device-id]`，使用对应 profile
+2. 未命中时，若 `voicebot.default` 存在则使用 default
+3. 若 `voicebot.default` 为 `null`（关闭默认配置），则该设备视为未开通，需要绑定后才能接入
+
+说明：
+
+- `voicebot.default` 设置为 `null` 时，服务端不会兜底，未绑定设备会被拒绝。
+- manager 服务（设备与 voicebot 关联管理）尚未实现，当前以本地绑定为准。

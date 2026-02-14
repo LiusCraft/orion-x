@@ -33,7 +33,9 @@ type outboundMessage struct {
 }
 
 type Session struct {
-	cfg       *config.AppConfig
+	serverCfg *config.WSServerAppConfig
+	voicebot  config.VoicebotSessionConfig
+	profileID string
 	conn      *websocket.Conn
 	deviceID  string
 	clientID  string
@@ -72,17 +74,19 @@ type Session struct {
 	mu        sync.Mutex
 }
 
-func NewSession(cfg *config.AppConfig, conn *websocket.Conn, deviceID, clientID, sessionID string, wsMetrics *metrics.WSServerMetrics, voicebotMetrics *metrics.VoicebotMetrics) *Session {
-	readTimeout := time.Duration(cfg.Server.ReadTimeoutMs) * time.Millisecond
-	writeTimeout := time.Duration(cfg.Server.WriteTimeoutMs) * time.Millisecond
+func NewSession(serverCfg *config.WSServerAppConfig, voicebot config.VoicebotSessionConfig, profileID string, conn *websocket.Conn, deviceID, clientID, sessionID string, wsMetrics *metrics.WSServerMetrics, voicebotMetrics *metrics.VoicebotMetrics) *Session {
+	readTimeout := time.Duration(serverCfg.Server.ReadTimeoutMs) * time.Millisecond
+	writeTimeout := time.Duration(serverCfg.Server.WriteTimeoutMs) * time.Millisecond
 
 	return &Session{
-		cfg:             cfg,
+		serverCfg:       serverCfg,
+		voicebot:        voicebot,
+		profileID:       profileID,
 		conn:            conn,
 		deviceID:        deviceID,
 		clientID:        clientID,
 		sessionID:       sessionID,
-		audioParams:     audioParamsFromConfig(cfg),
+		audioParams:     audioParamsFromConfig(serverCfg),
 		writeCh:         make(chan outboundMessage, 256),
 		readTimeout:     readTimeout,
 		writeTimeout:    writeTimeout,
@@ -204,20 +208,20 @@ func (s *Session) waitClientHello() error {
 
 func (s *Session) initPipeline() error {
 	memCfg := memory.Config{
-		Mode:                 memory.Mode(strings.TrimSpace(s.cfg.Memory.Mode)),
-		SessionMaxTurns:      s.cfg.Memory.SessionMaxTurns,
-		SessionSummaryEveryN: s.cfg.Memory.SessionSummaryEveryN,
-		LongTermDBPath:       s.cfg.Memory.LongTermDBPath,
-		LongTermMaxResults:   s.cfg.Memory.LongTermMaxResults,
-		RetentionDays:        s.cfg.Memory.RetentionDays,
-		FTSMinScore:          s.cfg.Memory.FTSMinScore,
+		Mode:                 memory.Mode(strings.TrimSpace(s.voicebot.Memory.Mode)),
+		SessionMaxTurns:      s.voicebot.Memory.SessionMaxTurns,
+		SessionSummaryEveryN: s.voicebot.Memory.SessionSummaryEveryN,
+		LongTermDBPath:       s.voicebot.Memory.LongTermDBPath,
+		LongTermMaxResults:   s.voicebot.Memory.LongTermMaxResults,
+		RetentionDays:        s.voicebot.Memory.RetentionDays,
+		FTSMinScore:          s.voicebot.Memory.FTSMinScore,
 	}
 	memorySvc, err := memory.NewService(memCfg, memory.Options{
 		SystemPrompt: agent.DefaultSystemPrompt(),
 		LLM: memory.LLMConfig{
-			APIKey:  s.cfg.LLM.APIKey,
-			BaseURL: s.cfg.LLM.BaseURL,
-			Model:   s.cfg.LLM.Model,
+			APIKey:  s.voicebot.LLM.APIKey,
+			BaseURL: s.voicebot.LLM.BaseURL,
+			Model:   s.voicebot.LLM.Model,
 		},
 	})
 	if err != nil {
@@ -226,12 +230,12 @@ func (s *Session) initPipeline() error {
 	s.memorySvc = memorySvc
 
 	toolCfg := tools.ManagerConfig{
-		APIKey:          s.cfg.LLM.APIKey,
-		BaseURL:         s.cfg.LLM.BaseURL,
-		Model:           s.cfg.LLM.Model,
-		ToolTypes:       s.cfg.Tools.Types,
-		ActionResponses: s.cfg.Tools.ActionResponses,
-		MCPServers:      toToolsMCPServers(s.cfg.Tools.MCP),
+		APIKey:          s.voicebot.LLM.APIKey,
+		BaseURL:         s.voicebot.LLM.BaseURL,
+		Model:           s.voicebot.LLM.Model,
+		ToolTypes:       s.voicebot.Tools.Types,
+		ActionResponses: s.voicebot.Tools.ActionResponses,
+		MCPServers:      toToolsMCPServers(s.voicebot.Tools.MCP),
 	}
 
 	toolManager, err := tools.NewToolManager(s.ctx, toolCfg)
@@ -250,8 +254,8 @@ func (s *Session) initPipeline() error {
 	s.voiceAgent = voiceAgent
 
 	mixerConfig := &audio.MixerConfig{
-		TTSVolume:       s.cfg.Audio.Mixer.TTSVolume,
-		ResourceVolume:  s.cfg.Audio.Mixer.ResourceVolume,
+		TTSVolume:       s.voicebot.Audio.Mixer.TTSVolume,
+		ResourceVolume:  s.voicebot.Audio.Mixer.ResourceVolume,
 		SampleRate:      s.audioParams.SampleRate,
 		Channels:        s.audioParams.Channels,
 		FramesPerBuffer: FrameSize(s.audioParams),
@@ -280,22 +284,22 @@ func (s *Session) initPipeline() error {
 	outPipeCfg := audio.DefaultOutPipeConfig()
 	outPipeCfg.Mixer = mixerConfig
 	outPipeCfg.TTS = tts.Config{
-		APIKey:               s.cfg.TTS.APIKey,
-		Endpoint:             s.cfg.TTS.Endpoint,
-		Workspace:            s.cfg.TTS.Workspace,
-		Model:                s.cfg.TTS.Model,
-		Voice:                s.cfg.TTS.Voice,
-		Format:               s.cfg.TTS.Format,
-		SampleRate:           s.cfg.TTS.SampleRate,
-		Volume:               s.cfg.TTS.Volume,
-		Rate:                 s.cfg.TTS.Rate,
-		Pitch:                s.cfg.TTS.Pitch,
-		EnableSSML:           s.cfg.TTS.EnableSSML,
-		TextType:             s.cfg.TTS.TextType,
-		EnableDataInspection: s.cfg.TTS.EnableDataInspection,
+		APIKey:               s.voicebot.TTS.APIKey,
+		Endpoint:             s.voicebot.TTS.Endpoint,
+		Workspace:            s.voicebot.TTS.Workspace,
+		Model:                s.voicebot.TTS.Model,
+		Voice:                s.voicebot.TTS.Voice,
+		Format:               s.voicebot.TTS.Format,
+		SampleRate:           s.voicebot.TTS.SampleRate,
+		Volume:               s.voicebot.TTS.Volume,
+		Rate:                 s.voicebot.TTS.Rate,
+		Pitch:                s.voicebot.TTS.Pitch,
+		EnableSSML:           s.voicebot.TTS.EnableSSML,
+		TextType:             s.voicebot.TTS.TextType,
+		EnableDataInspection: s.voicebot.TTS.EnableDataInspection,
 	}
-	if len(s.cfg.TTS.VoiceMap) > 0 {
-		outPipeCfg.VoiceMap = s.cfg.TTS.VoiceMap
+	if len(s.voicebot.TTS.VoiceMap) > 0 {
+		outPipeCfg.VoiceMap = s.voicebot.TTS.VoiceMap
 	}
 
 	audioOutPipe := audio.NewOutPipeWithConfig(outPipeCfg)
@@ -326,8 +330,8 @@ func (s *Session) initPipeline() error {
 		&voicebot.OrchestratorOptions{
 			Observer: observer,
 			TTSScheduler: voicebot.TTSSchedulerConfig{
-				MaxInFlightSentences: s.cfg.Audio.TTSScheduler.MaxInFlightSentences,
-				MaxCacheSentences:    s.cfg.Audio.TTSScheduler.MaxCacheSentences,
+				MaxInFlightSentences: s.voicebot.Audio.TTSScheduler.MaxInFlightSentences,
+				MaxCacheSentences:    s.voicebot.Audio.TTSScheduler.MaxCacheSentences,
 			},
 			Memory: memorySvc,
 		},
@@ -578,13 +582,13 @@ func (s *Session) createAudioInPipe() error {
 		return err
 	}
 
-	audioInPipe, err := audio.NewInPipeWithAudioSource(s.cfg.ASR.APIKey, &audio.InPipeConfig{
+	audioInPipe, err := audio.NewInPipeWithAudioSource(s.voicebot.ASR.APIKey, &audio.InPipeConfig{
 		SampleRate:   s.audioParams.SampleRate,
 		Channels:     s.audioParams.Channels,
-		EnableVAD:    s.cfg.Audio.InPipe.EnableVAD,
-		VADThreshold: s.cfg.Audio.InPipe.VADThreshold,
-		ASRModel:     s.cfg.ASR.Model,
-		ASREndpoint:  s.cfg.ASR.Endpoint,
+		EnableVAD:    s.voicebot.Audio.InPipe.EnableVAD,
+		VADThreshold: s.voicebot.Audio.InPipe.VADThreshold,
+		ASRModel:     s.voicebot.ASR.Model,
+		ASREndpoint:  s.voicebot.ASR.Endpoint,
 	}, wsSource)
 	if err != nil {
 		return err
@@ -826,7 +830,7 @@ func shouldDisplayOnlySentence(text string) bool {
 	return false
 }
 
-func audioParamsFromConfig(cfg *config.AppConfig) AudioParams {
+func audioParamsFromConfig(cfg *config.WSServerAppConfig) AudioParams {
 	ap := cfg.Server.AudioParams
 	return AudioParams{
 		Format:               ap.Format,

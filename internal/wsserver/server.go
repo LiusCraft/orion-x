@@ -18,7 +18,8 @@ import (
 )
 
 type Server struct {
-	cfg      *config.AppConfig
+	cfg      *config.WSServerAppConfig
+	resolver VoicebotResolver
 	upgrader websocket.Upgrader
 
 	mu       sync.Mutex
@@ -29,9 +30,21 @@ type Server struct {
 	voicebotMetrics *metrics.VoicebotMetrics
 }
 
-func NewServer(cfg *config.AppConfig, wsMetrics *metrics.WSServerMetrics, voicebotMetrics *metrics.VoicebotMetrics) *Server {
+func NewServer(cfg *config.WSServerAppConfig, wsMetrics *metrics.WSServerMetrics, voicebotMetrics *metrics.VoicebotMetrics) *Server {
+	return NewServerWithResolver(cfg, nil, wsMetrics, voicebotMetrics)
+}
+
+func NewServerWithResolver(cfg *config.WSServerAppConfig, resolver VoicebotResolver, wsMetrics *metrics.WSServerMetrics, voicebotMetrics *metrics.VoicebotMetrics) *Server {
+	if resolver == nil {
+		resolver = NewChainVoicebotResolver(
+			NewManagerVoicebotResolver(),
+			NewLocalVoicebotResolver(cfg),
+		)
+	}
+
 	server := &Server{
 		cfg:             cfg,
+		resolver:        resolver,
 		sessions:        make(map[string]*Session),
 		wsMetrics:       wsMetrics,
 		voicebotMetrics: voicebotMetrics,
@@ -45,6 +58,9 @@ func NewServer(cfg *config.AppConfig, wsMetrics *metrics.WSServerMetrics, voiceb
 func (s *Server) Start() error {
 	if s.cfg == nil {
 		return errors.New("wsserver: config is nil")
+	}
+	if s.resolver == nil {
+		return errors.New("wsserver: voicebot resolver is nil")
 	}
 
 	mux := http.NewServeMux()
@@ -101,6 +117,21 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientID := r.URL.Query().Get("client-id")
+	voicebotCfg, profileID, ok, err := s.resolver.ResolveVoicebot(r.Context(), deviceID)
+	if err != nil {
+		logging.Errorf("resolve voicebot for device %s failed: %v", deviceID, err)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("resolve voicebot failed"))
+		_ = conn.Close()
+		s.recordHandshake("resolve_error", start)
+		return
+	}
+	if !ok {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("device not provisioned, please bind voicebot"))
+		_ = conn.Close()
+		s.recordHandshake("unprovisioned", start)
+		return
+	}
+
 	sessionID := r.Header.Get("X-Reqid")
 	if sessionID == "" {
 		sessionID = r.Header.Get("x-reqid")
@@ -109,7 +140,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		sessionID = uuid.New().String()
 	}
 
-	session := NewSession(s.cfg, conn, deviceID, clientID, sessionID, s.wsMetrics, s.voicebotMetrics)
+	session := NewSession(s.cfg, voicebotCfg, profileID, conn, deviceID, clientID, sessionID, s.wsMetrics, s.voicebotMetrics)
 	if !s.registerSession(session) {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("session id already exists"))
 		_ = conn.Close()

@@ -90,6 +90,24 @@ cp voicebot.example.json data/voicebot.json
 go run cmd/voicebot/main.go
 ```
 
+### 运行 ws-server（独立配置）
+
+```bash
+cp ws-server.example.json data/ws-server.json
+go run cmd/ws-server/main.go -config data/ws-server.json
+```
+
+`ws-server` 配置与本地 `voicebot` 配置分离：
+
+- `data/voicebot.json`：`cmd/voicebot` / `cmd/agent`
+- `data/ws-server.json`：`cmd/ws-server`
+
+`ws-server` 会按 `device-id` 解析会话级 `voicebot` 配置：
+
+- 先查 `voicebot.local_bindings`
+- 未命中则用 `voicebot.default`
+- 若 `voicebot.default` 设为 `null`，未绑定设备会被拒绝（需先绑定）
+
 ## 配置说明
 
 ```json
