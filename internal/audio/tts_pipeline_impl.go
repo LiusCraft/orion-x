@@ -288,13 +288,6 @@ func (p *ttsPipelineImpl) Interrupt() error {
 
 	// 2. 立即停止当前播放
 	currentItem := p.currentItem
-	if currentItem != nil {
-		if p.mixer != nil {
-			p.mixer.RemoveTTSStream()
-			p.mixer.OnTTSFinished()
-		}
-		p.currentItem = nil
-	}
 	p.mu.Unlock()
 
 	// 3. 关闭当前正在播放的 item 的 reader，解除 playItem 中的阻塞

@@ -474,7 +474,7 @@ export function createAudioEngine({ onStatus, onError } = {}) {
             for (let i = 0; i < decodedSamples.length; i++) {
               this.queue.push(decodedSamples[i]);
             }
-          const minSamples = SAMPLE_RATE * MIN_AUDIO_DURATION;
+            const minSamples = SAMPLE_RATE * MIN_AUDIO_DURATION;
             if (!this.playing && this.queue.length >= minSamples) {
               this.startPlaying();
             }
@@ -522,11 +522,19 @@ export function createAudioEngine({ onStatus, onError } = {}) {
                 stats.isAudioPlaying = false;
               } else {
                 setTimeout(() => {
-                  if (this.queue.length === 0 && audioBufferQueue.length === 0) {
-                    isAudioPlaying = false;
-                    streamingContext = null;
-                    stats.isAudioPlaying = false;
+                  if (this.queue.length > 0) {
+                    this.startPlaying();
+                    return;
                   }
+                  if (audioBufferQueue.length > 0) {
+                    const frames = [...audioBufferQueue];
+                    audioBufferQueue = [];
+                    this.decodeOpusFrames(frames);
+                    return;
+                  }
+                  isAudioPlaying = false;
+                  streamingContext = null;
+                  stats.isAudioPlaying = false;
                 }, 500);
               }
             }, 10);
@@ -539,6 +547,58 @@ export function createAudioEngine({ onStatus, onError } = {}) {
     const frames = [...audioBufferQueue];
     audioBufferQueue = [];
     await streamingContext.decodeOpusFrames(frames);
+  }
+
+  function resumePlaybackIfNeeded() {
+    if (!streamingContext || streamingContext.playing) {
+      return;
+    }
+    if (streamingContext.queue.length > 0) {
+      streamingContext.startPlaying();
+      return;
+    }
+    if (audioBufferQueue.length > 0) {
+      const frames = [...audioBufferQueue];
+      audioBufferQueue = [];
+      streamingContext.decodeOpusFrames(frames);
+    }
+  }
+
+  function onTTSStart() {
+    if (streamingContext) {
+      streamingContext.endOfStream = false;
+    }
+  }
+
+  function onTTSStop(isAborted = false) {
+    if (streamingContext) {
+      streamingContext.endOfStream = true;
+      if (isAborted) {
+        if (streamingContext.source) {
+          const source = streamingContext.source;
+          streamingContext.source = null;
+          source.onended = null;
+          try {
+            source.stop();
+          } catch (error) {
+          }
+          try {
+            source.disconnect();
+          } catch (error) {
+          }
+        }
+        streamingContext.queue = [];
+      }
+    }
+
+    if (isAborted) {
+      audioBufferQueue = [];
+      isAudioBuffering = false;
+      isAudioPlaying = false;
+      streamingContext = null;
+      stats.isAudioBuffering = false;
+      stats.isAudioPlaying = false;
+    }
   }
 
   async function handleIncomingAudio(data) {
@@ -558,6 +618,8 @@ export function createAudioEngine({ onStatus, onError } = {}) {
       stats.lastFrameBytes = opusData.length;
       if (audioBufferQueue.length === 1 && !isAudioBuffering && !isAudioPlaying) {
         startAudioBuffering();
+      } else if (isAudioPlaying) {
+        resumePlaybackIfNeeded();
       }
     } else {
       if (audioBufferQueue.length > 0 && !isAudioPlaying) {
@@ -582,6 +644,8 @@ export function createAudioEngine({ onStatus, onError } = {}) {
     startRecording,
     stopRecording,
     handleIncomingAudio,
+    onTTSStart,
+    onTTSStop,
     stopAll,
     resume: ensureAudioContext,
     getStats: () => {

@@ -3,6 +3,7 @@ package voicebot
 import (
 	"context"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,6 +63,42 @@ func (m *mockOutPipe) PlayTTS(text string, emotion string) error {
 func (m *mockOutPipe) PlayResource(audio io.Reader) error { return nil }
 func (m *mockOutPipe) Interrupt() error                   { return nil }
 func (m *mockOutPipe) Stats() audio.PipelineStats         { return audio.PipelineStats{} }
+
+type interruptMockOutPipe struct {
+	mu         sync.Mutex
+	onFinished audio.PlaybackFinishedCallback
+	startedCh  chan struct{}
+	startOnce  sync.Once
+}
+
+func newInterruptMockOutPipe() *interruptMockOutPipe {
+	return &interruptMockOutPipe{startedCh: make(chan struct{})}
+}
+
+func (m *interruptMockOutPipe) Start(ctx context.Context) error { return nil }
+func (m *interruptMockOutPipe) Stop() error                     { return nil }
+func (m *interruptMockOutPipe) SetMixer(mixer audio.AudioMixer) {}
+func (m *interruptMockOutPipe) SetOnPlaybackFinished(callback audio.PlaybackFinishedCallback) {
+	m.mu.Lock()
+	m.onFinished = callback
+	m.mu.Unlock()
+}
+func (m *interruptMockOutPipe) SetOnTTSItemStarted(callback audio.TTSItemStartedCallback) {}
+func (m *interruptMockOutPipe) PlayTTS(text string, emotion string) error {
+	m.startOnce.Do(func() { close(m.startedCh) })
+	return nil
+}
+func (m *interruptMockOutPipe) PlayResource(audio io.Reader) error { return nil }
+func (m *interruptMockOutPipe) Interrupt() error {
+	m.mu.Lock()
+	callback := m.onFinished
+	m.mu.Unlock()
+	if callback != nil {
+		go callback()
+	}
+	return nil
+}
+func (m *interruptMockOutPipe) Stats() audio.PipelineStats { return audio.PipelineStats{} }
 
 type testObserver struct {
 	events chan string
@@ -134,6 +171,73 @@ func TestOrchestratorObserver(t *testing.T) {
 	for i, expected := range want {
 		if got[i] != expected {
 			t.Fatalf("event %d mismatch: got %s want %s", i, got[i], expected)
+		}
+	}
+}
+
+func TestOrchestratorObserverInterruptDoesNotEmitNormalStop(t *testing.T) {
+	voice := &mockVoiceAgent{
+		events: []agent.AgentEvent{
+			&agent.TextChunkEvent{Chunk: "hi.", Emotion: "happy"},
+			&agent.FinishedEvent{Error: nil},
+		},
+	}
+	outPipe := newInterruptMockOutPipe()
+	toolExec := tools.NewToolExecutor()
+	observer := &testObserver{events: make(chan string, 10)}
+
+	orchestrator := NewOrchestratorWithOptions(
+		voice,
+		outPipe,
+		nil,
+		toolExec,
+		&OrchestratorOptions{Observer: observer},
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := orchestrator.Start(ctx); err != nil {
+		t.Fatalf("start orchestrator failed: %v", err)
+	}
+	defer orchestrator.Stop()
+
+	orchestrator.OnASRFinal("hi")
+
+	select {
+	case <-outPipe.startedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for PlayTTS")
+	}
+
+	orchestrator.OnUserSpeakingDetected()
+
+	gotAbortedStop := false
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for !gotAbortedStop {
+		select {
+		case ev := <-observer.events:
+			if ev == "tts_stop" {
+				t.Fatalf("unexpected normal tts_stop during interrupt")
+			}
+			if ev == "tts_stop_aborted" {
+				gotAbortedStop = true
+			}
+		case <-deadline.C:
+			t.Fatal("timeout waiting for tts_stop_aborted")
+		}
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	for {
+		select {
+		case ev := <-observer.events:
+			if ev == "tts_stop" {
+				t.Fatalf("unexpected normal tts_stop after interrupt")
+			}
+		default:
+			return
 		}
 	}
 }

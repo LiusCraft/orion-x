@@ -225,6 +225,45 @@ func TestTTSPipelineInterrupt(t *testing.T) {
 	}
 }
 
+func TestTTSPipelineInterruptMixerCallbacksOnlyOnce(t *testing.T) {
+	provider := &slowMockTTSProvider{readDelay: 80 * time.Millisecond}
+	config := DefaultTTSPipelineConfig()
+	ttsConfig := tts.Config{APIKey: "test"}
+
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	mixer := newMockMixer()
+	pipeline.SetMixer(mixer)
+
+	ctx := context.Background()
+	if err := pipeline.Start(ctx); err != nil {
+		t.Fatalf("Failed to start pipeline: %v", err)
+	}
+	defer pipeline.Stop()
+
+	if err := pipeline.EnqueueText("interrupt me", "neutral"); err != nil {
+		t.Fatalf("Failed to enqueue text: %v", err)
+	}
+
+	deadline := time.Now().Add(1 * time.Second)
+	for mixer.getTTSStartedCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if mixer.getTTSStartedCount() == 0 {
+		t.Fatal("timeout waiting for TTS playback to start")
+	}
+
+	if err := pipeline.Interrupt(); err != nil {
+		t.Fatalf("Failed to interrupt: %v", err)
+	}
+
+	if got := mixer.getTTSFinishedCount(); got != 1 {
+		t.Fatalf("expected OnTTSFinished to be called once, got %d", got)
+	}
+	if got := mixer.getRemoveTTSStreamCount(); got != 1 {
+		t.Fatalf("expected RemoveTTSStream to be called once, got %d", got)
+	}
+}
+
 // TestTTSPipelineConcurrentEnqueue 测试并发入队
 func TestTTSPipelineConcurrentEnqueue(t *testing.T) {
 	provider := newMockTTSProvider()

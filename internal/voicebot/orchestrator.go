@@ -545,12 +545,18 @@ func (o *orchestratorImpl) onTTSPlaybackFinished() {
 		finishedID = o.inFlightQueue[0]
 		o.inFlightQueue = o.inFlightQueue[1:]
 	}
+	aborted := o.turnAborted
 	if finishedID != 0 {
 		if rec := o.sentenceIndex[finishedID]; rec != nil && rec.Status == SentenceEnqueued {
 			rec.Status = SentenceDone
 		}
 	}
 	o.mu.Unlock()
+
+	if finishedID == 0 {
+		logging.Infof("Orchestrator: ignoring stale TTS playback finished callback")
+		return
+	}
 
 	logging.Infof("Orchestrator: TTS playback finished, pending count: %d", pending)
 
@@ -561,6 +567,7 @@ func (o *orchestratorImpl) onTTSPlaybackFinished() {
 	o.mu.Lock()
 	pending = o.ttsPendingCount
 	hasPendingQueue := len(o.pendingQueue) > 0
+	aborted = o.turnAborted
 	o.mu.Unlock()
 	if pending <= 0 && !hasPendingQueue {
 		currentState := o.stateMachine.GetCurrentState()
@@ -568,7 +575,7 @@ func (o *orchestratorImpl) onTTSPlaybackFinished() {
 			logging.Infof("Orchestrator: All TTS finished, transitioning to Idle")
 			o.transitionTo(StateIdle)
 		}
-		if o.observer != nil {
+		if o.observer != nil && !aborted {
 			o.observer.OnTTSStop(false)
 		}
 		o.maybeFinalizeTurn()

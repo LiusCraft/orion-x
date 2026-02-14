@@ -218,6 +218,7 @@ export default function App() {
             }
           } else if (message.type === 'tts') {
             if (message.state === 'start') {
+              ensureAudioEngine().onTTSStart();
               if (!currentCalling) {
                 state.sessionState = 'speaking';
                 updateDebugStats();
@@ -234,6 +235,7 @@ export default function App() {
                 });
               }
             } else if (message.state === 'stop') {
+              ensureAudioEngine().onTTSStop(Boolean(message.is_aborted));
               if (!currentCalling && state.sessionState !== 'listening') {
                 state.sessionState = 'idle';
                 updateDebugStats();
