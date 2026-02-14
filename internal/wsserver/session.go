@@ -377,7 +377,9 @@ func (s *Session) readLoop() {
 				}
 				continue
 			}
-			if !errors.Is(err, websocket.ErrCloseSent) && !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+			if wsErrorKind(err) == "closed" {
+				logging.Infof("Session %s: websocket closed: %v", s.sessionID, err)
+			} else {
 				logging.Errorf("Session %s: read error: %v", s.sessionID, err)
 			}
 			return
