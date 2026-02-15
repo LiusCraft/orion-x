@@ -8,6 +8,7 @@ import AdminLayout from './layout/AdminLayout.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import ForbiddenPage from './pages/ForbiddenPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import LegacyVoiceChatPage from './pages/LegacyVoiceChatPage.jsx';
 import NotFoundPage from './pages/NotFoundPage.jsx';
 import PlatformResourcesPage from './pages/PlatformResourcesPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forbidden" element={<ForbiddenPage />} />
+        <Route path="/voice-chat" element={<LegacyVoiceChatPage />} />
 
         <Route element={<RequireAuth />}>
           <Route element={<AdminLayout />}>

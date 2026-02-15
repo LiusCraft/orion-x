@@ -10,6 +10,7 @@ Manager admin console skeleton built with React + MUI.
 - Protected routes and unified auth failure redirect
 - Role-based navigation (`admin` vs `normal_user`)
 - Basic layout for manager pages (`platform resources`, `tool market`, `voicebots/devices`)
+- Legacy voice chat page available at `/voice-chat`
 
 ## Run locally
 
