@@ -21,6 +21,8 @@ func TestLoadManager_MergesDefaultsAndEnv(t *testing.T) {
 	t.Setenv("MANAGER_SERVER_ADDRESS", "127.0.0.1:9100")
 	t.Setenv("MANAGER_DB_DSN", "host=127.0.0.1 user=postgres password=postgres dbname=override port=5432 sslmode=disable")
 	t.Setenv("MANAGER_DB_MAX_OPEN_CONNS", "25")
+	t.Setenv("MANAGER_AUTH_JWT_SECRET", "test-secret")
+	t.Setenv("MANAGER_AUTH_ACCESS_TOKEN_TTL_SECONDS", "120")
 
 	cfg, err := LoadManager(path)
 	if err != nil {
@@ -41,6 +43,12 @@ func TestLoadManager_MergesDefaultsAndEnv(t *testing.T) {
 	}
 	if cfg.Server.HealthPath != "/health" {
 		t.Fatalf("expected health path from file, got %q", cfg.Server.HealthPath)
+	}
+	if cfg.Auth.JWTSecret != "test-secret" {
+		t.Fatalf("expected MANAGER_AUTH_JWT_SECRET override, got %q", cfg.Auth.JWTSecret)
+	}
+	if cfg.Auth.AccessTokenTTLSeconds != 120 {
+		t.Fatalf("expected MANAGER_AUTH_ACCESS_TOKEN_TTL_SECONDS override, got %d", cfg.Auth.AccessTokenTTLSeconds)
 	}
 }
 
@@ -70,5 +78,16 @@ func TestLoadManager_DefaultFallback(t *testing.T) {
 	}
 	if cfg.Database.DSN == "" {
 		t.Fatalf("expected default database dsn")
+	}
+	if cfg.Auth.JWTSecret == "" {
+		t.Fatalf("expected default auth jwt secret")
+	}
+}
+
+func TestManagerConfigValidate_AuthSecretRequired(t *testing.T) {
+	cfg := DefaultManagerConfig()
+	cfg.Auth.JWTSecret = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected missing auth.jwt_secret error")
 	}
 }

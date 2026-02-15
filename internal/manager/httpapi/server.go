@@ -12,14 +12,15 @@ type Server struct {
 	httpServer *http.Server
 }
 
-func NewServer(cfg config.ManagerServerConfig, healthHandler http.Handler) *Server {
-	mux := http.NewServeMux()
-	mux.Handle(cfg.HealthPath, healthHandler)
+func NewServer(cfg config.ManagerServerConfig, handler http.Handler) *Server {
+	if handler == nil {
+		handler = http.NewServeMux()
+	}
 
 	return &Server{
 		httpServer: &http.Server{
 			Addr:         cfg.Address,
-			Handler:      mux,
+			Handler:      handler,
 			ReadTimeout:  time.Duration(cfg.ReadTimeoutMs) * time.Millisecond,
 			WriteTimeout: time.Duration(cfg.WriteTimeoutMs) * time.Millisecond,
 		},

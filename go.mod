@@ -6,6 +6,7 @@ require (
 	github.com/cloudwego/eino v0.7.18
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.7
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.4
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/gordonklaus/portaudio v0.0.0-20250206071425-98a94950218b
 	github.com/gorilla/websocket v1.5.3
@@ -13,6 +14,7 @@ require (
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/prometheus/client_golang v1.20.5
 	go.uber.org/zap v1.27.0
+	golang.org/x/crypto v0.39.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 	modernc.org/sqlite v1.45.0
@@ -66,7 +68,6 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/arch v0.11.0 // indirect
-	golang.org/x/crypto v0.39.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
