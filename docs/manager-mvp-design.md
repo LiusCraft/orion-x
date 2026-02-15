@@ -14,7 +14,7 @@
 
 ### 2.1 In Scope
 
-- 账号体系：登录、刷新 token、角色鉴权
+- 账号体系：注册、登录、刷新 token、角色鉴权
 - Voicebot：每个 normal_user 支持多个 voicebot
 - 平台资源：`platform_resources` 统一管理 LLM/ASR/TTS
 - 工具体系：工具市场、开通方案（offer）、用户工具仓库（entitlement）、voicebot 工具绑定

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/manager/app"
+	"github.com/liuscraft/orion-x/internal/manager/auth"
 	"github.com/liuscraft/orion-x/internal/manager/httpapi"
 	"github.com/liuscraft/orion-x/internal/manager/storage"
 )
@@ -49,7 +51,28 @@ func main() {
 
 	migrator := storage.NewMigrator(store.DB())
 	healthHandler := httpapi.NewHealthHandler(store, time.Duration(appConfig.Database.PingTimeoutMs)*time.Millisecond)
-	server := httpapi.NewServer(appConfig.Server, healthHandler)
+	authTokenManager, err := auth.NewJWTManager(auth.JWTManagerConfig{
+		Secret:     appConfig.Auth.JWTSecret,
+		Issuer:     appConfig.Auth.Issuer,
+		AccessTTL:  time.Duration(appConfig.Auth.AccessTokenTTLSeconds) * time.Second,
+		RefreshTTL: time.Duration(appConfig.Auth.RefreshTokenTTLSeconds) * time.Second,
+	})
+	if err != nil {
+		logging.Fatalf("Init manager auth token manager failed: %v", err)
+	}
+	userRepository := storage.NewAuthUserRepository(store.DB())
+	authService := auth.NewService(userRepository, authTokenManager)
+	authHandler := httpapi.NewAuthHandler(authService)
+	authMiddleware := httpapi.NewAuthMiddleware(authService)
+
+	router := http.NewServeMux()
+	router.Handle(appConfig.Server.HealthPath, healthHandler)
+	router.Handle("/api/v1/auth/register", http.HandlerFunc(authHandler.Register))
+	router.Handle("/api/v1/auth/login", http.HandlerFunc(authHandler.Login))
+	router.Handle("/api/v1/auth/refresh", http.HandlerFunc(authHandler.Refresh))
+	router.Handle("/api/v1/auth/logout", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.Logout)))
+
+	server := httpapi.NewServer(appConfig.Server, router)
 	lifecycle := app.NewLifecycle(appConfig.Migration.AutoMigrateOnStartup, migrator, server)
 
 	migrationResult, err := lifecycle.Bootstrap(ctx, *migrateOnly)
