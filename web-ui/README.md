@@ -1,26 +1,45 @@
-# 小智 Web UI（React + MUI）
+# Orion X Manager Web UI
 
-这是一个基于 React 与 MUI 的终端用户对话界面示例。支持真实 WebSocket 连接与 Opus 语音传输（与 test_page 协议一致），同时保留线程与历史记录的本地 mock 数据。
+Manager admin console skeleton built with React + MUI.
 
-## 运行
+## What is included
+
+- Login page (`/login`) with manager auth API integration
+- Registration page (`/register`) integrated with `POST /api/v1/auth/register`
+- Token lifecycle handling (restore from local storage, auto refresh, manual refresh)
+- Protected routes and unified auth failure redirect
+- Role-based navigation (`admin` vs `normal_user`)
+- Basic layout for manager pages (`platform resources`, `tool market`, `voicebots/devices`)
+
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-## 目录
+Dev mode uses Vite proxy by default:
 
+- `/api` -> `http://127.0.0.1:8081`
+- `/internal` -> `http://127.0.0.1:8081`
+
+Optional environment variables:
+
+```bash
+VITE_MANAGER_API_BASE_URL=
+VITE_MANAGER_API_PROXY_TARGET=http://127.0.0.1:8081
 ```
-web-ui/
-  src/
-    components/        # UI 组件
-    mock/              # 假数据
-    utils/             # 工具函数
+
+- `VITE_MANAGER_API_BASE_URL`: explicit API base URL (if set, requests bypass relative dev base).
+- `VITE_MANAGER_API_PROXY_TARGET`: dev proxy target URL.
+
+## Project structure
+
+```text
+src/
+  api/         # HTTP client and API error model
+  auth/        # session model, storage, auth provider and guards
+  layout/      # app shell and role-based navigation
+  pages/       # login + placeholder pages
+  components/  # reusable page-level blocks
 ```
-
-## 说明
-
-- 默认使用 mock 数据渲染 threads、历史、模型与 MCP Server。
-- 连接、按住说话、电话通话已直接对接 WebSocket 与 Opus。
-- 需确保服务端支持 `listen` 与 Opus 二进制帧协议。
