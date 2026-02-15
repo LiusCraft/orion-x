@@ -1,0 +1,85 @@
+name: Service delivery request
+description: Create a tracked requirement for orion-x multi-service delivery
+title: "[service] "
+labels:
+  - type:feature
+  - phase:mvp
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先完整填写以下信息。新需求会进入 GitHub Project 管理，默认不自动分配负责人。
+
+        设计文档参考：
+        - `docs/manager-mvp-design.md`
+        - `docs/manager-api-types.md`
+
+  - type: dropdown
+    id: service
+    attributes:
+      label: Service
+      description: 请选择需求主要归属服务
+      options:
+        - manager
+        - voicebot-server
+        - web-ui
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: 请选择优先级
+      options:
+        - P0
+        - P1
+        - P2
+    validations:
+      required: true
+
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+      description: 业务背景、触发原因、为什么现在要做
+      placeholder: 描述该需求的业务背景和价值
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_state
+    attributes:
+      label: 现状
+      description: 当前行为、限制或问题
+      placeholder: 目前系统表现是什么，存在什么问题
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_outcome
+    attributes:
+      label: 期望
+      description: 期望目标、成功标准、验收口径
+      placeholder: 完成后应该达到什么效果
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围与边界（可选）
+      description: In Scope / Out of Scope，避免范围蔓延
+      placeholder: 列出需要做与不需要做的内容
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已确认此需求未重复
+          required: true
+        - label: 我已确认该需求需要进入 Project 跟踪
+          required: true

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Architecture docs
+    url: https://github.com/LiusCraft/orion-x/tree/main/docs
+    about: Read design docs before opening a requirement issue.

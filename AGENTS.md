@@ -116,6 +116,21 @@ func TestOrchestrator(t *testing.T) {
 - Context7 不仅限于标准库，任何需要了解的外部代码、API、协议都可以尝试用它
 - 查询不到时再考虑使用 WebSearch 或直接读取源码
 
+### 10. GitHub Project 与 Worktree 流程
+- 新需求默认先创建 GitHub Issue，再开始开发
+- 新需求 Issue 需包含：优先级、服务、背景、现状、期望（优先使用 `.github/ISSUE_TEMPLATE/service_delivery_request.yml`）
+- 新需求 Issue 默认不分配 assignee
+- 当用户说“开始处理某个 issue”时，先检查该 issue 是否在 Project 中：
+  - 已在 Project：先更新状态到 `In Progress`
+  - 不在 Project：先加入 Project，再更新状态
+- 开始处理 issue 时，必须为其创建独立分支，分支命名遵循 Conventional Commits 类型映射：
+  - `feat/issue-<id>-<slug>`、`fix/issue-<id>-<slug>`、`docs/issue-<id>-<slug>` 等
+- 默认基于 `main` 分支创建 issue 开发分支；若仓库默认分支不明确，需先询问用户
+- 默认使用 worktree 开发；若用户明确说明不使用 worktree，则按用户要求执行
+- worktree 路径默认：`~/.worktrees/<branch-name>/`
+- 创建方式：在项目主目录执行 `git worktree add` 指向上述目录
+- 创建完成后，询问用户是否切换到该 worktree 目录继续开发
+
 ## 代码规范
 
 ### 文件结构
