@@ -175,6 +175,19 @@
 ### 16.1 配置与设备管理服务 (优先级: 中)
 - [ ] 设计并实现 manager 服务（管理设备与 voicebot 配置绑定关系）
 - [ ] ws-server 接入 manager 查询（device-id -> voicebot），并支持超时降级策略
+  - [x] 完成 manager MVP 产品/架构设计文档（`docs/manager-mvp-design.md`）
+  - [x] 完成 manager MVP 接口与数据类型文档（`docs/manager-api-types.md`）
+  - [ ] manager 服务工程骨架（`cmd/manager` + `internal/manager/*`）
+  - [ ] GORM + PostgreSQL 基础接入（连接、迁移、健康检查）
+  - [ ] users/auth 模块（JWT 登录/刷新 + RBAC）
+  - [ ] platform_resources 模块（LLM/ASR/TTS 资源管理）
+  - [ ] tool_market 模块（市场、offer、entitlement、tool repo）
+  - [ ] voicebots/devices/device_bindings 模块
+  - [ ] internal resolve API（`/internal/v1/devices/:device_id/resolve`）
+  - [ ] ws-server ManagerResolver HTTP 接入（超时、重试、降级）
+  - [ ] manager 与 ws-server 指标补充（resolve latency/result/fallback）
+  - [ ] 单元测试（handler/service/repo）
+  - [ ] 集成测试（PostgreSQL：绑定并发、entitlement 边界）
 
 ## 优先级说明
 
