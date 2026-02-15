@@ -16,6 +16,7 @@ type ManagerAppConfig struct {
 	Logging   LoggingConfig          `json:"logging"`
 	Server    ManagerServerConfig    `json:"server"`
 	Database  ManagerDatabaseConfig  `json:"database"`
+	Auth      ManagerAuthConfig      `json:"auth"`
 	Migration ManagerMigrationConfig `json:"migration"`
 }
 
@@ -39,6 +40,13 @@ type ManagerMigrationConfig struct {
 	AutoMigrateOnStartup bool `json:"auto_migrate_on_startup"`
 }
 
+type ManagerAuthConfig struct {
+	JWTSecret              string `json:"jwt_secret"`
+	Issuer                 string `json:"issuer"`
+	AccessTokenTTLSeconds  int    `json:"access_token_ttl_seconds"`
+	RefreshTokenTTLSeconds int    `json:"refresh_token_ttl_seconds"`
+}
+
 func DefaultManagerConfig() *ManagerAppConfig {
 	return &ManagerAppConfig{
 		Logging: LoggingConfig{},
@@ -55,6 +63,12 @@ func DefaultManagerConfig() *ManagerAppConfig {
 			ConnMaxLifetimeMs: 300000,
 			ConnMaxIdleTimeMs: 120000,
 			PingTimeoutMs:     2000,
+		},
+		Auth: ManagerAuthConfig{
+			JWTSecret:              "manager-dev-jwt-secret",
+			Issuer:                 "orion-x-manager",
+			AccessTokenTTLSeconds:  900,
+			RefreshTokenTTLSeconds: 1209600,
 		},
 		Migration: ManagerMigrationConfig{
 			AutoMigrateOnStartup: true,
@@ -129,6 +143,23 @@ func (c *ManagerAppConfig) ApplyEnv() {
 			c.Database.PingTimeoutMs = n
 		}
 	}
+
+	if secret := strings.TrimSpace(os.Getenv("MANAGER_AUTH_JWT_SECRET")); secret != "" {
+		c.Auth.JWTSecret = secret
+	}
+	if issuer := strings.TrimSpace(os.Getenv("MANAGER_AUTH_ISSUER")); issuer != "" {
+		c.Auth.Issuer = issuer
+	}
+	if value := strings.TrimSpace(os.Getenv("MANAGER_AUTH_ACCESS_TOKEN_TTL_SECONDS")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil {
+			c.Auth.AccessTokenTTLSeconds = n
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("MANAGER_AUTH_REFRESH_TOKEN_TTL_SECONDS")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil {
+			c.Auth.RefreshTokenTTLSeconds = n
+		}
+	}
 }
 
 func (c *ManagerAppConfig) Validate() error {
@@ -168,6 +199,19 @@ func (c *ManagerAppConfig) Validate() error {
 	}
 	if c.Database.PingTimeoutMs <= 0 {
 		return errors.New("database.ping_timeout_ms must be > 0")
+	}
+
+	if strings.TrimSpace(c.Auth.JWTSecret) == "" {
+		return errors.New("auth.jwt_secret must not be empty")
+	}
+	if strings.TrimSpace(c.Auth.Issuer) == "" {
+		return errors.New("auth.issuer must not be empty")
+	}
+	if c.Auth.AccessTokenTTLSeconds <= 0 {
+		return errors.New("auth.access_token_ttl_seconds must be > 0")
+	}
+	if c.Auth.RefreshTokenTTLSeconds <= 0 {
+		return errors.New("auth.refresh_token_ttl_seconds must be > 0")
 	}
 
 	return nil
