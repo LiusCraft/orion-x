@@ -177,8 +177,8 @@
 - [ ] ws-server 接入 manager 查询（device-id -> voicebot），并支持超时降级策略
   - [x] 完成 manager MVP 产品/架构设计文档（`docs/manager-mvp-design.md`）
   - [x] 完成 manager MVP 接口与数据类型文档（`docs/manager-api-types.md`）
-  - [ ] manager 服务工程骨架（`cmd/manager` + `internal/manager/*`）
-  - [ ] GORM + PostgreSQL 基础接入（连接、迁移、健康检查）
+  - [x] manager 服务工程骨架（`cmd/manager` + `internal/manager/*`）
+  - [x] GORM + PostgreSQL 基础接入（连接、迁移、健康检查）
   - [ ] users/auth 模块（JWT 登录/刷新 + RBAC）
   - [ ] platform_resources 模块（LLM/ASR/TTS 资源管理）
   - [ ] tool_market 模块（市场、offer、entitlement、tool repo）
