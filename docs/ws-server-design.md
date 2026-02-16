@@ -13,11 +13,19 @@ C -> S: hello (可选携带 audio_params)
 S -> C: hello (确认后的 audio_params)
 ```
 
+`hello.features` 协商规则：
+- 若 `features.stt.interim=true`（或 `features.interim_stt=true`），会话开启实时 STT 中间结果推送。
+- 默认关闭，仅下发 final，保持旧客户端兼容。
+
 ## 消息映射
 
-- `listen detect(text)` → 发送 `stt` → 触发 Orchestrator.OnASRFinal
+- `listen detect(text)` → 发送 `stt(state=final)` → 触发 Orchestrator.OnASRFinal
 - `listen start` → 启动 ASR
 - `binary audio` → 解码（opus/pcm）→ AudioInPipe.SendAudio
+- `ASR partial` →（capability 开启时）发送 `stt(state=partial)` + 去重 + 节流（200ms）
+  - 打断策略优先由 VAD 触发；当 VAD 启用时，partial 不直接触发打断，避免噪声误打断
+  - 仅在最近 `1.5s` 内有 VAD 语音事件时才下发 partial，减少静音噪声引发的伪识别闪烁
+- `ASR final` → 发送 `stt(state=final)` + Orchestrator.OnASRFinal
 - `listen stop / empty frame` → AudioInPipe.Stop
 - `abort` → AudioOutPipe.Interrupt + tts stop(is_aborted)
 

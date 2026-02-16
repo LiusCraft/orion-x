@@ -9,6 +9,9 @@ export default function MessageItem({ message }) {
   const isUser = message.role === 'user';
   const align = isUser ? 'flex-end' : 'flex-start';
   const bgColor = isUser ? 'rgba(77, 163, 255, 0.15)' : 'rgba(255,255,255,0.06)';
+  const sttLabel = message.sttState === 'partial' ? '实时识别' : '语音识别';
+  const sttVariant = message.sttState === 'partial' ? 'outlined' : 'filled';
+  const sttColor = message.sttState === 'partial' ? 'warning' : 'default';
 
   return (
     <Box sx={{ display: 'flex', justifyContent: align, mb: 1.5 }}>
@@ -26,7 +29,14 @@ export default function MessageItem({ message }) {
           <Typography variant="caption" color="text.secondary">
             {isUser ? '你' : '小智'}
           </Typography>
-          {message.stt && <Chip label="语音识别" size="small" />}
+          {message.stt && (
+            <Chip
+              label={sttLabel}
+              size="small"
+              variant={sttVariant}
+              color={sttColor}
+            />
+          )}
           {message.tts && (
             <Chip
               label="语音回复"

@@ -73,6 +73,7 @@ type LLMMessage struct {
 
 type STTMessage struct {
 	Type      string `json:"type"`
+	State     string `json:"state,omitempty"`
 	Text      string `json:"text"`
 	SessionID string `json:"session_id,omitempty"`
 	ErrorCode int    `json:"error_code,omitempty"`

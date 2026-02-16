@@ -32,6 +32,15 @@ type outboundMessage struct {
 	data    []byte
 }
 
+const (
+	sttStatePartial             = "partial"
+	sttStateFinal               = "final"
+	interimSTTThrottleInterval  = 200 * time.Millisecond
+	interimSTTVADWindow         = 1500 * time.Millisecond
+	helloFeatureInterimSTT      = "interim_stt"
+	helloFeatureInterimSTTGroup = "stt"
+)
+
 type Session struct {
 	serverCfg *config.WSServerAppConfig
 	voicebot  config.VoicebotSessionConfig
@@ -68,6 +77,10 @@ type Session struct {
 
 	startedAt      time.Time
 	lastASRFinalAt time.Time
+	lastASRPartial time.Time
+	lastASRText    string
+	lastVADAt      time.Time
+	interimSTT     bool
 	asrMu          sync.Mutex
 
 	listening bool
@@ -198,6 +211,7 @@ func (s *Session) waitClientHello() error {
 		if err := json.Unmarshal(data, &hello); err != nil {
 			return err
 		}
+		s.applyClientFeatures(hello.Features)
 		s.audioParams = NormalizeAudioParams(hello.AudioParams, s.audioParams)
 		if err := s.sendServerHello(); err != nil {
 			return err
@@ -508,7 +522,7 @@ func (s *Session) handleListen(msg ListenMessage) {
 				s.orchestrator.OnUserSpeakingDetected()
 			}
 			s.markASRFinal()
-			_ = s.sendSTT(msg.Text, 0)
+			_ = s.sendSTT(msg.Text, sttStateFinal, 0)
 			s.orchestrator.OnASRFinal(msg.Text)
 		}
 	case "start":
@@ -604,13 +618,19 @@ func (s *Session) createAudioInPipe() error {
 		}
 		if isFinal {
 			s.markASRFinal()
-			_ = s.sendSTT(text, 0)
+			_ = s.sendSTT(text, sttStateFinal, 0)
 			s.orchestrator.OnASRFinal(text)
 		} else {
-			s.orchestrator.OnUserSpeakingDetected()
+			if s.shouldSendASRPartial(text, time.Now()) {
+				_ = s.sendSTT(text, sttStatePartial, 0)
+			}
+			if s.orchestrator != nil && s.shouldInterruptOnASRPartial() {
+				s.orchestrator.OnUserSpeakingDetected()
+			}
 		}
 	})
 	audioInPipe.OnUserSpeakingDetected(func() {
+		s.markVADDetected()
 		s.orchestrator.OnUserSpeakingDetected()
 	})
 
@@ -655,9 +675,10 @@ func (s *Session) sendLLM(text, emotion string) error {
 	return s.sendJSON(msg)
 }
 
-func (s *Session) sendSTT(text string, code int) error {
+func (s *Session) sendSTT(text, state string, code int) error {
 	msg := STTMessage{
 		Type:      "stt",
+		State:     state,
 		Text:      text,
 		SessionID: s.sessionID,
 		ErrorCode: code,
@@ -830,6 +851,83 @@ func shouldDisplayOnlySentence(text string) bool {
 	return false
 }
 
+func (s *Session) applyClientFeatures(features map[string]any) {
+	enabled := clientSupportsInterimSTT(features)
+	s.asrMu.Lock()
+	s.interimSTT = enabled
+	s.lastASRPartial = time.Time{}
+	s.lastASRText = ""
+	s.asrMu.Unlock()
+}
+
+func (s *Session) shouldSendASRPartial(text string, now time.Time) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	s.asrMu.Lock()
+	defer s.asrMu.Unlock()
+	if !s.interimSTT {
+		return false
+	}
+	if s.voicebot.Audio.InPipe.EnableVAD {
+		if s.lastVADAt.IsZero() || now.Sub(s.lastVADAt) > interimSTTVADWindow {
+			return false
+		}
+	}
+	if text == s.lastASRText {
+		return false
+	}
+	if !s.lastASRPartial.IsZero() && now.Sub(s.lastASRPartial) < interimSTTThrottleInterval {
+		return false
+	}
+	s.lastASRPartial = now
+	s.lastASRText = text
+	return true
+}
+
+func (s *Session) shouldInterruptOnASRPartial() bool {
+	return !s.voicebot.Audio.InPipe.EnableVAD
+}
+
+func clientSupportsInterimSTT(features map[string]any) bool {
+	if len(features) == 0 {
+		return false
+	}
+	if enabled, ok := featureBool(features, helloFeatureInterimSTT); ok {
+		return enabled
+	}
+	sttRaw, ok := features[helloFeatureInterimSTTGroup]
+	if !ok {
+		return false
+	}
+	sttMap, ok := sttRaw.(map[string]any)
+	if !ok {
+		return false
+	}
+	enabled, ok := featureBool(sttMap, "interim")
+	return ok && enabled
+}
+
+func featureBool(features map[string]any, key string) (bool, bool) {
+	raw, ok := features[key]
+	if !ok {
+		return false, false
+	}
+	switch value := raw.(type) {
+	case bool:
+		return value, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "1", "true", "yes", "on":
+			return true, true
+		case "0", "false", "no", "off":
+			return false, true
+		}
+	}
+	return false, false
+}
+
 func audioParamsFromConfig(cfg *config.WSServerAppConfig) AudioParams {
 	ap := cfg.Server.AudioParams
 	return AudioParams{
@@ -866,6 +964,14 @@ func int16ToBytes(samples []int16) []byte {
 func (s *Session) markASRFinal() {
 	s.asrMu.Lock()
 	s.lastASRFinalAt = time.Now()
+	s.lastASRPartial = time.Time{}
+	s.lastASRText = ""
+	s.asrMu.Unlock()
+}
+
+func (s *Session) markVADDetected() {
+	s.asrMu.Lock()
+	s.lastVADAt = time.Now()
 	s.asrMu.Unlock()
 }
 

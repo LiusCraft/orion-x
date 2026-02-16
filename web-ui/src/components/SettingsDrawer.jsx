@@ -139,8 +139,26 @@ export default function SettingsDrawer({
               value={connection.deviceName}
               onChange={(e) => onUpdateConnection('deviceName', e.target.value)}
             />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={Boolean(connection.interimSttEnabled)}
+                  onChange={(e) =>
+                    onUpdateConnection('interimSttEnabled', e.target.checked)
+                  }
+                />
+              }
+              label={
+                <Stack spacing={0.25}>
+                  <Typography variant="body2">启用实时识别（partial）</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    开启后会在 hello.features 中声明 stt.interim=true
+                  </Typography>
+                </Stack>
+              }
+            />
             <Typography variant="caption" color="text.secondary">
-              修改后在顶部点击连接即可生效
+              修改后重新连接即可生效
             </Typography>
           </Stack>
         )}

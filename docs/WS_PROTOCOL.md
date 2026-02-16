@@ -120,6 +120,9 @@ ws://127.0.0.1:8000/xiaozhi/v1/?device-id=AA:BB:CC:DD:EE:FF&client-id=web_test_c
   "token": "your-token1",
   "features": {
     "mcp": true,
+    "stt": {
+      "interim": true
+    },
     "notify": {
       "config_updated": true
     }
@@ -140,6 +143,10 @@ ws://127.0.0.1:8000/xiaozhi/v1/?device-id=AA:BB:CC:DD:EE:FF&client-id=web_test_c
   }
 }
 ```
+
+兼容与协商说明：
+- `features.stt.interim=true`（或 `features.interim_stt=true`）时，服务端可下发 `stt.state=partial`。
+- 未声明该 capability（或显式 `false`）时，服务端仅下发 `stt.state=final`，兼容旧客户端。
 
 ### 6.2 `listen`
 
@@ -243,11 +250,20 @@ ws://127.0.0.1:8000/xiaozhi/v1/?device-id=AA:BB:CC:DD:EE:FF&client-id=web_test_c
 ```json
 {
   "type": "stt",
+  "state": "partial",
   "text": "识别结果",
   "session_id": "...",
   "error_code": 10001
 }
 ```
+
+`state` 语义：
+- `partial`：实时中间结果（需客户端能力协商开启）。
+- `final`：最终识别结果（默认总是下发）。
+
+服务端实时结果策略：
+- 相同文本会去重，不重复下发。
+- 下发频率节流为约 `200ms` 一次（仅 `partial` 生效）。
 
 支持错误码（兼容字段）：
 - `10001` 配置未找到
@@ -394,9 +410,11 @@ S -> C: binary opus frames
 ```text
 C -> S: listen start
 C -> S: binary opus frames...
+C -> S: (持续讲话)
+S -> C: stt(state=partial) ... (仅在 capability 开启时)
 C -> S: empty opus frame
 C -> S: listen stop
-S -> C: stt / llm / tts
+S -> C: stt(state=final) / llm / tts
 S -> C: binary opus frames
 ```
 
@@ -420,4 +438,3 @@ S -> C: binary opus frames
 - `/Users/liushunshun/workspace/coding/qbox/xrobotd/main/xiaozhi-server/core/config_update_listener.py`
 - `/Users/liushunshun/workspace/coding/qbox/xrobotd/main/xiaozhi-server/config.yaml`
 - `/Users/liushunshun/workspace/coding/qbox/xrobotd/main/xiaozhi-server/test/test_page.html`
-
