@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion = 1
+const CurrentSchemaVersion = 2
 
 type MigrationResult struct {
 	TargetVersion   int
@@ -117,6 +117,7 @@ func migrationTableNames() []string {
 	return []string{
 		"users",
 		"platform_resources",
+		"platform_resource_versions",
 		"voicebots",
 		"devices",
 		"device_bindings",

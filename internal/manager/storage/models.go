@@ -12,6 +12,7 @@ func MigrationModels() []any {
 	return []any{
 		&UserModel{},
 		&PlatformResourceModel{},
+		&PlatformResourceVersionModel{},
 		&VoicebotModel{},
 		&DeviceModel{},
 		&DeviceBindingModel{},
@@ -48,6 +49,17 @@ type PlatformResourceModel struct {
 }
 
 func (PlatformResourceModel) TableName() string { return "platform_resources" }
+
+type PlatformResourceVersionModel struct {
+	ID                    uuid.UUID       `gorm:"type:uuid;primaryKey"`
+	EntryID               uuid.UUID       `gorm:"type:uuid;not null;uniqueIndex:uniq_platform_resource_versions_entry_version,priority:1"`
+	Version               int             `gorm:"not null;uniqueIndex:uniq_platform_resource_versions_entry_version,priority:2"`
+	ConfigSnapshot        json.RawMessage `gorm:"type:jsonb;not null"`
+	CredentialRefSnapshot string          `gorm:"type:text;not null"`
+	PublishedAt           time.Time       `gorm:"type:timestamptz;not null"`
+}
+
+func (PlatformResourceVersionModel) TableName() string { return "platform_resource_versions" }
 
 type VoicebotModel struct {
 	ID            uuid.UUID       `gorm:"type:uuid;primaryKey"`

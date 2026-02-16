@@ -8,11 +8,12 @@ type tableNamer interface {
 
 func TestMigrationTableNames(t *testing.T) {
 	expected := map[string]struct{}{
-		"users":              {},
-		"platform_resources": {},
-		"voicebots":          {},
-		"devices":            {},
-		"device_bindings":    {},
+		"users":                      {},
+		"platform_resources":         {},
+		"platform_resource_versions": {},
+		"voicebots":                  {},
+		"devices":                    {},
+		"device_bindings":            {},
 	}
 
 	got := migrationTableNames()
@@ -28,11 +29,12 @@ func TestMigrationTableNames(t *testing.T) {
 
 func TestMigrationModels_CoversCoreTables(t *testing.T) {
 	expected := map[string]struct{}{
-		"users":              {},
-		"platform_resources": {},
-		"voicebots":          {},
-		"devices":            {},
-		"device_bindings":    {},
+		"users":                      {},
+		"platform_resources":         {},
+		"platform_resource_versions": {},
+		"voicebots":                  {},
+		"devices":                    {},
+		"device_bindings":            {},
 	}
 
 	for _, model := range MigrationModels() {

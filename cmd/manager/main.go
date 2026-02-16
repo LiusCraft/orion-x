@@ -15,7 +15,9 @@ import (
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/manager/app"
 	"github.com/liuscraft/orion-x/internal/manager/auth"
+	"github.com/liuscraft/orion-x/internal/manager/contracts"
 	"github.com/liuscraft/orion-x/internal/manager/httpapi"
+	"github.com/liuscraft/orion-x/internal/manager/platformresource"
 	"github.com/liuscraft/orion-x/internal/manager/storage"
 )
 
@@ -64,6 +66,9 @@ func main() {
 	authService := auth.NewService(userRepository, authTokenManager)
 	authHandler := httpapi.NewAuthHandler(authService)
 	authMiddleware := httpapi.NewAuthMiddleware(authService)
+	platformResourceRepository := storage.NewPlatformResourceRepository(store.DB())
+	platformResourceService := platformresource.NewService(platformResourceRepository)
+	platformResourceHandler := httpapi.NewPlatformResourceHandler(platformResourceService)
 
 	router := http.NewServeMux()
 	router.Handle(appConfig.Server.HealthPath, healthHandler)
@@ -71,6 +76,15 @@ func main() {
 	router.Handle("/api/v1/auth/login", http.HandlerFunc(authHandler.Login))
 	router.Handle("/api/v1/auth/refresh", http.HandlerFunc(authHandler.Refresh))
 	router.Handle("/api/v1/auth/logout", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.Logout)))
+	router.Handle(
+		"/api/v1/admin/platform-resources",
+		authMiddleware.RequireAuth(authMiddleware.RequireRole(contracts.RoleAdmin)(http.HandlerFunc(platformResourceHandler.Create))),
+	)
+	router.Handle(
+		"/api/v1/admin/platform-resources/",
+		authMiddleware.RequireAuth(authMiddleware.RequireRole(contracts.RoleAdmin)(http.HandlerFunc(platformResourceHandler.ByID))),
+	)
+	router.Handle("/api/v1/platform-resources", authMiddleware.RequireAuth(http.HandlerFunc(platformResourceHandler.List)))
 
 	server := httpapi.NewServer(appConfig.Server, router)
 	lifecycle := app.NewLifecycle(appConfig.Migration.AutoMigrateOnStartup, migrator, server)
