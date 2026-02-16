@@ -41,3 +41,26 @@ func TestListenMessageUnmarshal(t *testing.T) {
 		t.Fatalf("unexpected listen message: %+v", msg)
 	}
 }
+
+func TestSTTMessageMarshalIncludesState(t *testing.T) {
+	msg := STTMessage{
+		Type:      "stt",
+		State:     sttStatePartial,
+		Text:      "hello",
+		SessionID: "sid-1",
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal stt failed: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal stt failed: %v", err)
+	}
+
+	if got["state"] != sttStatePartial {
+		t.Fatalf("expected state %q, got %v", sttStatePartial, got["state"])
+	}
+}

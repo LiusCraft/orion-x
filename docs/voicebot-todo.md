@@ -190,6 +190,12 @@
   - [ ] 单元测试（handler/service/repo）
   - [ ] 集成测试（PostgreSQL：绑定并发、entitlement 边界）
 
+### 16.2 WS 实时 STT 回传 (优先级: 中) ⭐️ 已完成
+- [x] `hello.features` 增加 interim capability 协商（默认仅 final）
+- [x] 复用 `stt` 消息并增加 `state=partial/final`
+- [x] ws-server partial 去重与节流（200ms）
+- [x] 同步更新协议与设计文档（`docs/WS_PROTOCOL.md`、`docs/ws-server-design.md`、`docs/ws-realtime-stt-feedback-design.md`）
+
 ## 优先级说明
 
 - **高**: 核心功能，必须先实现
