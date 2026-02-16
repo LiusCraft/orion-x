@@ -22,9 +22,11 @@ type Resource struct {
 	ResourceKey   string
 	Name          string
 	SchemaVersion int
+	BaseURL       string
+	AccessKey     string
+	HasAccessKey  bool
 	Capabilities  json.RawMessage
 	Config        json.RawMessage
-	CredentialRef string
 	Status        contracts.ResourceStatus
 	CreatedBy     uuid.UUID
 	CreatedAt     time.Time
@@ -32,12 +34,13 @@ type Resource struct {
 }
 
 type Version struct {
-	ID                    uuid.UUID
-	EntryID               uuid.UUID
-	Version               int
-	ConfigSnapshot        json.RawMessage
-	CredentialRefSnapshot string
-	PublishedAt           time.Time
+	ID                uuid.UUID
+	EntryID           uuid.UUID
+	Version           int
+	BaseURLSnapshot   string
+	AccessKeySnapshot string
+	ConfigSnapshot    json.RawMessage
+	PublishedAt       time.Time
 }
 
 type CreateInput struct {
@@ -46,9 +49,10 @@ type CreateInput struct {
 	ResourceKey   string
 	Name          string
 	SchemaVersion int
+	BaseURL       string
+	AccessKey     string
 	Capabilities  json.RawMessage
 	Config        json.RawMessage
-	CredentialRef string
 	Status        string
 }
 
@@ -64,9 +68,10 @@ type UpdateInput struct {
 	ResourceKey   *string
 	Name          *string
 	SchemaVersion *int
+	BaseURL       *string
+	AccessKey     *string
 	Capabilities  *json.RawMessage
 	Config        *json.RawMessage
-	CredentialRef *string
 	Status        *string
 }
 
@@ -76,9 +81,10 @@ func (in UpdateInput) HasChanges() bool {
 		in.ResourceKey != nil ||
 		in.Name != nil ||
 		in.SchemaVersion != nil ||
+		in.BaseURL != nil ||
+		in.AccessKey != nil ||
 		in.Capabilities != nil ||
 		in.Config != nil ||
-		in.CredentialRef != nil ||
 		in.Status != nil
 }
 
@@ -94,9 +100,10 @@ type UpdatePatch struct {
 	ResourceKey   *string
 	Name          *string
 	SchemaVersion *int
+	BaseURL       *string
+	AccessKey     *string
 	Capabilities  *json.RawMessage
 	Config        *json.RawMessage
-	CredentialRef *string
 	Status        *contracts.ResourceStatus
 }
 
@@ -106,9 +113,10 @@ func (patch UpdatePatch) HasChanges() bool {
 		patch.ResourceKey != nil ||
 		patch.Name != nil ||
 		patch.SchemaVersion != nil ||
+		patch.BaseURL != nil ||
+		patch.AccessKey != nil ||
 		patch.Capabilities != nil ||
 		patch.Config != nil ||
-		patch.CredentialRef != nil ||
 		patch.Status != nil
 }
 

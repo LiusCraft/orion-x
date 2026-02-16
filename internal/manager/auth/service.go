@@ -188,6 +188,35 @@ func (s *Service) Authenticate(ctx context.Context, accessToken string) (Princip
 	}, nil
 }
 
+func (s *Service) Reauthenticate(ctx context.Context, userID uuid.UUID, password string) error {
+	if err := s.validateReady(); err != nil {
+		return err
+	}
+	if userID == uuid.Nil || strings.TrimSpace(password) == "" {
+		return fmt.Errorf("%w: user_id and password are required", ErrInvalidArgument)
+	}
+
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			return ErrUnauthorized
+		}
+		return fmt.Errorf("load user by id: %w", err)
+	}
+
+	if !isSupportedRole(user.Role) || !isSupportedStatus(user.Status) {
+		return ErrUnauthorized
+	}
+	if user.Status != contracts.UserStatusActive {
+		return ErrForbidden
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		return ErrInvalidCredentials
+	}
+
+	return nil
+}
+
 func HashPassword(password string) (string, error) {
 	if strings.TrimSpace(password) == "" {
 		return "", fmt.Errorf("%w: password is required", ErrInvalidArgument)

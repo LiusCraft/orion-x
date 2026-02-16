@@ -39,9 +39,10 @@ func (r *platformResourceRepository) Create(ctx context.Context, resource platfo
 		ResourceKey:   resource.ResourceKey,
 		Name:          resource.Name,
 		SchemaVersion: resource.SchemaVersion,
+		BaseURL:       resource.BaseURL,
+		AccessKey:     resource.AccessKey,
 		Capabilities:  copyRawMessage(resource.Capabilities),
 		Config:        copyRawMessage(resource.Config),
-		CredentialRef: resource.CredentialRef,
 		Status:        string(resource.Status),
 		CreatedBy:     resource.CreatedBy,
 		CreatedAt:     now,
@@ -174,14 +175,17 @@ func (r *platformResourceRepository) Update(ctx context.Context, id uuid.UUID, p
 	if patch.SchemaVersion != nil {
 		model.SchemaVersion = *patch.SchemaVersion
 	}
+	if patch.BaseURL != nil {
+		model.BaseURL = *patch.BaseURL
+	}
+	if patch.AccessKey != nil {
+		model.AccessKey = *patch.AccessKey
+	}
 	if patch.Capabilities != nil {
 		model.Capabilities = copyRawMessage(*patch.Capabilities)
 	}
 	if patch.Config != nil {
 		model.Config = copyRawMessage(*patch.Config)
-	}
-	if patch.CredentialRef != nil {
-		model.CredentialRef = *patch.CredentialRef
 	}
 	if patch.Status != nil {
 		model.Status = string(*patch.Status)
@@ -257,9 +261,11 @@ func mapPlatformResourceModel(model PlatformResourceModel) platformresource.Reso
 		ResourceKey:   model.ResourceKey,
 		Name:          model.Name,
 		SchemaVersion: model.SchemaVersion,
+		BaseURL:       model.BaseURL,
+		AccessKey:     model.AccessKey,
+		HasAccessKey:  strings.TrimSpace(model.AccessKey) != "",
 		Capabilities:  copyRawMessage(model.Capabilities),
 		Config:        copyRawMessage(model.Config),
-		CredentialRef: model.CredentialRef,
 		Status:        contracts.ResourceStatus(model.Status),
 		CreatedBy:     model.CreatedBy,
 		CreatedAt:     model.CreatedAt,
@@ -274,12 +280,13 @@ func insertPlatformResourceVersion(tx *gorm.DB, model PlatformResourceModel, pub
 	}
 
 	versionModel := PlatformResourceVersionModel{
-		ID:                    uuid.New(),
-		EntryID:               model.ID,
-		Version:               nextVersion,
-		ConfigSnapshot:        copyRawMessage(model.Config),
-		CredentialRefSnapshot: model.CredentialRef,
-		PublishedAt:           publishedAt,
+		ID:                uuid.New(),
+		EntryID:           model.ID,
+		Version:           nextVersion,
+		BaseURLSnapshot:   model.BaseURL,
+		AccessKeySnapshot: model.AccessKey,
+		ConfigSnapshot:    copyRawMessage(model.Config),
+		PublishedAt:       publishedAt,
 	}
 	if err := tx.Create(&versionModel).Error; err != nil {
 		return err

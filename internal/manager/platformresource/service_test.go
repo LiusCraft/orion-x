@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,14 +93,17 @@ func (r *serviceFakeRepository) Update(_ context.Context, id uuid.UUID, patch Up
 	if patch.SchemaVersion != nil {
 		resource.SchemaVersion = *patch.SchemaVersion
 	}
+	if patch.BaseURL != nil {
+		resource.BaseURL = *patch.BaseURL
+	}
+	if patch.AccessKey != nil {
+		resource.AccessKey = *patch.AccessKey
+	}
 	if patch.Capabilities != nil {
 		resource.Capabilities = copyRaw(*patch.Capabilities)
 	}
 	if patch.Config != nil {
 		resource.Config = copyRaw(*patch.Config)
-	}
-	if patch.CredentialRef != nil {
-		resource.CredentialRef = *patch.CredentialRef
 	}
 	if patch.Status != nil {
 		resource.Status = *patch.Status
@@ -122,9 +126,22 @@ func (r *serviceFakeRepository) Delete(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
+type fakeAccessKeyCipher struct{}
+
+func (fakeAccessKeyCipher) Encrypt(plaintext string) (string, error) {
+	return "enc:" + plaintext, nil
+}
+
+func (fakeAccessKeyCipher) Decrypt(ciphertext string) (string, error) {
+	if !strings.HasPrefix(ciphertext, "enc:") {
+		return "", errors.New("invalid ciphertext")
+	}
+	return strings.TrimPrefix(ciphertext, "enc:"), nil
+}
+
 func TestService_CreateAndListSuccess(t *testing.T) {
 	repo := newServiceFakeRepository()
-	service := NewService(repo)
+	service := NewService(repo, fakeAccessKeyCipher{})
 	createdBy := uuid.New()
 
 	created, err := service.Create(context.Background(), createdBy, CreateInput{
@@ -133,9 +150,10 @@ func TestService_CreateAndListSuccess(t *testing.T) {
 		ResourceKey:   "LLM-ZHIPU-PROD",
 		Name:          "Zhipu Production",
 		SchemaVersion: 1,
+		BaseURL:       "https://open.bigmodel.cn/api/v4",
+		AccessKey:     "sk-zhipu-plain",
 		Capabilities:  json.RawMessage(`{"stream":true}`),
 		Config:        json.RawMessage(`{"model":"glm-4-flash"}`),
-		CredentialRef: "secret://manager/llm/zhipu/prod",
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -153,8 +171,19 @@ func TestService_CreateAndListSuccess(t *testing.T) {
 	if created.ResourceKey != "llm-zhipu-prod" {
 		t.Fatalf("expected normalized resource key, got %q", created.ResourceKey)
 	}
+	if created.AccessKey != "" {
+		t.Fatalf("expected sanitized access key in response")
+	}
+	if !created.HasAccessKey {
+		t.Fatalf("expected has_access_key=true")
+	}
 	if repo.versions[created.ID] != 1 {
 		t.Fatalf("expected initial version count 1, got %d", repo.versions[created.ID])
+	}
+
+	stored := repo.resources[created.ID]
+	if stored.AccessKey == "" || stored.AccessKey == "sk-zhipu-plain" {
+		t.Fatalf("expected encrypted access key stored in repository")
 	}
 
 	items, err := service.List(context.Background(), ListInput{
@@ -171,11 +200,14 @@ func TestService_CreateAndListSuccess(t *testing.T) {
 	if items[0].ID != created.ID {
 		t.Fatalf("expected listed id %s, got %s", created.ID, items[0].ID)
 	}
+	if items[0].AccessKey != "" || !items[0].HasAccessKey {
+		t.Fatalf("expected list result hides access key and reports has_access_key")
+	}
 }
 
 func TestService_CreateRejectsInvalidCategoryOrProvider(t *testing.T) {
 	repo := newServiceFakeRepository()
-	service := NewService(repo)
+	service := NewService(repo, fakeAccessKeyCipher{})
 	createdBy := uuid.New()
 
 	tests := []struct {
@@ -190,9 +222,10 @@ func TestService_CreateRejectsInvalidCategoryOrProvider(t *testing.T) {
 				ResourceKey:   "vision-dashscope-main",
 				Name:          "invalid category",
 				SchemaVersion: 1,
+				BaseURL:       "https://dashscope.aliyuncs.com",
+				AccessKey:     "sk-test",
 				Capabilities:  json.RawMessage(`{"stream":true}`),
 				Config:        json.RawMessage(`{"model":"x"}`),
-				CredentialRef: "secret://x",
 			},
 		},
 		{
@@ -203,9 +236,10 @@ func TestService_CreateRejectsInvalidCategoryOrProvider(t *testing.T) {
 				ResourceKey:   "asr-zhipu-main",
 				Name:          "invalid provider",
 				SchemaVersion: 1,
+				BaseURL:       "https://dashscope.aliyuncs.com",
+				AccessKey:     "sk-test",
 				Capabilities:  json.RawMessage(`{"stream":true}`),
 				Config:        json.RawMessage(`{"model":"x"}`),
-				CredentialRef: "secret://x",
 			},
 		},
 	}
@@ -220,9 +254,28 @@ func TestService_CreateRejectsInvalidCategoryOrProvider(t *testing.T) {
 	}
 }
 
+func TestService_CreateRejectsReservedConfigKeys(t *testing.T) {
+	service := NewService(newServiceFakeRepository(), fakeAccessKeyCipher{})
+
+	_, err := service.Create(context.Background(), uuid.New(), CreateInput{
+		Category:      "llm",
+		Provider:      "zhipu",
+		ResourceKey:   "llm-zhipu-prod",
+		Name:          "LLM Prod",
+		SchemaVersion: 1,
+		BaseURL:       "https://open.bigmodel.cn/api/v4",
+		AccessKey:     "sk-test",
+		Capabilities:  json.RawMessage(`{"stream":true}`),
+		Config:        json.RawMessage(`{"base_url":"https://x"}`),
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	}
+}
+
 func TestService_UpdateRejectsProviderCategoryMismatch(t *testing.T) {
 	repo := newServiceFakeRepository()
-	service := NewService(repo)
+	service := NewService(repo, fakeAccessKeyCipher{})
 
 	created, err := service.Create(context.Background(), uuid.New(), CreateInput{
 		Category:      "asr",
@@ -230,9 +283,10 @@ func TestService_UpdateRejectsProviderCategoryMismatch(t *testing.T) {
 		ResourceKey:   "asr-dashscope-prod",
 		Name:          "ASR Prod",
 		SchemaVersion: 1,
+		BaseURL:       "https://dashscope.aliyuncs.com/api-ws/v1/inference",
+		AccessKey:     "sk-dashscope",
 		Capabilities:  json.RawMessage(`{"stream":true}`),
 		Config:        json.RawMessage(`{"model":"fun-asr-realtime"}`),
-		CredentialRef: "secret://manager/asr/dashscope/prod",
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -247,7 +301,7 @@ func TestService_UpdateRejectsProviderCategoryMismatch(t *testing.T) {
 
 func TestService_UpdateSuccessIncrementsVersion(t *testing.T) {
 	repo := newServiceFakeRepository()
-	service := NewService(repo)
+	service := NewService(repo, fakeAccessKeyCipher{})
 
 	created, err := service.Create(context.Background(), uuid.New(), CreateInput{
 		Category:      "llm",
@@ -255,9 +309,10 @@ func TestService_UpdateSuccessIncrementsVersion(t *testing.T) {
 		ResourceKey:   "llm-zhipu-prod",
 		Name:          "LLM Prod",
 		SchemaVersion: 1,
+		BaseURL:       "https://open.bigmodel.cn/api/v4",
+		AccessKey:     "sk-zhipu",
 		Capabilities:  json.RawMessage(`{"stream":true}`),
 		Config:        json.RawMessage(`{"model":"glm-4-flash"}`),
-		CredentialRef: "secret://manager/llm/zhipu/prod",
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -266,11 +321,13 @@ func TestService_UpdateSuccessIncrementsVersion(t *testing.T) {
 	updatedName := "LLM Prod V2"
 	schemaVersion := 2
 	updatedConfig := json.RawMessage(`{"model":"glm-4-air"}`)
+	updatedAccessKey := "sk-zhipu-v2"
 
 	updated, err := service.Update(context.Background(), created.ID, UpdateInput{
 		Name:          &updatedName,
 		SchemaVersion: &schemaVersion,
 		Config:        &updatedConfig,
+		AccessKey:     &updatedAccessKey,
 	})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
@@ -285,17 +342,53 @@ func TestService_UpdateSuccessIncrementsVersion(t *testing.T) {
 	if string(updated.Config) != string(updatedConfig) {
 		t.Fatalf("expected updated config %s, got %s", string(updatedConfig), string(updated.Config))
 	}
+	if updated.AccessKey != "" || !updated.HasAccessKey {
+		t.Fatalf("expected updated response to hide access key")
+	}
 	if repo.versions[created.ID] != 2 {
 		t.Fatalf("expected version count 2 after update, got %d", repo.versions[created.ID])
+	}
+
+	stored := repo.resources[created.ID]
+	if stored.AccessKey == updatedAccessKey || !strings.HasPrefix(stored.AccessKey, "enc:") {
+		t.Fatalf("expected rotated access key stored as encrypted payload")
 	}
 }
 
 func TestService_ListRejectsUnknownProviderFilter(t *testing.T) {
-	service := NewService(newServiceFakeRepository())
+	service := NewService(newServiceFakeRepository(), fakeAccessKeyCipher{})
 
 	_, err := service.List(context.Background(), ListInput{Provider: "unknown-provider"})
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	}
+}
+
+func TestService_RevealAccessKey(t *testing.T) {
+	repo := newServiceFakeRepository()
+	service := NewService(repo, fakeAccessKeyCipher{})
+
+	created, err := service.Create(context.Background(), uuid.New(), CreateInput{
+		Category:      "llm",
+		Provider:      "zhipu",
+		ResourceKey:   "llm-zhipu-prod",
+		Name:          "LLM Prod",
+		SchemaVersion: 1,
+		BaseURL:       "https://open.bigmodel.cn/api/v4",
+		AccessKey:     "sk-zhipu-reveal",
+		Capabilities:  json.RawMessage(`{"stream":true}`),
+		Config:        json.RawMessage(`{"model":"glm-4-flash"}`),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	plain, err := service.RevealAccessKey(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("RevealAccessKey() error = %v", err)
+	}
+	if plain != "sk-zhipu-reveal" {
+		t.Fatalf("expected plain access key, got %q", plain)
 	}
 }
 

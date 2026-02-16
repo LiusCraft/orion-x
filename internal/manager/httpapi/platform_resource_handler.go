@@ -8,17 +8,26 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/manager/auth"
 	"github.com/liuscraft/orion-x/internal/manager/platformresource"
 )
 
-const platformResourceAdminPathPrefix = "/api/v1/admin/platform-resources/"
+const (
+	platformResourceAdminPathPrefix = "/api/v1/admin/platform-resources/"
+	revealAccessKeyAction           = "reveal_access_key"
+)
 
 type PlatformResourceHandler struct {
-	service *platformresource.Service
+	resourceService *platformresource.Service
+	authService     *auth.Service
 }
 
-func NewPlatformResourceHandler(service *platformresource.Service) *PlatformResourceHandler {
-	return &PlatformResourceHandler{service: service}
+func NewPlatformResourceHandler(resourceService *platformresource.Service, authService *auth.Service) *PlatformResourceHandler {
+	return &PlatformResourceHandler{
+		resourceService: resourceService,
+		authService:     authService,
+	}
 }
 
 func (h *PlatformResourceHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +35,7 @@ func (h *PlatformResourceHandler) Create(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	if h.service == nil {
+	if h.resourceService == nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"code":    "ERR_INTERNAL",
 			"message": "internal server error",
@@ -52,15 +61,16 @@ func (h *PlatformResourceHandler) Create(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	resource, err := h.service.Create(r.Context(), principal.UserID, platformresource.CreateInput{
+	resource, err := h.resourceService.Create(r.Context(), principal.UserID, platformresource.CreateInput{
 		Category:      req.Category,
 		Provider:      req.Provider,
 		ResourceKey:   req.ResourceKey,
 		Name:          req.Name,
 		SchemaVersion: req.SchemaVersion,
+		BaseURL:       req.BaseURL,
+		AccessKey:     req.AccessKey,
 		Capabilities:  req.Capabilities,
 		Config:        req.Config,
-		CredentialRef: req.CredentialRef,
 		Status:        req.Status,
 	})
 	if err != nil {
@@ -80,7 +90,7 @@ func (h *PlatformResourceHandler) List(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	if h.service == nil {
+	if h.resourceService == nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"code":    "ERR_INTERNAL",
 			"message": "internal server error",
@@ -96,7 +106,7 @@ func (h *PlatformResourceHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resources, err := h.service.List(r.Context(), platformresource.ListInput{
+	resources, err := h.resourceService.List(r.Context(), platformresource.ListInput{
 		Category: r.URL.Query().Get("category"),
 		Provider: r.URL.Query().Get("provider"),
 		Status:   r.URL.Query().Get("status"),
@@ -121,7 +131,7 @@ func (h *PlatformResourceHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PlatformResourceHandler) ByID(w http.ResponseWriter, r *http.Request) {
-	if h.service == nil {
+	if h.resourceService == nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"code":    "ERR_INTERNAL",
 			"message": "internal server error",
@@ -129,7 +139,8 @@ func (h *PlatformResourceHandler) ByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := PrincipalFromContext(r.Context()); !ok {
+	principal, ok := PrincipalFromContext(r.Context())
+	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{
 			"code":    "ERR_UNAUTHORIZED",
 			"message": "unauthorized",
@@ -137,12 +148,17 @@ func (h *PlatformResourceHandler) ByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resourceID, err := extractPlatformResourceID(r.URL.Path)
+	resourceID, action, err := parsePlatformResourceSubPath(r.URL.Path)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"code":    "ERR_INVALID_ARGUMENT",
-			"message": "invalid resource id",
+			"message": "invalid resource path",
 		})
+		return
+	}
+
+	if action == revealAccessKeyAction {
+		h.revealAccessKey(w, r, principal, resourceID)
 		return
 	}
 
@@ -166,15 +182,16 @@ func (h *PlatformResourceHandler) patchByID(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	resource, err := h.service.Update(r.Context(), resourceID, platformresource.UpdateInput{
+	resource, err := h.resourceService.Update(r.Context(), resourceID, platformresource.UpdateInput{
 		Category:      req.Category,
 		Provider:      req.Provider,
 		ResourceKey:   req.ResourceKey,
 		Name:          req.Name,
 		SchemaVersion: req.SchemaVersion,
+		BaseURL:       req.BaseURL,
+		AccessKey:     req.AccessKey,
 		Capabilities:  req.Capabilities,
 		Config:        req.Config,
-		CredentialRef: req.CredentialRef,
 		Status:        req.Status,
 	})
 	if err != nil {
@@ -190,7 +207,7 @@ func (h *PlatformResourceHandler) patchByID(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *PlatformResourceHandler) deleteByID(w http.ResponseWriter, r *http.Request, resourceID uuid.UUID) {
-	err := h.service.Delete(r.Context(), resourceID)
+	err := h.resourceService.Delete(r.Context(), resourceID)
 	if err != nil {
 		writePlatformResourceError(w, err)
 		return
@@ -205,15 +222,61 @@ func (h *PlatformResourceHandler) deleteByID(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+func (h *PlatformResourceHandler) revealAccessKey(w http.ResponseWriter, r *http.Request, principal auth.Principal, resourceID uuid.UUID) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if h.authService == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"code":    "ERR_INTERNAL",
+			"message": "internal server error",
+		})
+		return
+	}
+
+	var req revealAccessKeyRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"code":    "ERR_INVALID_ARGUMENT",
+			"message": "invalid request body",
+		})
+		return
+	}
+
+	if err := h.authService.Reauthenticate(r.Context(), principal.UserID, req.Password); err != nil {
+		writeAuthServiceError(w, err)
+		return
+	}
+
+	accessKey, err := h.resourceService.RevealAccessKey(r.Context(), resourceID)
+	if err != nil {
+		writePlatformResourceError(w, err)
+		return
+	}
+
+	logging.Infof("manager access key revealed user_id=%s resource_id=%s", principal.UserID.String(), resourceID.String())
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"code":    "OK",
+		"message": "",
+		"data": map[string]any{
+			"id":         resourceID.String(),
+			"access_key": accessKey,
+		},
+	})
+}
+
 type platformResourceCreateRequest struct {
 	Category      string          `json:"category"`
 	Provider      string          `json:"provider"`
 	ResourceKey   string          `json:"resource_key"`
 	Name          string          `json:"name"`
 	SchemaVersion int             `json:"schema_version"`
+	BaseURL       string          `json:"base_url"`
+	AccessKey     string          `json:"access_key"`
 	Capabilities  json.RawMessage `json:"capabilities"`
 	Config        json.RawMessage `json:"config"`
-	CredentialRef string          `json:"credential_ref"`
 	Status        string          `json:"status"`
 }
 
@@ -223,10 +286,15 @@ type platformResourceUpdateRequest struct {
 	ResourceKey   *string          `json:"resource_key"`
 	Name          *string          `json:"name"`
 	SchemaVersion *int             `json:"schema_version"`
+	BaseURL       *string          `json:"base_url"`
+	AccessKey     *string          `json:"access_key"`
 	Capabilities  *json.RawMessage `json:"capabilities"`
 	Config        *json.RawMessage `json:"config"`
-	CredentialRef *string          `json:"credential_ref"`
 	Status        *string          `json:"status"`
+}
+
+type revealAccessKeyRequest struct {
+	Password string `json:"password"`
 }
 
 func platformResourceDTO(resource platformresource.Resource) map[string]any {
@@ -237,9 +305,10 @@ func platformResourceDTO(resource platformresource.Resource) map[string]any {
 		"resource_key":   resource.ResourceKey,
 		"name":           resource.Name,
 		"schema_version": resource.SchemaVersion,
+		"base_url":       resource.BaseURL,
+		"has_access_key": resource.HasAccessKey,
 		"capabilities":   resource.Capabilities,
 		"config":         resource.Config,
-		"credential_ref": resource.CredentialRef,
 		"status":         resource.Status,
 		"created_by":     resource.CreatedBy.String(),
 		"created_at":     resource.CreatedAt.UTC().Format(time.RFC3339),
@@ -247,20 +316,34 @@ func platformResourceDTO(resource platformresource.Resource) map[string]any {
 	}
 }
 
-func extractPlatformResourceID(path string) (uuid.UUID, error) {
+func parsePlatformResourceSubPath(path string) (uuid.UUID, string, error) {
 	if !strings.HasPrefix(path, platformResourceAdminPathPrefix) {
-		return uuid.Nil, errors.New("unsupported path")
-	}
-	rawID := strings.TrimSpace(strings.TrimPrefix(path, platformResourceAdminPathPrefix))
-	if rawID == "" || strings.Contains(rawID, "/") {
-		return uuid.Nil, errors.New("resource id is required")
+		return uuid.Nil, "", errors.New("unsupported path")
 	}
 
-	resourceID, err := uuid.Parse(rawID)
-	if err != nil {
-		return uuid.Nil, err
+	raw := strings.Trim(strings.TrimPrefix(path, platformResourceAdminPathPrefix), "/")
+	if raw == "" {
+		return uuid.Nil, "", errors.New("resource id is required")
 	}
-	return resourceID, nil
+
+	parts := strings.Split(raw, "/")
+	if len(parts) != 1 && len(parts) != 3 {
+		return uuid.Nil, "", errors.New("unsupported resource action")
+	}
+
+	resourceID, err := uuid.Parse(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+
+	if len(parts) == 1 {
+		return resourceID, "", nil
+	}
+	if parts[1] == "access-key" && parts[2] == "reveal" {
+		return resourceID, revealAccessKeyAction, nil
+	}
+
+	return uuid.Nil, "", errors.New("unsupported resource action")
 }
 
 func writePlatformResourceError(w http.ResponseWriter, err error) {

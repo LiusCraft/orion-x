@@ -29,9 +29,10 @@ func TestPlatformResourceRepository_CreateListAndInitialVersion(t *testing.T) {
 		ResourceKey:   "llm-zhipu-prod",
 		Name:          "LLM Zhipu Prod",
 		SchemaVersion: 1,
+		BaseURL:       "https://open.bigmodel.cn/api/v4",
+		AccessKey:     "encrypted:sk-zhipu-prod",
 		Capabilities:  json.RawMessage(`{"stream":true}`),
 		Config:        json.RawMessage(`{"model":"glm-4-flash"}`),
-		CredentialRef: "secret://manager/llm/zhipu/prod",
 		Status:        contracts.ResourceStatusActive,
 		CreatedBy:     uuid.New(),
 	}
@@ -84,9 +85,10 @@ func TestPlatformResourceRepository_UpdateCreatesVersionSnapshot(t *testing.T) {
 		ResourceKey:   "llm-zhipu-stage",
 		Name:          "LLM Zhipu Stage",
 		SchemaVersion: 1,
+		BaseURL:       "https://open.bigmodel.cn/api/v4",
+		AccessKey:     "encrypted:sk-zhipu-stage",
 		Capabilities:  json.RawMessage(`{"stream":true}`),
 		Config:        json.RawMessage(`{"model":"glm-4-flash"}`),
-		CredentialRef: "secret://manager/llm/zhipu/stage",
 		Status:        contracts.ResourceStatusActive,
 		CreatedBy:     uuid.New(),
 	}
@@ -96,13 +98,15 @@ func TestPlatformResourceRepository_UpdateCreatesVersionSnapshot(t *testing.T) {
 	}
 
 	updatedConfig := json.RawMessage(`{"model":"glm-4-air"}`)
-	updatedCredential := "secret://manager/llm/zhipu/stage-v2"
+	updatedBaseURL := "https://open.bigmodel.cn/api/v5"
+	updatedAccessKey := "encrypted:sk-zhipu-stage-v2"
 	updatedSchemaVersion := 2
 	updatedStatus := contracts.ResourceStatusInactive
 
 	updated, err := repo.Update(ctx, created.ID, platformresource.UpdatePatch{
 		Config:        &updatedConfig,
-		CredentialRef: &updatedCredential,
+		BaseURL:       &updatedBaseURL,
+		AccessKey:     &updatedAccessKey,
 		SchemaVersion: &updatedSchemaVersion,
 		Status:        &updatedStatus,
 	})
@@ -113,8 +117,11 @@ func TestPlatformResourceRepository_UpdateCreatesVersionSnapshot(t *testing.T) {
 	if updated.SchemaVersion != updatedSchemaVersion {
 		t.Fatalf("expected schema version %d, got %d", updatedSchemaVersion, updated.SchemaVersion)
 	}
-	if updated.CredentialRef != updatedCredential {
-		t.Fatalf("expected credential ref %q, got %q", updatedCredential, updated.CredentialRef)
+	if updated.BaseURL != updatedBaseURL {
+		t.Fatalf("expected base url %q, got %q", updatedBaseURL, updated.BaseURL)
+	}
+	if updated.AccessKey != updatedAccessKey {
+		t.Fatalf("expected access key %q, got %q", updatedAccessKey, updated.AccessKey)
 	}
 	if updated.Status != updatedStatus {
 		t.Fatalf("expected status %q, got %q", updatedStatus, updated.Status)
@@ -136,8 +143,11 @@ func TestPlatformResourceRepository_UpdateCreatesVersionSnapshot(t *testing.T) {
 	if string(versions[1].ConfigSnapshot) != string(updatedConfig) {
 		t.Fatalf("expected config snapshot %s, got %s", string(updatedConfig), string(versions[1].ConfigSnapshot))
 	}
-	if versions[1].CredentialRefSnapshot != updatedCredential {
-		t.Fatalf("expected credential snapshot %q, got %q", updatedCredential, versions[1].CredentialRefSnapshot)
+	if versions[1].BaseURLSnapshot != updatedBaseURL {
+		t.Fatalf("expected base url snapshot %q, got %q", updatedBaseURL, versions[1].BaseURLSnapshot)
+	}
+	if versions[1].AccessKeySnapshot != updatedAccessKey {
+		t.Fatalf("expected access key snapshot %q, got %q", updatedAccessKey, versions[1].AccessKeySnapshot)
 	}
 }
 
@@ -152,9 +162,10 @@ func TestPlatformResourceRepository_DeleteRemovesVersions(t *testing.T) {
 		ResourceKey:   "tts-dashscope-main",
 		Name:          "TTS DashScope Main",
 		SchemaVersion: 1,
+		BaseURL:       "https://dashscope.aliyuncs.com/api-ws/v1/inference",
+		AccessKey:     "encrypted:sk-dashscope-main",
 		Capabilities:  json.RawMessage(`{"emotion":true}`),
 		Config:        json.RawMessage(`{"model":"cosyvoice-v3-flash"}`),
-		CredentialRef: "secret://manager/tts/dashscope/main",
 		Status:        contracts.ResourceStatusActive,
 		CreatedBy:     uuid.New(),
 	}
@@ -194,9 +205,10 @@ func TestPlatformResourceRepository_CreateConflict(t *testing.T) {
 		ResourceKey:   "asr-dashscope-main",
 		Name:          "ASR DashScope Main",
 		SchemaVersion: 1,
+		BaseURL:       "https://dashscope.aliyuncs.com/api-ws/v1/inference",
+		AccessKey:     "encrypted:sk-dashscope-main",
 		Capabilities:  json.RawMessage(`{"stream":true}`),
 		Config:        json.RawMessage(`{"model":"fun-asr-realtime"}`),
-		CredentialRef: "secret://manager/asr/dashscope/main",
 		Status:        contracts.ResourceStatusActive,
 		CreatedBy:     uuid.New(),
 	}

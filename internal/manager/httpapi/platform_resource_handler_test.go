@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,14 +99,17 @@ func (r *handlerPlatformResourceRepo) Update(_ context.Context, id uuid.UUID, pa
 	if patch.SchemaVersion != nil {
 		resource.SchemaVersion = *patch.SchemaVersion
 	}
+	if patch.BaseURL != nil {
+		resource.BaseURL = *patch.BaseURL
+	}
+	if patch.AccessKey != nil {
+		resource.AccessKey = *patch.AccessKey
+	}
 	if patch.Capabilities != nil {
 		resource.Capabilities = copyRawMessageForHandler(*patch.Capabilities)
 	}
 	if patch.Config != nil {
 		resource.Config = copyRawMessageForHandler(*patch.Config)
-	}
-	if patch.CredentialRef != nil {
-		resource.CredentialRef = *patch.CredentialRef
 	}
 	if patch.Status != nil {
 		resource.Status = *patch.Status
@@ -126,19 +131,69 @@ func (r *handlerPlatformResourceRepo) Delete(_ context.Context, id uuid.UUID) er
 	return nil
 }
 
-func TestPlatformResourceHandler_CRUDFlow(t *testing.T) {
-	repo := newHandlerPlatformResourceRepo()
-	handler := NewPlatformResourceHandler(platformresource.NewService(repo))
+type handlerFakeAccessKeyCipher struct{}
+
+func (handlerFakeAccessKeyCipher) Encrypt(plaintext string) (string, error) {
+	return "enc:" + plaintext, nil
+}
+
+func (handlerFakeAccessKeyCipher) Decrypt(ciphertext string) (string, error) {
+	if !strings.HasPrefix(ciphertext, "enc:") {
+		return "", errors.New("invalid ciphertext")
+	}
+	return strings.TrimPrefix(ciphertext, "enc:"), nil
+}
+
+type handlerAuthUserRepo struct {
+	byID    map[uuid.UUID]auth.User
+	byEmail map[string]auth.User
+}
+
+func (r *handlerAuthUserRepo) Create(_ context.Context, user auth.User) error {
+	if r.byID == nil {
+		r.byID = make(map[uuid.UUID]auth.User)
+	}
+	if r.byEmail == nil {
+		r.byEmail = make(map[string]auth.User)
+	}
+	r.byID[user.ID] = user
+	r.byEmail[user.Email] = user
+	return nil
+}
+
+func (r *handlerAuthUserRepo) GetByID(_ context.Context, id uuid.UUID) (auth.User, error) {
+	user, ok := r.byID[id]
+	if !ok {
+		return auth.User{}, auth.ErrUserNotFound
+	}
+	return user, nil
+}
+
+func (r *handlerAuthUserRepo) GetByEmail(_ context.Context, email string) (auth.User, error) {
+	user, ok := r.byEmail[email]
+	if !ok {
+		return auth.User{}, auth.ErrUserNotFound
+	}
+	return user, nil
+}
+
+type noopTokenManager struct{}
+
+func (noopTokenManager) IssueTokenPair(user auth.User) (auth.TokenPair, error) {
+	return auth.TokenPair{TokenType: "Bearer"}, nil
+}
+
+func (noopTokenManager) Parse(token string, expectedType auth.TokenType) (auth.TokenClaims, error) {
+	return auth.TokenClaims{}, auth.ErrUnauthorized
+}
+
+func TestPlatformResourceHandler_CRUDAndRevealFlow(t *testing.T) {
+	repo, handler, principal := newPlatformResourceHandlerTestHarness(t)
+
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/admin/platform-resources", http.HandlerFunc(handler.Create))
 	mux.Handle("/api/v1/admin/platform-resources/", http.HandlerFunc(handler.ByID))
 	mux.Handle("/api/v1/platform-resources", http.HandlerFunc(handler.List))
-
-	principal := auth.Principal{
-		UserID: uuid.New(),
-		Email:  "admin@example.com",
-		Role:   contracts.RoleAdmin,
-	}
 
 	createResp := performJSONRequestWithPrincipal(t, mux, http.MethodPost, "/api/v1/admin/platform-resources", []byte(`{
 		"category":"llm",
@@ -146,9 +201,10 @@ func TestPlatformResourceHandler_CRUDFlow(t *testing.T) {
 		"resource_key":"llm-zhipu-prod",
 		"name":"LLM Zhipu Prod",
 		"schema_version":1,
+		"base_url":"https://open.bigmodel.cn/api/v4",
+		"access_key":"sk-zhipu-plain",
 		"capabilities":{"stream":true},
-		"config":{"model":"glm-4-flash"},
-		"credential_ref":"secret://manager/llm/zhipu/prod"
+		"config":{"model":"glm-4-flash"}
 	}`), principal)
 	if createResp.Code != http.StatusOK {
 		t.Fatalf("expected create status 200, got %d", createResp.Code)
@@ -162,6 +218,12 @@ func TestPlatformResourceHandler_CRUDFlow(t *testing.T) {
 	resourceID, _ := createData["id"].(string)
 	if resourceID == "" {
 		t.Fatalf("expected non-empty resource id")
+	}
+	if _, exists := createData["access_key"]; exists {
+		t.Fatalf("expected create response not to return access_key")
+	}
+	if createData["has_access_key"] != true {
+		t.Fatalf("expected has_access_key=true, got %#v", createData["has_access_key"])
 	}
 
 	listResp := performJSONRequestWithPrincipal(t, mux, http.MethodGet, "/api/v1/platform-resources?category=llm&provider=zhipu&status=active", nil, principal)
@@ -183,6 +245,8 @@ func TestPlatformResourceHandler_CRUDFlow(t *testing.T) {
 
 	patchResp := performJSONRequestWithPrincipal(t, mux, http.MethodPatch, "/api/v1/admin/platform-resources/"+resourceID, []byte(`{
 		"schema_version":2,
+		"base_url":"https://open.bigmodel.cn/api/v5",
+		"access_key":"sk-zhipu-rotated",
 		"config":{"model":"glm-4-air"},
 		"status":"inactive"
 	}`), principal)
@@ -200,6 +264,27 @@ func TestPlatformResourceHandler_CRUDFlow(t *testing.T) {
 	if patchData["status"] != string(contracts.ResourceStatusInactive) {
 		t.Fatalf("expected status inactive, got %#v", patchData["status"])
 	}
+	if _, exists := patchData["access_key"]; exists {
+		t.Fatalf("expected patch response not to return access_key")
+	}
+
+	revealBadResp := performJSONRequestWithPrincipal(t, mux, http.MethodPost, "/api/v1/admin/platform-resources/"+resourceID+"/access-key/reveal", []byte(`{"password":"wrong"}`), principal)
+	if revealBadResp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected reveal with wrong password status 401, got %d", revealBadResp.Code)
+	}
+
+	revealResp := performJSONRequestWithPrincipal(t, mux, http.MethodPost, "/api/v1/admin/platform-resources/"+resourceID+"/access-key/reveal", []byte(`{"password":"P@ssw0rd"}`), principal)
+	if revealResp.Code != http.StatusOK {
+		t.Fatalf("expected reveal status 200, got %d", revealResp.Code)
+	}
+	revealPayload := decodePayload(t, revealResp)
+	revealData, ok := revealPayload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reveal data object")
+	}
+	if revealData["access_key"] != "sk-zhipu-rotated" {
+		t.Fatalf("expected revealed access key sk-zhipu-rotated, got %#v", revealData["access_key"])
+	}
 
 	deleteResp := performJSONRequestWithPrincipal(t, mux, http.MethodDelete, "/api/v1/admin/platform-resources/"+resourceID, nil, principal)
 	if deleteResp.Code != http.StatusOK {
@@ -211,12 +296,10 @@ func TestPlatformResourceHandler_CRUDFlow(t *testing.T) {
 }
 
 func TestPlatformResourceHandler_InvalidCategoryOrProviderReturns400(t *testing.T) {
-	repo := newHandlerPlatformResourceRepo()
-	handler := NewPlatformResourceHandler(platformresource.NewService(repo))
+	_, handler, principal := newPlatformResourceHandlerTestHarness(t)
+
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/admin/platform-resources", http.HandlerFunc(handler.Create))
-
-	principal := auth.Principal{UserID: uuid.New(), Email: "admin@example.com", Role: contracts.RoleAdmin}
 
 	tests := []struct {
 		name string
@@ -230,9 +313,10 @@ func TestPlatformResourceHandler_InvalidCategoryOrProviderReturns400(t *testing.
 				"resource_key":"vision-dashscope-prod",
 				"name":"invalid",
 				"schema_version":1,
+				"base_url":"https://dashscope.aliyuncs.com",
+				"access_key":"sk-test",
 				"capabilities":{"stream":true},
-				"config":{"model":"x"},
-				"credential_ref":"secret://x"
+				"config":{"model":"x"}
 			}`,
 		},
 		{
@@ -243,9 +327,10 @@ func TestPlatformResourceHandler_InvalidCategoryOrProviderReturns400(t *testing.
 				"resource_key":"asr-zhipu-prod",
 				"name":"invalid",
 				"schema_version":1,
+				"base_url":"https://dashscope.aliyuncs.com",
+				"access_key":"sk-test",
 				"capabilities":{"stream":true},
-				"config":{"model":"x"},
-				"credential_ref":"secret://x"
+				"config":{"model":"x"}
 			}`,
 		},
 	}
@@ -265,8 +350,7 @@ func TestPlatformResourceHandler_InvalidCategoryOrProviderReturns400(t *testing.
 }
 
 func TestPlatformResourceHandler_UnauthorizedWithoutPrincipal(t *testing.T) {
-	repo := newHandlerPlatformResourceRepo()
-	handler := NewPlatformResourceHandler(platformresource.NewService(repo))
+	_, handler, _ := newPlatformResourceHandlerTestHarness(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/platform-resources", nil)
 	resp := httptest.NewRecorder()
@@ -285,12 +369,10 @@ func TestPlatformResourceHandler_UnauthorizedWithoutPrincipal(t *testing.T) {
 }
 
 func TestPlatformResourceHandler_DeleteNotFound(t *testing.T) {
-	repo := newHandlerPlatformResourceRepo()
-	handler := NewPlatformResourceHandler(platformresource.NewService(repo))
+	_, handler, principal := newPlatformResourceHandlerTestHarness(t)
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/admin/platform-resources/", http.HandlerFunc(handler.ByID))
 
-	principal := auth.Principal{UserID: uuid.New(), Email: "admin@example.com", Role: contracts.RoleAdmin}
 	notFoundID := uuid.New().String()
 
 	resp := performJSONRequestWithPrincipal(t, mux, http.MethodDelete, "/api/v1/admin/platform-resources/"+notFoundID, nil, principal)
@@ -300,6 +382,40 @@ func TestPlatformResourceHandler_DeleteNotFound(t *testing.T) {
 	payload := decodePayload(t, resp)
 	if payload["code"] != "ERR_NOT_FOUND" {
 		t.Fatalf("expected code ERR_NOT_FOUND, got %#v", payload["code"])
+	}
+}
+
+func newPlatformResourceHandlerTestHarness(t *testing.T) (*handlerPlatformResourceRepo, *PlatformResourceHandler, auth.Principal) {
+	t.Helper()
+
+	passwordHash, err := auth.HashPassword("P@ssw0rd")
+	if err != nil {
+		t.Fatalf("HashPassword() error = %v", err)
+	}
+
+	userID := uuid.New()
+	userRepo := &handlerAuthUserRepo{
+		byID: map[uuid.UUID]auth.User{
+			userID: {
+				ID:           userID,
+				Email:        "admin@example.com",
+				PasswordHash: passwordHash,
+				Role:         contracts.RoleAdmin,
+				Status:       contracts.UserStatusActive,
+			},
+		},
+		byEmail: map[string]auth.User{},
+	}
+	userRepo.byEmail["admin@example.com"] = userRepo.byID[userID]
+
+	authService := auth.NewService(userRepo, noopTokenManager{})
+	resourceRepo := newHandlerPlatformResourceRepo()
+	resourceService := platformresource.NewService(resourceRepo, handlerFakeAccessKeyCipher{})
+
+	return resourceRepo, NewPlatformResourceHandler(resourceService, authService), auth.Principal{
+		UserID: userID,
+		Email:  "admin@example.com",
+		Role:   contracts.RoleAdmin,
 	}
 }
 
