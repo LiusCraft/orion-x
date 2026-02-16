@@ -128,9 +128,10 @@ const (
 | resource_key | text unique | 资源唯一标识 |
 | name | text | 展示名 |
 | schema_version | int | 配置 schema 版本 |
+| base_url | text | 资源请求基地址 |
+| access_key | text | 访问密钥密文（数据库不存明文） |
 | capabilities | jsonb | 能力标签 |
 | config | jsonb | 非敏感配置 |
-| credential_ref | text | 密钥引用 |
 | status | text | `active/inactive` |
 | created_by | uuid | 创建人 |
 | created_at | timestamptz | 创建时间 |
@@ -148,8 +149,9 @@ const (
 | id | uuid pk | 主键 |
 | entry_id | uuid | 关联 `platform_resources.id` |
 | version | int | 版本号（从 1 递增） |
+| base_url_snapshot | text | `base_url` 快照 |
+| access_key_snapshot | text | `access_key` 密文快照 |
 | config_snapshot | jsonb | 配置快照 |
-| credential_ref_snapshot | text | 凭据引用快照 |
 | published_at | timestamptz | 发布时间 |
 
 ### 4.4 `tool_market_items`
@@ -287,8 +289,16 @@ const (
 - `GET /api/v1/platform-resources?category=...&provider=...&status=...`
 - `PATCH /api/v1/admin/platform-resources/:id`
 - `DELETE /api/v1/admin/platform-resources/:id`
+- `POST /api/v1/admin/platform-resources/:id/access-key/reveal`
 
-### 5.3 工具市场 + 开通 + 用户工具仓库
+### 5.3 provider 模板（admin 写，用户读）
+
+- `POST /api/v1/admin/provider-templates`
+- `GET /api/v1/provider-templates?category=...&provider=...&status=...`
+- `PATCH /api/v1/admin/provider-templates/:id`
+- `DELETE /api/v1/admin/provider-templates/:id`
+
+### 5.4 工具市场 + 开通 + 用户工具仓库
 
 - `POST /api/v1/admin/tool-market/items`
 - `GET /api/v1/tool-market/items`
@@ -301,7 +311,7 @@ const (
 - `GET /api/v1/me/tool-repo/:entitlement_id/usage`
 - `POST /api/v1/admin/tool-entitlements/grant`
 
-### 5.4 voicebot + 设备
+### 5.5 voicebot + 设备
 
 - `POST /api/v1/voicebots`
 - `GET /api/v1/voicebots`
@@ -313,7 +323,7 @@ const (
 - `PATCH /api/v1/devices/:id`
 - `PUT /api/v1/devices/:device_id/binding`
 
-### 5.5 ws-server 内部解析
+### 5.6 ws-server 内部解析
 
 - `GET /internal/v1/devices/:device_id/resolve`
 
@@ -328,12 +338,12 @@ const (
   "resource_key": "llm-zhipu-prod",
   "name": "Zhipu Production",
   "schema_version": 1,
+  "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+  "access_key": "sk-prod-xxx",
   "capabilities": {"stream": true},
   "config": {
-    "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
     "model": "glm-4-flash"
-  },
-  "credential_ref": "secret://manager/llm/zhipu/prod"
+  }
 }
 ```
 

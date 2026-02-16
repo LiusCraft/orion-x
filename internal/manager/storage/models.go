@@ -11,7 +11,9 @@ import (
 func MigrationModels() []any {
 	return []any{
 		&UserModel{},
+		&ProviderTemplateModel{},
 		&PlatformResourceModel{},
+		&PlatformResourceVersionModel{},
 		&VoicebotModel{},
 		&DeviceModel{},
 		&DeviceBindingModel{},
@@ -38,9 +40,10 @@ type PlatformResourceModel struct {
 	ResourceKey   string          `gorm:"type:text;not null;uniqueIndex:uniq_platform_resources_resource_key"`
 	Name          string          `gorm:"type:text;not null"`
 	SchemaVersion int             `gorm:"not null"`
+	BaseURL       string          `gorm:"type:text;not null"`
+	AccessKey     string          `gorm:"type:text;not null"`
 	Capabilities  json.RawMessage `gorm:"type:jsonb;not null"`
 	Config        json.RawMessage `gorm:"type:jsonb;not null"`
-	CredentialRef string          `gorm:"type:text;not null"`
 	Status        string          `gorm:"type:text;not null;index:idx_platform_resources_category_provider_status"`
 	CreatedBy     uuid.UUID       `gorm:"type:uuid;not null"`
 	CreatedAt     time.Time       `gorm:"type:timestamptz;not null"`
@@ -48,6 +51,33 @@ type PlatformResourceModel struct {
 }
 
 func (PlatformResourceModel) TableName() string { return "platform_resources" }
+
+type PlatformResourceVersionModel struct {
+	ID                uuid.UUID       `gorm:"type:uuid;primaryKey"`
+	EntryID           uuid.UUID       `gorm:"type:uuid;not null;uniqueIndex:uniq_platform_resource_versions_entry_version,priority:1"`
+	Version           int             `gorm:"not null;uniqueIndex:uniq_platform_resource_versions_entry_version,priority:2"`
+	BaseURLSnapshot   string          `gorm:"type:text;not null"`
+	AccessKeySnapshot string          `gorm:"type:text;not null"`
+	ConfigSnapshot    json.RawMessage `gorm:"type:jsonb;not null"`
+	PublishedAt       time.Time       `gorm:"type:timestamptz;not null"`
+}
+
+func (PlatformResourceVersionModel) TableName() string { return "platform_resource_versions" }
+
+type ProviderTemplateModel struct {
+	ID        uuid.UUID       `gorm:"type:uuid;primaryKey"`
+	Category  string          `gorm:"type:text;not null;index:idx_provider_templates_category_provider_status"`
+	Provider  string          `gorm:"type:text;not null;index:idx_provider_templates_category_provider_status"`
+	Status    string          `gorm:"type:text;not null;index:idx_provider_templates_category_provider_status"`
+	Version   int             `gorm:"not null"`
+	Fields    json.RawMessage `gorm:"type:jsonb;not null"`
+	CreatedBy uuid.UUID       `gorm:"type:uuid;not null"`
+	CreatedAt time.Time       `gorm:"type:timestamptz;not null"`
+	UpdatedAt time.Time       `gorm:"type:timestamptz;not null"`
+	DeletedAt gorm.DeletedAt  `gorm:"type:timestamptz;index"`
+}
+
+func (ProviderTemplateModel) TableName() string { return "provider_templates" }
 
 type VoicebotModel struct {
 	ID            uuid.UUID       `gorm:"type:uuid;primaryKey"`

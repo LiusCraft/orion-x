@@ -342,3 +342,43 @@ func TestService_RegisterConflict(t *testing.T) {
 		t.Fatalf("expected ErrConflict, got %v", err)
 	}
 }
+
+func TestService_Reauthenticate(t *testing.T) {
+	passwordHash, err := HashPassword("P@ssw0rd")
+	if err != nil {
+		t.Fatalf("HashPassword() error = %v", err)
+	}
+
+	userID := uuid.New()
+	user := User{
+		ID:           userID,
+		Email:        "reauth@example.com",
+		PasswordHash: passwordHash,
+		Role:         contracts.RoleAdmin,
+		Status:       contracts.UserStatusActive,
+	}
+
+	repo := &fakeUserRepository{
+		byID:    map[uuid.UUID]User{userID: user},
+		byEmail: map[string]User{"reauth@example.com": user},
+	}
+	tokens, err := NewJWTManager(JWTManagerConfig{
+		Secret:     "unit-test-secret",
+		Issuer:     "unit-test",
+		AccessTTL:  5 * time.Minute,
+		RefreshTTL: 30 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("NewJWTManager() error = %v", err)
+	}
+
+	service := NewService(repo, tokens)
+
+	if err := service.Reauthenticate(context.Background(), userID, "P@ssw0rd"); err != nil {
+		t.Fatalf("Reauthenticate() error = %v", err)
+	}
+
+	if err := service.Reauthenticate(context.Background(), userID, "bad-password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+}
