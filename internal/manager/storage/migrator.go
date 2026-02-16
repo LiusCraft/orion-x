@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion = 1
+const CurrentSchemaVersion = 3
 
 type MigrationResult struct {
 	TargetVersion   int
@@ -74,6 +74,11 @@ func (m *GormMigrator) Migrate(ctx context.Context) (MigrationResult, error) {
 		return MigrationResult{}, fmt.Errorf("auto migrate manager tables: %w", err)
 	}
 
+	if err := migratePlatformResourceSchema(tx); err != nil {
+		tx.Rollback()
+		return MigrationResult{}, err
+	}
+
 	record := schemaMigrationModel{
 		Version:   CurrentSchemaVersion,
 		AppliedAt: time.Now().UTC(),
@@ -116,9 +121,31 @@ func getCurrentVersion(db *gorm.DB) (int, error) {
 func migrationTableNames() []string {
 	return []string{
 		"users",
+		"provider_templates",
 		"platform_resources",
+		"platform_resource_versions",
 		"voicebots",
 		"devices",
 		"device_bindings",
 	}
+}
+
+func migratePlatformResourceSchema(tx *gorm.DB) error {
+	if tx == nil {
+		return errors.New("migration db is nil")
+	}
+
+	migrator := tx.Migrator()
+	if migrator.HasColumn(&PlatformResourceModel{}, "credential_ref") {
+		if err := migrator.DropColumn(&PlatformResourceModel{}, "credential_ref"); err != nil {
+			return fmt.Errorf("drop platform_resources.credential_ref: %w", err)
+		}
+	}
+	if migrator.HasColumn(&PlatformResourceVersionModel{}, "credential_ref_snapshot") {
+		if err := migrator.DropColumn(&PlatformResourceVersionModel{}, "credential_ref_snapshot"); err != nil {
+			return fmt.Errorf("drop platform_resource_versions.credential_ref_snapshot: %w", err)
+		}
+	}
+
+	return nil
 }

@@ -16,6 +16,7 @@ type ManagerAppConfig struct {
 	Logging   LoggingConfig          `json:"logging"`
 	Server    ManagerServerConfig    `json:"server"`
 	Database  ManagerDatabaseConfig  `json:"database"`
+	Security  ManagerSecurityConfig  `json:"security"`
 	Auth      ManagerAuthConfig      `json:"auth"`
 	Migration ManagerMigrationConfig `json:"migration"`
 }
@@ -38,6 +39,10 @@ type ManagerDatabaseConfig struct {
 
 type ManagerMigrationConfig struct {
 	AutoMigrateOnStartup bool `json:"auto_migrate_on_startup"`
+}
+
+type ManagerSecurityConfig struct {
+	AccessKeyCipherSecret string `json:"access_key_cipher_secret"`
 }
 
 type ManagerAuthConfig struct {
@@ -63,6 +68,9 @@ func DefaultManagerConfig() *ManagerAppConfig {
 			ConnMaxLifetimeMs: 300000,
 			ConnMaxIdleTimeMs: 120000,
 			PingTimeoutMs:     2000,
+		},
+		Security: ManagerSecurityConfig{
+			AccessKeyCipherSecret: "manager-dev-access-key-cipher-secret",
 		},
 		Auth: ManagerAuthConfig{
 			JWTSecret:              "manager-dev-jwt-secret",
@@ -144,6 +152,10 @@ func (c *ManagerAppConfig) ApplyEnv() {
 		}
 	}
 
+	if secret := strings.TrimSpace(os.Getenv("MANAGER_ACCESS_KEY_CIPHER_SECRET")); secret != "" {
+		c.Security.AccessKeyCipherSecret = secret
+	}
+
 	if secret := strings.TrimSpace(os.Getenv("MANAGER_AUTH_JWT_SECRET")); secret != "" {
 		c.Auth.JWTSecret = secret
 	}
@@ -199,6 +211,10 @@ func (c *ManagerAppConfig) Validate() error {
 	}
 	if c.Database.PingTimeoutMs <= 0 {
 		return errors.New("database.ping_timeout_ms must be > 0")
+	}
+
+	if strings.TrimSpace(c.Security.AccessKeyCipherSecret) == "" {
+		return errors.New("security.access_key_cipher_secret must not be empty")
 	}
 
 	if strings.TrimSpace(c.Auth.JWTSecret) == "" {
