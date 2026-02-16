@@ -36,6 +36,7 @@ const (
 	sttStatePartial             = "partial"
 	sttStateFinal               = "final"
 	interimSTTThrottleInterval  = 200 * time.Millisecond
+	interimSTTVADWindow         = 1500 * time.Millisecond
 	helloFeatureInterimSTT      = "interim_stt"
 	helloFeatureInterimSTTGroup = "stt"
 )
@@ -78,6 +79,7 @@ type Session struct {
 	lastASRFinalAt time.Time
 	lastASRPartial time.Time
 	lastASRText    string
+	lastVADAt      time.Time
 	interimSTT     bool
 	asrMu          sync.Mutex
 
@@ -622,10 +624,13 @@ func (s *Session) createAudioInPipe() error {
 			if s.shouldSendASRPartial(text, time.Now()) {
 				_ = s.sendSTT(text, sttStatePartial, 0)
 			}
-			s.orchestrator.OnUserSpeakingDetected()
+			if s.orchestrator != nil && s.shouldInterruptOnASRPartial() {
+				s.orchestrator.OnUserSpeakingDetected()
+			}
 		}
 	})
 	audioInPipe.OnUserSpeakingDetected(func() {
+		s.markVADDetected()
 		s.orchestrator.OnUserSpeakingDetected()
 	})
 
@@ -865,6 +870,11 @@ func (s *Session) shouldSendASRPartial(text string, now time.Time) bool {
 	if !s.interimSTT {
 		return false
 	}
+	if s.voicebot.Audio.InPipe.EnableVAD {
+		if s.lastVADAt.IsZero() || now.Sub(s.lastVADAt) > interimSTTVADWindow {
+			return false
+		}
+	}
 	if text == s.lastASRText {
 		return false
 	}
@@ -874,6 +884,10 @@ func (s *Session) shouldSendASRPartial(text string, now time.Time) bool {
 	s.lastASRPartial = now
 	s.lastASRText = text
 	return true
+}
+
+func (s *Session) shouldInterruptOnASRPartial() bool {
+	return !s.voicebot.Audio.InPipe.EnableVAD
 }
 
 func clientSupportsInterimSTT(features map[string]any) bool {
@@ -952,6 +966,12 @@ func (s *Session) markASRFinal() {
 	s.lastASRFinalAt = time.Now()
 	s.lastASRPartial = time.Time{}
 	s.lastASRText = ""
+	s.asrMu.Unlock()
+}
+
+func (s *Session) markVADDetected() {
+	s.asrMu.Lock()
+	s.lastVADAt = time.Now()
 	s.asrMu.Unlock()
 }
 

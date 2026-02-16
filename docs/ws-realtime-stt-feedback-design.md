@@ -63,13 +63,15 @@
      - 下发 `stt(state=final)`
      - 调用 `Orchestrator.OnASRFinal(text)`
    - `isFinal=false`：
-     - 仍触发 `Orchestrator.OnUserSpeakingDetected()`
      - 仅在 `interimSTT=true` 且满足去重/节流时下发 `stt(state=partial)`
+     - 打断由 VAD 负责；当 `EnableVAD=true` 时，partial 不直接触发 `OnUserSpeakingDetected()`
+     - 若 `EnableVAD=false`，保留 partial 驱动打断作为兼容兜底
 
 ## 去重与节流策略
 
 - 去重：相同 partial 文本不重复发送。
 - 节流：最小发送间隔 `200ms`（仅对 partial 生效）。
+- 当 `EnableVAD=true` 时，要求最近 `1.5s` 内出现过 VAD 语音事件才允许下发 partial。
 - final 不受节流影响，始终发送。
 
 ## 兼容性

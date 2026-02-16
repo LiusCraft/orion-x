@@ -77,6 +77,24 @@ func TestSessionShouldSendASRPartial(t *testing.T) {
 	}
 }
 
+func TestSessionShouldSendASRPartialRequiresRecentVADWhenEnabled(t *testing.T) {
+	s := &Session{}
+	s.applyClientFeatures(map[string]any{helloFeatureInterimSTT: true})
+	s.voicebot.Audio.InPipe.EnableVAD = true
+
+	base := time.Unix(500, 0)
+	s.asrMu.Lock()
+	s.lastVADAt = base
+	s.asrMu.Unlock()
+
+	if !s.shouldSendASRPartial("hello", base.Add(200*time.Millisecond)) {
+		t.Fatal("expected partial with recent VAD to pass")
+	}
+	if s.shouldSendASRPartial("hello world", base.Add(interimSTTVADWindow+time.Millisecond)) {
+		t.Fatal("expected stale VAD window to suppress partial")
+	}
+}
+
 func TestSessionShouldSendASRPartialDisabledByDefault(t *testing.T) {
 	s := &Session{}
 	if s.shouldSendASRPartial("hello", time.Now()) {
@@ -96,5 +114,19 @@ func TestMarkASRFinalResetsPartialState(t *testing.T) {
 	s.markASRFinal()
 	if !s.shouldSendASRPartial("same text", now.Add(10*time.Millisecond)) {
 		t.Fatal("expected partial tracker reset after final")
+	}
+}
+
+func TestShouldInterruptOnASRPartial(t *testing.T) {
+	s := &Session{}
+
+	s.voicebot.Audio.InPipe.EnableVAD = true
+	if s.shouldInterruptOnASRPartial() {
+		t.Fatal("expected partial ASR not to interrupt when VAD is enabled")
+	}
+
+	s.voicebot.Audio.InPipe.EnableVAD = false
+	if !s.shouldInterruptOnASRPartial() {
+		t.Fatal("expected partial ASR to interrupt when VAD is disabled")
 	}
 }

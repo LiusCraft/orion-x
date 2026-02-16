@@ -23,6 +23,8 @@ S -> C: hello (确认后的 audio_params)
 - `listen start` → 启动 ASR
 - `binary audio` → 解码（opus/pcm）→ AudioInPipe.SendAudio
 - `ASR partial` →（capability 开启时）发送 `stt(state=partial)` + 去重 + 节流（200ms）
+  - 打断策略优先由 VAD 触发；当 VAD 启用时，partial 不直接触发打断，避免噪声误打断
+  - 仅在最近 `1.5s` 内有 VAD 语音事件时才下发 partial，减少静音噪声引发的伪识别闪烁
 - `ASR final` → 发送 `stt(state=final)` + Orchestrator.OnASRFinal
 - `listen stop / empty frame` → AudioInPipe.Stop
 - `abort` → AudioOutPipe.Interrupt + tts stop(is_aborted)

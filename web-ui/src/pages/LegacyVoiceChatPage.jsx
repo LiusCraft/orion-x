@@ -44,11 +44,14 @@ export default function LegacyVoiceChatPage() {
     deviceMac: 'AA:BB:CC:DD:EE:FF',
     clientId: 'web_user_client',
     token: 'your-token',
-    deviceName: 'Web 客户端'
+    deviceName: 'Web 客户端',
+    interimSttEnabled: false
   });
 
   const threadStatesRef = React.useRef(new Map());
   const audioEngineRef = React.useRef(null);
+  const partialMessageByThreadRef = React.useRef(new Map());
+  const partialTimerByThreadRef = React.useRef(new Map());
 
   const activeThread = threads.find((thread) => thread.id === activeThreadId);
   const messages = messagesByThread[activeThreadId] || [];
@@ -96,14 +99,95 @@ export default function LegacyVoiceChatPage() {
     });
   };
 
-  const appendMessage = (threadId, message) => {
+  const appendMessage = (threadId, message, options = {}) => {
+    const shouldBump = options.bump !== false;
     setMessagesByThread((previous) => ({
       ...previous,
       [threadId]: [...(previous[threadId] || []), message]
     }));
-    if (message.text) {
+    if (shouldBump && message.text) {
       bumpThread(threadId, message.text);
     }
+  };
+
+  const clearPartialTimer = (threadId) => {
+    const timer = partialTimerByThreadRef.current.get(threadId);
+    if (timer) {
+      window.clearTimeout(timer);
+      partialTimerByThreadRef.current.delete(threadId);
+    }
+  };
+
+  const removePartialMessage = (threadId) => {
+    clearPartialTimer(threadId);
+    const partialId = partialMessageByThreadRef.current.get(threadId);
+    if (!partialId) {
+      return;
+    }
+    partialMessageByThreadRef.current.delete(threadId);
+    setMessagesByThread((previous) => {
+      const messages = previous[threadId] || [];
+      const nextMessages = messages.filter((message) => message.id !== partialId);
+      if (nextMessages.length === messages.length) {
+        return previous;
+      }
+      return {
+        ...previous,
+        [threadId]: nextMessages
+      };
+    });
+  };
+
+  const schedulePartialExpire = (threadId) => {
+    clearPartialTimer(threadId);
+    const timer = window.setTimeout(() => {
+      removePartialMessage(threadId);
+    }, 1500);
+    partialTimerByThreadRef.current.set(threadId, timer);
+  };
+
+  const upsertPartialMessage = (threadId, text) => {
+    const partialId = partialMessageByThreadRef.current.get(threadId);
+    if (!partialId) {
+      const message = {
+        id: createId('m'),
+        threadId,
+        role: 'user',
+        text: `（实时识别）${text}`,
+        stt: true,
+        sttState: 'partial',
+        ts: Date.now()
+      };
+      partialMessageByThreadRef.current.set(threadId, message.id);
+      appendMessage(threadId, message, { bump: false });
+      schedulePartialExpire(threadId);
+      return;
+    }
+
+    setMessagesByThread((previous) => {
+      const messages = previous[threadId] || [];
+      let updated = false;
+      const nextMessages = messages.map((message) => {
+        if (message.id !== partialId) {
+          return message;
+        }
+        updated = true;
+        return {
+          ...message,
+          text: `（实时识别）${text}`,
+          ts: Date.now()
+        };
+      });
+      if (!updated) {
+        partialMessageByThreadRef.current.delete(threadId);
+        return previous;
+      }
+      return {
+        ...previous,
+        [threadId]: nextMessages
+      };
+    });
+    schedulePartialExpire(threadId);
   };
 
   const buildWsUrl = () => {
@@ -122,6 +206,10 @@ export default function LegacyVoiceChatPage() {
       token: connection.token,
       features: {
         mcp: true,
+        interim_stt: Boolean(connection.interimSttEnabled),
+        stt: {
+          interim: Boolean(connection.interimSttEnabled)
+        },
         notify: {
           config_updated: true
         }
@@ -225,14 +313,29 @@ export default function LegacyVoiceChatPage() {
               }
             }
           } else if (message.type === 'stt') {
+            const sttState = message.state === 'partial' ? 'partial' : 'final';
+            const sttText = typeof message.text === 'string' ? message.text.trim() : '';
+            if (sttState === 'partial') {
+              if (state.sessionState !== 'listening' && state.sessionState !== 'calling') {
+                return;
+              }
+              if (!sttText || sttText.length <= 1) {
+                return;
+              }
+              upsertPartialMessage(threadId, sttText);
+              return;
+            }
+
+            removePartialMessage(threadId);
             appendMessage(threadId, {
               id: createId('m'),
               threadId,
               role: 'user',
-              text: message.text ? `（语音识别）${message.text}` : '（语音识别）',
+              text: sttText ? `（语音识别）${sttText}` : '（语音识别）',
               stt: true,
+              sttState,
               ts: Date.now()
-            });
+            }, { bump: true });
           } else if (message.type === 'llm') {
             if (message.text && message.text !== '😊') {
               appendMessage(threadId, {
@@ -265,6 +368,7 @@ export default function LegacyVoiceChatPage() {
 
   const disconnectThread = (threadId) => {
     const state = getThreadState(threadId);
+    removePartialMessage(threadId);
     if (state.ws) {
       state.ws.close();
       state.ws = null;
@@ -413,6 +517,11 @@ export default function LegacyVoiceChatPage() {
 
   React.useEffect(() => {
     return () => {
+      for (const [, timer] of partialTimerByThreadRef.current) {
+        window.clearTimeout(timer);
+      }
+      partialTimerByThreadRef.current.clear();
+      partialMessageByThreadRef.current.clear();
       for (const [, state] of threadStatesRef.current) {
         if (state.ws) {
           state.ws.close();
