@@ -182,6 +182,7 @@
   - [x] users/auth 模块（注册 + JWT 登录/刷新 + RBAC）
   - [x] web-ui 管理后台骨架（登录态、鉴权拦截、RBAC 菜单）
   - [ ] platform_resources 模块（LLM/ASR/TTS 资源管理）
+    - [x] web-ui platform_resources 管理页（列表筛选、创建/编辑/禁用、实时刷新、provider 模板化配置表单、provider catalog 面板与模板增删改（后端 API）、`base_url/access_key` 独立必填字段、access key 二次认证明文查看）
   - [ ] tool_market 模块（市场、offer、entitlement、tool repo）
   - [ ] voicebots/devices/device_bindings 模块
   - [ ] internal resolve API（`/internal/v1/devices/:device_id/resolve`）
