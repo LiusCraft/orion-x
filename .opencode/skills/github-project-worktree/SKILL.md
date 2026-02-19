@@ -17,8 +17,8 @@ metadata:
 ## Defaults
 
 - Repository: detect from current git remote (or pass `-R owner/repo`)
-- Project owner/number: use repo convention (for `orion-x`: owner `LiusCraft`, project `#3`), otherwise ask once and continue
-- Base branch: `main`
+- Project owner/number: detect from repo or prompt once per session
+- Base branch: detect from `defaultBranchRef` or prompt
 - Worktree root: `~/.worktrees` (full path: `~/.worktrees/<branch-name>`)
 - Assignment policy for new issues: unassigned by default
 
@@ -43,22 +43,22 @@ metadata:
 ## Workflow A: New requirement
 
 1. Create issue first (do not start coding before issue exists).
-2. Use issue template `service_delivery_request.yml` and ensure required fields are filled:
+2. Use issue template `service_delivery_request.yml` (if available) and ensure required fields are filled:
    - Priority
-   - Service
+   - Service (or equivalent grouping field)
    - Background
    - Current state
    - Expected outcome
 3. Keep issue unassigned by default (if needed, remove accidental assignment).
 4. After issue is created and requirement is clear, try `title agent` to rename current session.
-5. Add issue to target GitHub Project (for `orion-x`: `orion-x Service Delivery`, `#3`).
+5. Add issue to target GitHub Project:
    - Use `gh project item-add ... --format json --jq '.id'` to get `item-id`.
    - `item-add` is idempotent for existing issue/PR items.
 6. Set Project fields (lookup field/option IDs by name, do not hardcode IDs):
    - `Status=Todo`
-   - `Service` from issue form
-   - `Priority` from issue form
-   - `Size` if available, otherwise leave blank
+   - Service/grouping field from issue form
+   - Priority from issue form
+   - Size if available, otherwise leave blank
 
 ## Workflow B: Start working on an issue
 
@@ -75,77 +75,63 @@ metadata:
    - `test` -> `test`
    - fallback -> `chore`
 5. Build branch name:
-   - `<type>/issue-<number>-<short-slug>`
+   - Format: `<type>/issue-<number>-<short-slug>`
    - Example: `feat/issue-25-manager-auth-rbac`
-6. Create branch from synced `origin/main` (or ask user if default branch is uncertain):
-   - `git fetch origin main`
+   - Slug derivation: lowercase, kebab-case, remove prefixes like `[service:]`, limit to ~50 chars
+6. Create branch from synced default branch (e.g., `origin/main`):
+   - `git fetch origin <default-branch>`
    - `WORKTREE_PATH="$HOME/.worktrees/<branch-name>"`
    - `mkdir -p "$(dirname "$WORKTREE_PATH")"`
-   - `git worktree add -b "<branch-name>" "$WORKTREE_PATH" origin/main`
+   - `git worktree add -b "<branch-name>" "$WORKTREE_PATH" origin/<default-branch>`
 7. If user explicitly says no worktree, skip worktree and create branch in current tree.
 8. After creation, ask one targeted question: whether to switch and continue coding in that worktree path.
 
 ## Conventional Commit alignment
 
 - Branch type should match planned commit prefix (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`).
-- Keep first commit scope close to issue service when possible, e.g. `feat(manager): ...`.
+- Keep first commit scope close to issue service/component when possible, e.g. `feat(manager): ...`.
 
 ## Command references
 
 ```bash
-# required variables
-REPO="LiusCraft/orion-x"
-PROJECT_OWNER="LiusCraft"
-PROJECT_NUMBER=3
-ISSUE_NUMBER=8
+# === Setup variables (detect or prompt per session) ===
+REPO="<owner>/<repo>"                    # e.g., LiusCraft/orion-x
+PROJECT_OWNER="<project-owner>"          # e.g., LiusCraft (or @me)
+PROJECT_NUMBER="<project-number>"        # e.g., 3
+DEFAULT_BRANCH="<default-branch>"        # e.g., main
+ISSUE_NUMBER="<issue-number>"            # e.g., 8
 ISSUE_URL="https://github.com/${REPO}/issues/${ISSUE_NUMBER}"
 
-# preflight
+# === Preflight ===
 gh auth status
-# if missing project scope:
-# gh auth refresh -s project
+# if missing project scope: gh auth refresh -s project
 
-# validate issue
+# === Validate issue ===
 gh issue view "$ISSUE_NUMBER" -R "$REPO" --json number,title,state,stateReason,labels,url
 
-# optional: rename current session via title agent
+# === Optional: rename current session via title agent ===
 # target title format: <type>/<service> #<issue> <short-slug>
-# Example prompt to title agent:
-# "feat/manager #8 tool-market-offers-entitlements"
+# Example prompt: "feat/manager #8 tool-market-offers-entitlements"
 
-# resolve project and item IDs
+# === Resolve project and item IDs ===
 PROJECT_ID=$(gh project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq '.id')
 ITEM_ID=$(gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$ISSUE_URL" --format json --jq '.id')
 
-# lookup field/option IDs by name
+# === Lookup field/option IDs by name (avoid hardcoding) ===
+# Example for Status field:
 STATUS_FIELD_ID=$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq '.fields[] | select(.name=="Status") | .id')
-STATUS_TODO_OPTION_ID=$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq '.fields[] | select(.name=="Status") | .options[] | select(.name=="Todo") | .id')
 STATUS_IN_PROGRESS_OPTION_ID=$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq '.fields[] | select(.name=="Status") | .options[] | select(.name=="In Progress") | .id')
-SERVICE_FIELD_ID=$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq '.fields[] | select(.name=="Service") | .id')
-PRIORITY_FIELD_ID=$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq '.fields[] | select(.name=="Priority") | .id')
 
-# values from issue form
-SERVICE_VALUE="manager"
-PRIORITY_VALUE="P1"
-SERVICE_OPTION_ID=$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq ".fields[] | select(.name==\"Service\") | .options[] | select(.name==\"$SERVICE_VALUE\") | .id")
-PRIORITY_OPTION_ID=$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq ".fields[] | select(.name==\"Priority\") | .options[] | select(.name==\"$PRIORITY_VALUE\") | .id")
-
-# set Status=In Progress (before coding)
+# Set Status=In Progress (before coding)
 gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" --field-id "$STATUS_FIELD_ID" --single-select-option-id "$STATUS_IN_PROGRESS_OPTION_ID"
 
-# set Service/Priority (for new requirement intake)
-gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" --field-id "$SERVICE_FIELD_ID" --single-select-option-id "$SERVICE_OPTION_ID"
-gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" --field-id "$PRIORITY_FIELD_ID" --single-select-option-id "$PRIORITY_OPTION_ID"
-
-# verify item status (use -L to avoid default 30-item truncation)
-gh project item-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" -L 200 --format json --jq ".items[] | select(.id==\"$ITEM_ID\") | {id,status,service,priority,title}"
-
-# create worktree from main
-BRANCH_NAME="feat/issue-8-tool-market-offers-entitlements-api"
+# === Create worktree from default branch ===
+BRANCH_TYPE="feat"        # determine from issue labels
+BRANCH_NAME="$BRANCH_TYPE/issue-$ISSUE_NUMBER-short-slug"
 WORKTREE_PATH="$HOME/.worktrees/$BRANCH_NAME"
-git fetch origin main
+git fetch origin "$DEFAULT_BRANCH"
 mkdir -p "$(dirname "$WORKTREE_PATH")"
-git worktree add -b "$BRANCH_NAME" "$WORKTREE_PATH" origin/main
+git worktree add -b "$BRANCH_NAME" "$WORKTREE_PATH" "origin/$DEFAULT_BRANCH"
 ```
 
 ## Common gh pitfalls
