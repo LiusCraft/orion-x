@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -98,33 +102,61 @@ func (l *mcpLoader) Close() error {
 
 // buildMCPClient 创建并初始化 MCP 客户端
 func (l *mcpLoader) buildMCPClient(ctx context.Context) (*client.Client, error) {
-	transport := strings.ToLower(strings.TrimSpace(l.cfg.Transport))
-	if transport == "" {
-		transport = "sse"
+	transportType := strings.ToLower(strings.TrimSpace(l.cfg.Transport))
+	if transportType == "" {
+		transportType = "sse"
+	}
+	timeout := time.Duration(l.cfg.TimeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 30 * time.Second
 	}
 
 	var cli *client.Client
 	var err error
 
-	switch transport {
+	switch transportType {
 	case "stdio":
 		command := strings.TrimSpace(l.cfg.Command)
 		if command == "" {
 			return nil, errors.New("mcp stdio command is required")
 		}
-		cli, err = client.NewStdioMCPClient(command, nil, l.cfg.Args...)
+		env := flattenEnv(l.cfg.Env)
+		cwd := strings.TrimSpace(l.cfg.CWD)
+		if cwd == "" {
+			cli, err = client.NewStdioMCPClient(command, env, l.cfg.Args...)
+		} else {
+			cli, err = client.NewStdioMCPClientWithOptions(
+				command,
+				env,
+				l.cfg.Args,
+				transport.WithCommandFunc(func(ctx context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
+					cmd := exec.CommandContext(ctx, command, args...)
+					cmd.Env = append(os.Environ(), env...)
+					cmd.Dir = cwd
+					return cmd, nil
+				}),
+			)
+		}
 	case "sse":
 		endpoint := strings.TrimSpace(l.cfg.Endpoint)
 		if endpoint == "" {
 			return nil, errors.New("mcp sse endpoint is required")
 		}
-		cli, err = client.NewSSEMCPClient(endpoint)
-	case "streamable":
+		sseOptions := make([]transport.ClientOption, 0, 1)
+		if len(l.cfg.Headers) > 0 {
+			sseOptions = append(sseOptions, transport.WithHeaders(l.cfg.Headers))
+		}
+		cli, err = client.NewSSEMCPClient(endpoint, sseOptions...)
+	case "streamable", "stream_http":
 		endpoint := strings.TrimSpace(l.cfg.Endpoint)
 		if endpoint == "" {
 			return nil, errors.New("mcp streamable endpoint is required")
 		}
-		cli, err = client.NewStreamableHttpClient(endpoint)
+		httpOptions := []transport.StreamableHTTPCOption{transport.WithHTTPTimeout(timeout)}
+		if len(l.cfg.Headers) > 0 {
+			httpOptions = append(httpOptions, transport.WithHTTPHeaders(l.cfg.Headers))
+		}
+		cli, err = client.NewStreamableHttpClient(endpoint, httpOptions...)
 	default:
 		return nil, fmt.Errorf("unsupported mcp transport: %s", l.cfg.Transport)
 	}
@@ -132,14 +164,14 @@ func (l *mcpLoader) buildMCPClient(ctx context.Context) (*client.Client, error) 
 		return nil, err
 	}
 
-	timeout := time.Duration(l.cfg.TimeoutMs) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 30 * time.Second
+	startCtx := ctx
+	if transportType != "sse" {
+		boundedStartCtx, cancelStart := context.WithTimeout(ctx, timeout)
+		defer cancelStart()
+		startCtx = boundedStartCtx
 	}
-	initCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
-	if err := cli.Start(initCtx); err != nil {
+	if err := cli.Start(startCtx); err != nil {
 		_ = cli.Close()
 		return nil, err
 	}
@@ -151,12 +183,31 @@ func (l *mcpLoader) buildMCPClient(ctx context.Context) (*client.Client, error) 
 		Version: "1.0.0",
 	}
 
+	initCtx, cancelInit := context.WithTimeout(ctx, timeout)
+	defer cancelInit()
+
 	if _, err := cli.Initialize(initCtx, initRequest); err != nil {
 		_ = cli.Close()
 		return nil, err
 	}
 
 	return cli, nil
+}
+
+func flattenEnv(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	flattened := make([]string, 0, len(env))
+	for _, key := range keys {
+		flattened = append(flattened, fmt.Sprintf("%s=%s", key, env[key]))
+	}
+	return flattened
 }
 
 // mcpToolWrapper MCP 工具包装器，用于添加前缀名称

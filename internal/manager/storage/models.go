@@ -14,6 +14,10 @@ func MigrationModels() []any {
 		&ProviderTemplateModel{},
 		&PlatformResourceModel{},
 		&PlatformResourceVersionModel{},
+		&ToolMarketItemModel{},
+		&ToolOfferModel{},
+		&UserToolEntitlementModel{},
+		&ToolUsageLedgerModel{},
 		&VoicebotModel{},
 		&DeviceModel{},
 		&DeviceBindingModel{},
@@ -116,3 +120,62 @@ type DeviceBindingModel struct {
 }
 
 func (DeviceBindingModel) TableName() string { return "device_bindings" }
+
+type ToolMarketItemModel struct {
+	ID        uuid.UUID       `gorm:"type:uuid;primaryKey"`
+	ToolKey   string          `gorm:"type:text;not null;uniqueIndex:uniq_tool_market_items_tool_key"`
+	Name      string          `gorm:"type:text;not null"`
+	Provider  string          `gorm:"type:text;not null;index:idx_tool_market_items_provider_status"`
+	Protocol  string          `gorm:"type:text;not null"`
+	Config    json.RawMessage `gorm:"type:jsonb;not null"`
+	Status    string          `gorm:"type:text;not null;index:idx_tool_market_items_provider_status"`
+	CreatedBy uuid.UUID       `gorm:"type:uuid;not null"`
+	CreatedAt time.Time       `gorm:"type:timestamptz;not null"`
+	UpdatedAt time.Time       `gorm:"type:timestamptz;not null"`
+}
+
+func (ToolMarketItemModel) TableName() string { return "tool_market_items" }
+
+type ToolOfferModel struct {
+	ID              uuid.UUID `gorm:"type:uuid;primaryKey"`
+	ToolItemID      uuid.UUID `gorm:"type:uuid;not null;index:idx_tool_offers_tool_item_status"`
+	OfferType       string    `gorm:"type:text;not null"`
+	Price           *float64  `gorm:"type:numeric(18,2)"`
+	Currency        *string   `gorm:"type:text"`
+	QuotaTotal      *int64    `gorm:"type:bigint"`
+	DurationSeconds *int64    `gorm:"type:bigint"`
+	Status          string    `gorm:"type:text;not null;index:idx_tool_offers_tool_item_status"`
+	CreatedAt       time.Time `gorm:"type:timestamptz;not null"`
+	UpdatedAt       time.Time `gorm:"type:timestamptz;not null"`
+}
+
+func (ToolOfferModel) TableName() string { return "tool_offers" }
+
+type UserToolEntitlementModel struct {
+	ID         uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	UserID     uuid.UUID  `gorm:"type:uuid;not null;index:idx_user_tool_entitlements_user_status"`
+	ToolItemID uuid.UUID  `gorm:"type:uuid;not null;index"`
+	OfferID    uuid.UUID  `gorm:"type:uuid;not null;index"`
+	SourceType string     `gorm:"type:text;not null"`
+	SourceRef  string     `gorm:"type:text;not null"`
+	Status     string     `gorm:"type:text;not null;index:idx_user_tool_entitlements_user_status"`
+	StartsAt   time.Time  `gorm:"type:timestamptz;not null"`
+	ExpiresAt  *time.Time `gorm:"type:timestamptz"`
+	QuotaTotal *int64     `gorm:"type:bigint"`
+	QuotaUsed  int64      `gorm:"type:bigint;not null;default:0"`
+	CreatedAt  time.Time  `gorm:"type:timestamptz;not null"`
+	UpdatedAt  time.Time  `gorm:"type:timestamptz;not null"`
+}
+
+func (UserToolEntitlementModel) TableName() string { return "user_tool_entitlements" }
+
+type ToolUsageLedgerModel struct {
+	ID            uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	EntitlementID uuid.UUID  `gorm:"type:uuid;not null;index:idx_tool_usage_ledger_entitlement"`
+	VoicebotID    *uuid.UUID `gorm:"type:uuid;index"`
+	DeviceID      *uuid.UUID `gorm:"type:uuid;index"`
+	ConsumedUnits int64      `gorm:"type:bigint;not null"`
+	CreatedAt     time.Time  `gorm:"type:timestamptz;not null"`
+}
+
+func (ToolUsageLedgerModel) TableName() string { return "tool_usage_ledger" }
