@@ -74,18 +74,6 @@ const (
     ToolProtocolMCP ToolProtocol = "mcp"
 )
 
-type ToolOfferType string
-
-const (
-    OfferFree           ToolOfferType = "free"
-    OfferTrial          ToolOfferType = "trial"
-    OfferPaid           ToolOfferType = "paid"
-    OfferActivationCode ToolOfferType = "activation_code"
-    OfferAdminGrant     ToolOfferType = "admin_grant"
-    OfferUsagePack      ToolOfferType = "usage_pack"
-    OfferTimeLimited    ToolOfferType = "time_limited"
-)
-
 type EntitlementStatus string
 
 const (
@@ -169,7 +157,7 @@ const (
 | created_at | timestamptz | 创建时间 |
 | updated_at | timestamptz | 更新时间 |
 
-### 4.5 `tool_offers`
+### 4.5 `tool_offers`（预留，当前不对外开放）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -191,8 +179,8 @@ const (
 | id | uuid pk | 主键 |
 | user_id | uuid | 用户 |
 | tool_item_id | uuid | 工具市场项 |
-| offer_id | uuid | 开通方案 |
-| source_type | text | purchase/code/admin_grant/system |
+| offer_id | uuid | 预留字段（当前固定零值 UUID） |
+| source_type | text | purchase/admin_grant/system |
 | source_ref | text | 外部关联 |
 | status | text | pending/active/expired/revoked |
 | starts_at | timestamptz | 生效时间 |
@@ -298,7 +286,7 @@ const (
 - `PATCH /api/v1/admin/provider-templates/:id`
 - `DELETE /api/v1/admin/provider-templates/:id`
 
-### 5.4 工具市场 + 开通 + 用户工具仓库
+### 5.4 工具市场 + 直接激活 + 用户工具仓库
 
 - `POST /api/v1/admin/tool-market/items`
 - `GET /api/v1/admin/tool-market/items`
@@ -390,6 +378,50 @@ const (
 }
 ```
 
+### 6.4 用户工具调试调用（MCP）
+
+`POST /api/v1/me/tool-repo/:entitlement_id/tools/call`
+
+```json
+{
+  "tool_name": "get_device_status",
+  "arguments": {
+    "device_id": "device-001"
+  }
+}
+```
+
+返回示例（result 为工具原始返回结构透传）：
+
+```json
+{
+  "code": "OK",
+  "message": "",
+  "data": {
+    "tool_name": "get_device_status",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "online"
+        }
+      ],
+      "isError": false
+    }
+  }
+}
+```
+
+说明：MVP 阶段 `tools/call` 仅用于用户侧工具体验，不做额度扣减与计费记账。
+
+### 6.5 直接激活工具（free）
+
+`POST /api/v1/tool-market/items/:item_id/activate`
+
+- 请求体：无需传参（可为空）
+- 行为：为当前登录用户直接创建 `active` entitlement
+- 约束：同一用户对同一工具重复激活会返回 `ERR_BUSINESS_RULE`
+
 ## 7. MCP 配置格式（工具市场）
 
 当 `tool_market_items.protocol = mcp` 时：
@@ -423,14 +455,18 @@ const (
 
 校验规则：
 
-- manager 在创建/更新 `tool_market_items` 时会执行真实探测：连接 MCP client，执行 `initialize` 和 `tools/list`。
 - `transport=stdio` 时 `stdio.command` 必填。
 - `transport=sse` 时 `sse.endpoint` 必填。
 - `transport=stream_http` 时 `stream_http.endpoint` 必填。
 - `tool_name_list` 为空表示加载全部工具。
-- 当 `tool_name_list` 非空时，必须是实时 `tools/list` 返回结果的子集。
+- manager 在创建/更新 `tool_market_items` 时会进行一次实时 MCP 探测：
+  - 按配置建立 MCP client 连接；
+  - 执行 `initialize`；
+  - 执行 `tools/list` 拉取真实工具列表。
+- 若连接、初始化或 `tools/list` 任一步失败，请求返回 `ERR_INVALID_ARGUMENT`。
+- 若设置了 `tool_name_list`，其内容必须是 `tools/list` 返回结果的子集，否则返回 `ERR_INVALID_ARGUMENT`。
 
-兼容说明：现有 loader 内部使用 `streamable`，manager 下发时将 `stream_http` 映射为 `streamable`。
+兼容说明：loader 同时兼容 `stream_http` 与历史 `streamable` 写法。
 
 ## 8. 业务规则与一致性
 

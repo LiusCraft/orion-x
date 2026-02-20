@@ -43,6 +43,49 @@ const (
 	DeviceStatusDisabled DeviceStatus = "disabled"
 )
 
+type ToolProtocol string
+
+const (
+	ToolProtocolMCP ToolProtocol = "mcp"
+)
+
+type ToolStatus string
+
+const (
+	ToolStatusActive   ToolStatus = "active"
+	ToolStatusInactive ToolStatus = "inactive"
+)
+
+type ToolOfferType string
+
+const (
+	OfferTypeFree           ToolOfferType = "free"
+	OfferTypeTrial          ToolOfferType = "trial"
+	OfferTypePaid           ToolOfferType = "paid"
+	OfferTypeActivationCode ToolOfferType = "activation_code"
+	OfferTypeAdminGrant     ToolOfferType = "admin_grant"
+	OfferTypeUsagePack      ToolOfferType = "usage_pack"
+	OfferTypeTimeLimited    ToolOfferType = "time_limited"
+)
+
+type EntitlementStatus string
+
+const (
+	EntitlementStatusPending EntitlementStatus = "pending"
+	EntitlementStatusActive  EntitlementStatus = "active"
+	EntitlementStatusExpired EntitlementStatus = "expired"
+	EntitlementStatusRevoked EntitlementStatus = "revoked"
+)
+
+type EntitlementSourceType string
+
+const (
+	EntitlementSourcePurchase   EntitlementSourceType = "purchase"
+	EntitlementSourceCode       EntitlementSourceType = "code"
+	EntitlementSourceAdminGrant EntitlementSourceType = "admin_grant"
+	EntitlementSourceSystem     EntitlementSourceType = "system"
+)
+
 type User struct {
 	ID        uuid.UUID
 	Email     string

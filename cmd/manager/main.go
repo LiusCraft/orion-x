@@ -21,6 +21,10 @@ import (
 	"github.com/liuscraft/orion-x/internal/manager/providertemplate"
 	"github.com/liuscraft/orion-x/internal/manager/security"
 	"github.com/liuscraft/orion-x/internal/manager/storage"
+	"github.com/liuscraft/orion-x/internal/manager/toolentitlement"
+	"github.com/liuscraft/orion-x/internal/manager/toolmarket"
+	"github.com/liuscraft/orion-x/internal/manager/toolruntime"
+	"github.com/liuscraft/orion-x/internal/manager/toolvalidator"
 )
 
 func main() {
@@ -78,6 +82,14 @@ func main() {
 	providerTemplateRepository := storage.NewProviderTemplateRepository(store.DB())
 	providerTemplateService := providertemplate.NewService(providerTemplateRepository)
 	providerTemplateHandler := httpapi.NewProviderTemplateHandler(providerTemplateService)
+	toolMarketRepository := storage.NewToolMarketRepository(store.DB())
+	toolEntitlementRepository := storage.NewToolEntitlementRepository(store.DB())
+	toolMarketService := toolmarket.NewService(toolMarketRepository, toolvalidator.NewMCPConfigValidator())
+	toolEntitlementService := toolentitlement.NewService(toolEntitlementRepository, toolMarketRepository, userRepository)
+	toolRuntimeService := toolruntime.NewService(toolEntitlementService)
+	toolMarketHandler := httpapi.NewToolMarketHandler(toolMarketService, toolEntitlementService)
+	toolEntitlementHandler := httpapi.NewToolEntitlementHandler(toolEntitlementService)
+	toolEntitlementHandler.SetRuntimeService(toolRuntimeService)
 
 	router := http.NewServeMux()
 	router.Handle(appConfig.Server.HealthPath, healthHandler)
@@ -103,6 +115,22 @@ func main() {
 		authMiddleware.RequireAuth(authMiddleware.RequireRole(contracts.RoleAdmin)(http.HandlerFunc(providerTemplateHandler.ByID))),
 	)
 	router.Handle("/api/v1/provider-templates", authMiddleware.RequireAuth(http.HandlerFunc(providerTemplateHandler.List)))
+	router.Handle(
+		"/api/v1/admin/tool-market/items",
+		authMiddleware.RequireAuth(authMiddleware.RequireRole(contracts.RoleAdmin)(http.HandlerFunc(toolMarketHandler.AdminItems))),
+	)
+	router.Handle(
+		"/api/v1/admin/tool-market/items/",
+		authMiddleware.RequireAuth(authMiddleware.RequireRole(contracts.RoleAdmin)(http.HandlerFunc(toolMarketHandler.AdminByItem))),
+	)
+	router.Handle(
+		"/api/v1/admin/tool-entitlements/grant",
+		authMiddleware.RequireAuth(authMiddleware.RequireRole(contracts.RoleAdmin)(http.HandlerFunc(toolEntitlementHandler.Grant))),
+	)
+	router.Handle("/api/v1/tool-market/items", authMiddleware.RequireAuth(http.HandlerFunc(toolMarketHandler.PublicItems)))
+	router.Handle("/api/v1/tool-market/items/", authMiddleware.RequireAuth(http.HandlerFunc(toolMarketHandler.PublicByItem)))
+	router.Handle("/api/v1/me/tool-repo", authMiddleware.RequireAuth(http.HandlerFunc(toolEntitlementHandler.ListRepo)))
+	router.Handle("/api/v1/me/tool-repo/", authMiddleware.RequireAuth(http.HandlerFunc(toolEntitlementHandler.RepoByID)))
 
 	server := httpapi.NewServer(appConfig.Server, router)
 	lifecycle := app.NewLifecycle(appConfig.Migration.AutoMigrateOnStartup, migrator, server)
