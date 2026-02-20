@@ -4,6 +4,7 @@ docs-site/node_modules
 docs-site/.vitepress/cache
 docs-site/.vitepress/dist
 web-ui/node_modules
+web-ui/dist/
 
 # Debug binaries
 __debug_bin*
