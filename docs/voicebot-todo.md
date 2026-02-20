@@ -185,7 +185,9 @@
     - [x] web-ui platform_resources 管理页（列表筛选、创建/编辑/禁用、实时刷新、provider 模板化配置表单、provider catalog 面板与模板增删改（后端 API）、`base_url/access_key` 独立必填字段、access key 二次认证明文查看）
   - [x] provider_templates 模块（模板字段定义 + CRUD）
   - [x] platform_resources 安全改造（移除 credential_ref、access_key 加密存储、reveal 二次认证）
-  - [ ] tool_market 模块（市场、offer、entitlement、tool repo）
+  - [x] tool_market 模块（市场、offer、entitlement、tool repo）
+  - [x] 用户工具体验 API（MCP）：`/api/v1/me/tool-repo/:entitlement_id/tools/list` + `/tools/call`（仅运行时体验，不计费）
+  - [x] tool 激活策略简化：移除 offer 依赖，改为 free 直接激活（`POST /api/v1/tool-market/items/:item_id/activate`）
   - [ ] voicebots/devices/device_bindings 模块
   - [ ] internal resolve API（`/internal/v1/devices/:device_id/resolve`）
   - [ ] ws-server ManagerResolver HTTP 接入（超时、重试、降级）
