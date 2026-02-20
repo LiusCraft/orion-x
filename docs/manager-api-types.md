@@ -301,14 +301,16 @@ const (
 ### 5.4 工具市场 + 开通 + 用户工具仓库
 
 - `POST /api/v1/admin/tool-market/items`
+- `GET /api/v1/admin/tool-market/items`
+- `GET /api/v1/admin/tool-market/items/:id`
 - `GET /api/v1/tool-market/items`
 - `PATCH /api/v1/admin/tool-market/items/:id`
 - `DELETE /api/v1/admin/tool-market/items/:id`
-- `POST /api/v1/admin/tool-market/items/:id/offers`
-- `GET /api/v1/tool-market/items/:id/offers`
 - `POST /api/v1/tool-market/items/:item_id/activate`
 - `GET /api/v1/me/tool-repo`
 - `GET /api/v1/me/tool-repo/:entitlement_id/usage`
+- `GET /api/v1/me/tool-repo/:entitlement_id/tools/list`
+- `POST /api/v1/me/tool-repo/:entitlement_id/tools/call`
 - `POST /api/v1/admin/tool-entitlements/grant`
 
 ### 5.5 voicebot + 设备
@@ -421,10 +423,12 @@ const (
 
 校验规则：
 
+- manager 在创建/更新 `tool_market_items` 时会执行真实探测：连接 MCP client，执行 `initialize` 和 `tools/list`。
 - `transport=stdio` 时 `stdio.command` 必填。
 - `transport=sse` 时 `sse.endpoint` 必填。
 - `transport=stream_http` 时 `stream_http.endpoint` 必填。
 - `tool_name_list` 为空表示加载全部工具。
+- 当 `tool_name_list` 非空时，必须是实时 `tools/list` 返回结果的子集。
 
 兼容说明：现有 loader 内部使用 `streamable`，manager 下发时将 `stream_http` 映射为 `streamable`。
 
