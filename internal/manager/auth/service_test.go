@@ -38,6 +38,10 @@ func (f *fakeUserRepository) Create(_ context.Context, user User) error {
 	return nil
 }
 
+func (f *fakeUserRepository) Count(_ context.Context) (int64, error) {
+	return int64(len(f.byID)), nil
+}
+
 func (f *fakeUserRepository) GetByID(_ context.Context, id uuid.UUID) (User, error) {
 	user, ok := f.byID[id]
 	if !ok {
@@ -289,8 +293,8 @@ func TestService_RegisterSuccess(t *testing.T) {
 	if result.User.Email != "newuser@example.com" {
 		t.Fatalf("expected normalized email, got %q", result.User.Email)
 	}
-	if result.User.Role != contracts.RoleNormalUser {
-		t.Fatalf("expected role normal_user, got %s", result.User.Role)
+	if result.User.Role != contracts.RoleAdmin {
+		t.Fatalf("expected role admin for first user, got %s", result.User.Role)
 	}
 	if result.Tokens.AccessToken == "" || result.Tokens.RefreshToken == "" {
 		t.Fatalf("expected non-empty tokens")
@@ -302,6 +306,48 @@ func TestService_RegisterSuccess(t *testing.T) {
 	}
 	if stored.PasswordHash == "" || stored.PasswordHash == "P@ssw0rd" {
 		t.Fatalf("expected hashed password in repository")
+	}
+}
+
+func TestService_RegisterSecondUserIsNormalUser(t *testing.T) {
+	existingPasswordHash, err := HashPassword("P@ssw0rd")
+	if err != nil {
+		t.Fatalf("HashPassword() error = %v", err)
+	}
+
+	existingID := uuid.New()
+	repo := &fakeUserRepository{
+		byID: map[uuid.UUID]User{
+			existingID: {
+				ID:           existingID,
+				Email:        "existing@example.com",
+				PasswordHash: existingPasswordHash,
+				Role:         contracts.RoleAdmin,
+				Status:       contracts.UserStatusActive,
+			},
+		},
+		byEmail: map[string]User{},
+	}
+	repo.byEmail["existing@example.com"] = repo.byID[existingID]
+
+	tokens, err := NewJWTManager(JWTManagerConfig{
+		Secret:     "unit-test-secret",
+		Issuer:     "unit-test",
+		AccessTTL:  5 * time.Minute,
+		RefreshTTL: 30 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("NewJWTManager() error = %v", err)
+	}
+
+	service := NewService(repo, tokens)
+	result, err := service.Register(context.Background(), "second@example.com", "P@ssw0rd")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	if result.User.Role != contracts.RoleNormalUser {
+		t.Fatalf("expected role normal_user for second user, got %s", result.User.Role)
 	}
 }
 

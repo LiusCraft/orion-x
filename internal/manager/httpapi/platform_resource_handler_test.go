@@ -161,6 +161,10 @@ func (r *handlerAuthUserRepo) Create(_ context.Context, user auth.User) error {
 	return nil
 }
 
+func (r *handlerAuthUserRepo) Count(_ context.Context) (int64, error) {
+	return int64(len(r.byID)), nil
+}
+
 func (r *handlerAuthUserRepo) GetByID(_ context.Context, id uuid.UUID) (auth.User, error) {
 	user, ok := r.byID[id]
 	if !ok {
