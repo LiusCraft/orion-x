@@ -82,11 +82,21 @@ func (s *Service) Register(ctx context.Context, email, password string) (LoginRe
 		return LoginResult{}, err
 	}
 
+	userCount, err := s.users.Count(ctx)
+	if err != nil {
+		return LoginResult{}, fmt.Errorf("count users: %w", err)
+	}
+
+	role := contracts.RoleNormalUser
+	if userCount == 0 {
+		role = contracts.RoleAdmin
+	}
+
 	user := User{
 		ID:           uuid.New(),
 		Email:        normalizedEmail,
 		PasswordHash: passwordHash,
-		Role:         contracts.RoleNormalUser,
+		Role:         role,
 		Status:       contracts.UserStatusActive,
 	}
 

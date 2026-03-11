@@ -59,6 +59,14 @@ func (r *authUserRepository) Create(ctx context.Context, user auth.User) error {
 	return nil
 }
 
+func (r *authUserRepository) Count(ctx context.Context) (int64, error) {
+	var total int64
+	if err := r.db.WithContext(ctx).Model(&UserModel{}).Count(&total).Error; err != nil {
+		return 0, fmt.Errorf("count users: %w", err)
+	}
+	return total, nil
+}
+
 func (r *authUserRepository) GetByID(ctx context.Context, id uuid.UUID) (auth.User, error) {
 	if id == uuid.Nil {
 		return auth.User{}, fmt.Errorf("%w: user id is required", auth.ErrInvalidArgument)

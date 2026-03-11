@@ -43,6 +43,10 @@ func (r *authTestRepo) Create(_ context.Context, user auth.User) error {
 	return nil
 }
 
+func (r *authTestRepo) Count(_ context.Context) (int64, error) {
+	return int64(len(r.usersByID)), nil
+}
+
 func (r *authTestRepo) GetByID(_ context.Context, id uuid.UUID) (auth.User, error) {
 	user, ok := r.usersByID[id]
 	if !ok {
@@ -229,8 +233,8 @@ func TestAuthHandler_RegisterSuccess(t *testing.T) {
 	if userData["email"] != "newuser@example.com" {
 		t.Fatalf("expected normalized email, got %#v", userData["email"])
 	}
-	if userData["role"] != string(contracts.RoleNormalUser) {
-		t.Fatalf("expected role normal_user, got %#v", userData["role"])
+	if userData["role"] != string(contracts.RoleAdmin) {
+		t.Fatalf("expected role admin for first user, got %#v", userData["role"])
 	}
 
 	loginResp := performJSONRequest(t, mux, http.MethodPost, "/api/v1/auth/login", []byte(`{"email":"newuser@example.com","password":"P@ssw0rd"}`), "")
