@@ -85,13 +85,17 @@ type MixerConfig struct {
 }
 
 type InPipeConfig struct {
-	SampleRate   int     `json:"sample_rate"`
-	Channels     int     `json:"channels"`
-	EnableVAD    bool    `json:"enable_vad"`
-	VADThreshold float64 `json:"vad_threshold"`
-	BufferSize   int     `json:"buffer_size"`  // 缓冲区大小（样本数），默认 3200
-	HighLatency  bool    `json:"high_latency"` // 高延迟模式，适合蓝牙设备
-	InputDevice  string  `json:"input_device"` // 输入设备名称，空字符串表示使用默认设备
+	SampleRate      int     `json:"sample_rate"`
+	Channels        int     `json:"channels"`
+	EnableVAD       bool    `json:"enable_vad"`
+	VADThreshold    float64 `json:"vad_threshold"`      // Silero speech probability threshold, default 0.5
+	VADType         string  `json:"vad_type"`           // "silero", default "silero"
+	VADModelPath    string  `json:"vad_model_path"`     // Silero VAD model path, default "models/silero_vad.onnx"
+	VADMinSilenceMs int     `json:"vad_min_silence_ms"` // Silero VAD min silence duration in ms, default 500
+	VADSpeechPadMs  int     `json:"vad_speech_pad_ms"`  // Silero VAD speech pad in ms, default 300
+	BufferSize      int     `json:"buffer_size"`        // 缓冲区大小（样本数），默认 3200
+	HighLatency     bool    `json:"high_latency"`       // 高延迟模式，适合蓝牙设备
+	InputDevice     string  `json:"input_device"`       // 输入设备名称，空字符串表示使用默认设备
 }
 
 type ToolsConfig struct {
@@ -206,10 +210,14 @@ func DefaultConfig() *AppConfig {
 				MaxCacheSentences:    0,
 			},
 			InPipe: InPipeConfig{
-				SampleRate:   16000,
-				Channels:     1,
-				EnableVAD:    true,
-				VADThreshold: 0.5,
+				SampleRate:      16000,
+				Channels:        1,
+				EnableVAD:       true,
+				VADThreshold:    0.5,
+				VADType:         "silero",
+				VADModelPath:    "models/silero_vad.onnx",
+				VADMinSilenceMs: 500,
+				VADSpeechPadMs:  300,
 			},
 		},
 		Tools: ToolsConfig{
@@ -319,6 +327,10 @@ func (c *AppConfig) ApplyEnv() {
 func (c *AppConfig) Validate() error {
 	if c.Audio.InPipe.SampleRate <= 0 {
 		return errors.New("audio.in_pipe.sample_rate must be positive")
+	}
+	vadType := strings.ToLower(strings.TrimSpace(c.Audio.InPipe.VADType))
+	if c.Audio.InPipe.EnableVAD && vadType != "" && vadType != "silero" {
+		return fmt.Errorf("audio.in_pipe.vad_type must be silero")
 	}
 	if c.TTS.SampleRate <= 0 {
 		return errors.New("tts.sample_rate must be positive")

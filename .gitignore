@@ -1,4 +1,7 @@
 data/
+.DS_Store
+/bin/
+/voicebot
 cmd/voicebot/config/voicebot.json
 docs-site/node_modules
 docs-site/.vitepress/cache
@@ -8,3 +11,4 @@ web-ui/dist/
 
 # Debug binaries
 __debug_bin*
+.opencode/

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"sync"
 	"time"
 
@@ -47,25 +46,29 @@ type inPipeImpl struct {
 	mu          sync.Mutex
 
 	vadEnabled     bool
-	vadThreshold   float64
+	vadDetector    VADDetector
+	levelMonitor   *AudioLevelMonitor
 	vadMinInterval time.Duration
 	lastVADTime    time.Time
+	lastLevelLog   time.Time
 }
 
 func NewInPipeWithRecognizer(config *InPipeConfig, recognizer asr.Recognizer) AudioInPipe {
 	if config == nil {
 		config = DefaultInPipeConfig()
 	}
-	vadThreshold := config.VADThreshold
-	if vadThreshold <= 0 {
-		vadThreshold = 0.5
+	vadDetector, err := NewVADDetector(config)
+	if err != nil {
+		logging.Warnf("AudioInPipe: failed to create VAD detector: %v, VAD will be disabled", err)
+		vadDetector = &noopVAD{}
 	}
 	return &inPipeImpl{
 		state:          InPipeStateIdle,
 		config:         config,
 		recognizer:     recognizer,
 		vadEnabled:     config.EnableVAD,
-		vadThreshold:   vadThreshold,
+		vadDetector:    vadDetector,
+		levelMonitor:   NewAudioLevelMonitor(config.SampleRate),
 		vadMinInterval: 300 * time.Millisecond,
 	}
 }
@@ -122,6 +125,7 @@ func (p *inPipeImpl) Stop() error {
 	cancel := p.cancel
 	audioSource := p.audioSource
 	recognizer := p.recognizer
+	vadDetector := p.vadDetector
 	ctx := p.ctx
 	p.mu.Unlock()
 
@@ -148,6 +152,11 @@ func (p *inPipeImpl) Stop() error {
 		_ = recognizer.Finish(ctx)
 		_ = recognizer.Close()
 		logging.Infof("AudioInPipe: ASR finished")
+	}
+	if vadDetector != nil {
+		if err := vadDetector.Close(); err != nil {
+			logging.Warnf("AudioInPipe: close VAD detector failed: %v", err)
+		}
 	}
 
 	logging.Infof("AudioInPipe: waiting for goroutines to finish...")
@@ -279,8 +288,11 @@ func (p *inPipeImpl) handleASRResult(result asr.Result) {
 }
 
 func (p *inPipeImpl) handleVAD(audio []byte) {
+	level := p.observeAudioLevel(audio)
 	if !p.vadEnabled {
-		logging.Infof("AudioInPipe: VAD disabled")
+		return
+	}
+	if level.Silent {
 		return
 	}
 
@@ -314,27 +326,63 @@ func (p *inPipeImpl) handleVAD(audio []byte) {
 	handler()
 }
 
+func (p *inPipeImpl) observeAudioLevel(audio []byte) AudioLevelSnapshot {
+	if p.levelMonitor == nil {
+		sampleRate := 16000
+		if p.config != nil && p.config.SampleRate > 0 {
+			sampleRate = p.config.SampleRate
+		}
+		p.levelMonitor = NewAudioLevelMonitor(sampleRate)
+	}
+
+	level := p.levelMonitor.Observe(audio)
+
+	p.mu.Lock()
+	now := time.Now()
+	shouldLog := now.Sub(p.lastLevelLog) >= 3*time.Second
+	if shouldLog {
+		p.lastLevelLog = now
+	}
+	p.mu.Unlock()
+
+	if shouldLog || level.Clipping || level.Noisy {
+		logging.Infof(
+			"AudioInPipe: audio level rms=%.4f peak=%.4f noise_floor=%.4f clipping=%.4f silent=%v above_noise=%v noisy=%v",
+			level.RMS,
+			level.Peak,
+			level.NoiseFloor,
+			level.ClippingRatio,
+			level.Silent,
+			level.AboveNoiseFloor,
+			level.Noisy,
+		)
+	}
+	if level.Clipping {
+		logging.Warnf("AudioInPipe: audio input appears clipped (peak=%.4f clipping=%.4f)", level.Peak, level.ClippingRatio)
+	}
+	if level.Noisy {
+		logging.Warnf("AudioInPipe: audio input noise floor is high (noise_floor=%.4f)", level.NoiseFloor)
+	}
+
+	return level
+}
+
 func (p *inPipeImpl) detectSpeech(audio []byte) bool {
-	if len(audio) < 2 {
+	if p.vadDetector == nil {
 		return false
 	}
-	var sum float64
-	count := len(audio) / 2
-	for i := 0; i < count; i++ {
-		lo := audio[i*2]
-		hi := audio[i*2+1]
-		sample := int16(lo) | int16(hi)<<8
-		v := float64(sample) / 32768.0
-		sum += v * v
-	}
-	rms := math.Sqrt(sum / float64(count))
-	detected := rms >= p.vadThreshold
 
-	// 每秒最多打印一次 RMS 值用于调试
+	detected, err := p.vadDetector.Detect(audio)
+	if err != nil {
+		logging.Warnf("AudioInPipe: VAD detection error: %v", err)
+		return false
+	}
+
+	// Throttled logging
 	p.mu.Lock()
 	now := time.Now()
 	if detected && now.Sub(p.lastVADTime) >= 1*time.Second {
-		logging.Infof("AudioInPipe: VAD RMS=%.4f, threshold=%.4f, detected=%v", rms, p.vadThreshold, detected)
+		logging.Infof("AudioInPipe: VAD detected speech")
 	}
 	p.mu.Unlock()
 

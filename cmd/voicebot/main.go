@@ -185,12 +185,16 @@ func main() {
 
 	logging.Infof("Creating AudioInPipe...")
 	inPipeCfg := &audio.InPipeConfig{
-		SampleRate:   appConfig.Audio.InPipe.SampleRate,
-		Channels:     appConfig.Audio.InPipe.Channels,
-		EnableVAD:    appConfig.Audio.InPipe.EnableVAD,
-		VADThreshold: appConfig.Audio.InPipe.VADThreshold,
-		ASRModel:     appConfig.ASR.Model,
-		ASREndpoint:  appConfig.ASR.Endpoint,
+		SampleRate:      appConfig.Audio.InPipe.SampleRate,
+		Channels:        appConfig.Audio.InPipe.Channels,
+		EnableVAD:       appConfig.Audio.InPipe.EnableVAD,
+		VADThreshold:    appConfig.Audio.InPipe.VADThreshold,
+		VADType:         appConfig.Audio.InPipe.VADType,
+		VADModelPath:    appConfig.Audio.InPipe.VADModelPath,
+		VADMinSilenceMs: appConfig.Audio.InPipe.VADMinSilenceMs,
+		VADSpeechPadMs:  appConfig.Audio.InPipe.VADSpeechPadMs,
+		ASRModel:        appConfig.ASR.Model,
+		ASREndpoint:     appConfig.ASR.Endpoint,
 	}
 
 	// 配置缓冲区大小，默认 3200 样本 (200ms @ 16kHz)

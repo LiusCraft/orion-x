@@ -52,11 +52,15 @@ type AudioInPipe interface {
 
 ```go
 type InPipeConfig struct {
-    SampleRate   int     // 采样率（默认 16000）
-    Channels     int     // 声道数（默认 1）
-    EnableVAD    bool    // 是否启用VAD（默认 true）
-    VADThreshold float64 // VAD阈值（默认 0.5）
-    ASREnabled   bool    // 是否启用ASR（默认 true）
+    SampleRate      int     // 采样率（默认 16000）
+    Channels        int     // 声道数（默认 1）
+    EnableVAD       bool    // 是否启用VAD（默认 true）
+    VADThreshold    float64 // Silero 语音概率阈值（默认 0.5）
+    VADType         string  // VAD类型（默认 silero）
+    VADModelPath    string  // Silero 模型路径
+    VADMinSilenceMs int     // 语音分段最小静音时长
+    VADSpeechPadMs  int     // 语音分段前后 padding
+    ASREnabled      bool    // 是否启用ASR（默认 true）
 }
 ```
 
@@ -131,13 +135,15 @@ type AudioSource interface {
 
 ### 触发逻辑
 
-- 在 `AudioInPipe.readAudioFromSource()` 中对 PCM 数据计算能量（RMS）。
-- 当 RMS >= `VADThreshold` 且距离上次触发超过最小间隔时，触发 `OnUserSpeakingDetected()`。
+- 在 `AudioInPipe.readAudioFromSource()` 中先通过 `AudioLevelMonitor` 计算 RMS、peak、clipping ratio 和动态噪声基线，用于静音前置过滤、输入健康检查和调试日志。
+- 非静音音频进入 Silero VAD，由模型判断是否为用户语音。
+- 当 Silero VAD 检测到语音且距离上次触发超过最小间隔时，触发 `OnUserSpeakingDetected()`。
 - 通过 `EnableVAD` 开关控制，默认启用。
 
 ### 参数与策略
 
-- `VADThreshold`：0~1，基于 16-bit PCM 归一化 RMS。
+- `VADThreshold`：0~1，Silero 语音概率阈值。
+- RMS 不再作为 VAD 判断依据，只作为前置静音过滤、底噪估计、爆音/高噪声健康检查和日志指标。
 - 最小触发间隔：300ms（防止频繁触发）。
 - 若音频读取返回 `context.Canceled`/`io.EOF`，直接退出，不触发 VAD。
 
@@ -292,6 +298,8 @@ config.SampleRate = 16000
 config.Channels = 1
 config.EnableVAD = true
 config.VADThreshold = 0.5
+config.VADType = "silero"
+config.VADModelPath = "models/silero_vad.onnx"
 ```
 
 ## 相关文档

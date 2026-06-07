@@ -294,6 +294,18 @@ func mergeVoicebotSessionConfig(base VoicebotSessionConfig, override VoicebotSes
 	if override.Audio.InPipe.VADThreshold > 0 {
 		out.Audio.InPipe.VADThreshold = override.Audio.InPipe.VADThreshold
 	}
+	if strings.TrimSpace(override.Audio.InPipe.VADType) != "" {
+		out.Audio.InPipe.VADType = override.Audio.InPipe.VADType
+	}
+	if strings.TrimSpace(override.Audio.InPipe.VADModelPath) != "" {
+		out.Audio.InPipe.VADModelPath = override.Audio.InPipe.VADModelPath
+	}
+	if override.Audio.InPipe.VADMinSilenceMs > 0 {
+		out.Audio.InPipe.VADMinSilenceMs = override.Audio.InPipe.VADMinSilenceMs
+	}
+	if override.Audio.InPipe.VADSpeechPadMs > 0 {
+		out.Audio.InPipe.VADSpeechPadMs = override.Audio.InPipe.VADSpeechPadMs
+	}
 	if override.Audio.InPipe.BufferSize > 0 {
 		out.Audio.InPipe.BufferSize = override.Audio.InPipe.BufferSize
 	}

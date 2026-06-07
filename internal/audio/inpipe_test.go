@@ -30,6 +30,25 @@ type blockingAudioSource struct {
 	closeOnce sync.Once
 }
 
+type staticVAD struct {
+	detected bool
+	err      error
+}
+
+func (v *staticVAD) Detect([]byte) (bool, error) {
+	return v.detected, v.err
+}
+
+func (v *staticVAD) Close() error {
+	return nil
+}
+
+func testInPipeConfig() *InPipeConfig {
+	config := DefaultInPipeConfig()
+	config.EnableVAD = false
+	return config
+}
+
 func newBlockingAudioSource() *blockingAudioSource {
 	return &blockingAudioSource{
 		readCh:  make(chan []byte),
@@ -109,7 +128,7 @@ func (m *mockRecognizer) SendResult(result asr.Result) {
 }
 
 func TestNewInPipeWithRecognizer(t *testing.T) {
-	config := DefaultInPipeConfig()
+	config := testInPipeConfig()
 	mock := &mockRecognizer{}
 
 	pipe := NewInPipeWithRecognizer(config, mock)
@@ -119,7 +138,7 @@ func TestNewInPipeWithRecognizer(t *testing.T) {
 }
 
 func TestInPipeStateTransitions(t *testing.T) {
-	config := DefaultInPipeConfig()
+	config := testInPipeConfig()
 	mock := &mockRecognizer{}
 	pipe := NewInPipeWithRecognizer(config, mock)
 
@@ -155,7 +174,7 @@ func TestInPipeStateTransitions(t *testing.T) {
 }
 
 func TestInPipeStartWhenAlreadyStarted(t *testing.T) {
-	config := DefaultInPipeConfig()
+	config := testInPipeConfig()
 	mock := &mockRecognizer{}
 	pipe := NewInPipeWithRecognizer(config, mock)
 
@@ -175,7 +194,7 @@ func TestInPipeStartWhenAlreadyStarted(t *testing.T) {
 }
 
 func TestInPipeSendAudioWhenNotStarted(t *testing.T) {
-	config := DefaultInPipeConfig()
+	config := testInPipeConfig()
 	mock := &mockRecognizer{}
 	pipe := NewInPipeWithRecognizer(config, mock)
 
@@ -186,7 +205,7 @@ func TestInPipeSendAudioWhenNotStarted(t *testing.T) {
 }
 
 func TestInPipeSendAudio(t *testing.T) {
-	config := DefaultInPipeConfig()
+	config := testInPipeConfig()
 	mock := &mockRecognizer{}
 	pipe := NewInPipeWithRecognizer(config, mock)
 
@@ -210,7 +229,7 @@ func TestInPipeSendAudio(t *testing.T) {
 }
 
 func TestInPipeOnASRResult(t *testing.T) {
-	config := DefaultInPipeConfig()
+	config := testInPipeConfig()
 	mock := &mockRecognizer{}
 	pipe := NewInPipeWithRecognizer(config, mock)
 
@@ -243,7 +262,7 @@ func TestInPipeOnASRResult(t *testing.T) {
 }
 
 func TestInPipeStopWhenIdle(t *testing.T) {
-	config := DefaultInPipeConfig()
+	config := testInPipeConfig()
 	mock := &mockRecognizer{}
 	pipe := NewInPipeWithRecognizer(config, mock)
 
@@ -254,7 +273,7 @@ func TestInPipeStopWhenIdle(t *testing.T) {
 }
 
 func TestInPipeContextCancellation(t *testing.T) {
-	config := DefaultInPipeConfig()
+	config := testInPipeConfig()
 	mock := &mockRecognizer{}
 	pipe := NewInPipeWithRecognizer(config, mock)
 
@@ -292,6 +311,10 @@ func TestDefaultInPipeConfig(t *testing.T) {
 		t.Errorf("Expected VADThreshold 0.5, got %f", config.VADThreshold)
 	}
 
+	if config.VADType != string(VADTypeSilero) {
+		t.Errorf("Expected VADType silero, got %s", config.VADType)
+	}
+
 	if config.ASRModel != "fun-asr-realtime" {
 		t.Errorf("Expected ASRModel fun-asr-realtime, got %s", config.ASRModel)
 	}
@@ -316,7 +339,7 @@ func TestInPipeStateString(t *testing.T) {
 }
 
 func TestInPipeStopDoesNotDeadlock(t *testing.T) {
-	config := DefaultInPipeConfig()
+	config := testInPipeConfig()
 	mock := &mockRecognizer{}
 	pipe := NewInPipeWithRecognizer(config, mock)
 
@@ -346,7 +369,7 @@ func TestInPipeStopDoesNotDeadlock(t *testing.T) {
 }
 
 func TestInPipeStopUnblocksSendAudio(t *testing.T) {
-	config := DefaultInPipeConfig()
+	config := testInPipeConfig()
 	recognizer := &blockingRecognizer{sendStarted: make(chan struct{})}
 	pipe := NewInPipeWithRecognizer(config, recognizer)
 
@@ -386,13 +409,14 @@ func TestInPipeStopUnblocksSendAudio(t *testing.T) {
 }
 
 func TestInPipeDetectSpeech(t *testing.T) {
-	impl := &inPipeImpl{vadThreshold: 0.2}
+	impl := &inPipeImpl{vadDetector: &staticVAD{detected: false}}
 
 	silence := makePCM(0, 160)
 	if impl.detectSpeech(silence) {
 		t.Fatal("expected silence to not trigger VAD")
 	}
 
+	impl.vadDetector = &staticVAD{detected: true}
 	voice := makePCM(12000, 160)
 	if !impl.detectSpeech(voice) {
 		t.Fatal("expected voice to trigger VAD")

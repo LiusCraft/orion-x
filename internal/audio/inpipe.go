@@ -23,22 +23,30 @@ type AudioSource interface {
 
 // InPipeConfig InPipe配置
 type InPipeConfig struct {
-	SampleRate   int
-	Channels     int
-	EnableVAD    bool
-	VADThreshold float64
-	ASRModel     string
-	ASREndpoint  string
+	SampleRate      int
+	Channels        int
+	EnableVAD       bool
+	VADThreshold    float64
+	VADType         string // "silero", default "silero"
+	VADModelPath    string // Silero VAD model path, default "models/silero_vad.onnx"
+	VADMinSilenceMs int    // Silero VAD min silence duration in ms, default 500
+	VADSpeechPadMs  int    // Silero VAD speech pad in ms, default 300
+	ASRModel        string
+	ASREndpoint     string
 }
 
 // DefaultInPipeConfig 默认配置
 func DefaultInPipeConfig() *InPipeConfig {
 	return &InPipeConfig{
-		SampleRate:   16000,
-		Channels:     1,
-		EnableVAD:    true,
-		VADThreshold: 0.5,
-		ASRModel:     "fun-asr-realtime",
+		SampleRate:      16000,
+		Channels:        1,
+		EnableVAD:       true,
+		VADThreshold:    0.5,
+		VADType:         string(VADTypeSilero),
+		VADModelPath:    DefaultVADModelPath,
+		VADMinSilenceMs: 500,
+		VADSpeechPadMs:  300,
+		ASRModel:        "fun-asr-realtime",
 	}
 }
 

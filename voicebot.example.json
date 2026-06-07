@@ -57,7 +57,11 @@
             "sample_rate": 16000,
             "channels": 1,
             "enable_vad": true,
-            "vad_threshold": 0.5
+            "vad_threshold": 0.5,
+            "vad_type": "silero",
+            "vad_model_path": "models/silero_vad.onnx",
+            "vad_min_silence_ms": 500,
+            "vad_speech_pad_ms": 300
         }
     },
     "tools": {
