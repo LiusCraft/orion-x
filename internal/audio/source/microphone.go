@@ -143,11 +143,19 @@ func NewMicrophoneSourceWithDevice(sampleRate, channels, bufferSize int, highLat
 	return newMicrophoneSourceWithStream(stream, sampleRate, channels, bufferSize, buffer), nil
 }
 
-// findInputDeviceByName 按名称查找输入设备（支持部分匹配）
-// isBluetoothDevice 检测设备是否为蓝牙设备（通过设备名称匹配）
+// isBluetoothDevice 检测设备是否为蓝牙设备
+// 通过名称关键词或高延迟特征（蓝牙 HFP 模式 DefaultHighInputLatency 通常 > 200ms）判断
 func isBluetoothDevice(device *portaudio.DeviceInfo) bool {
 	nameLower := strings.ToLower(device.Name)
-	return strings.Contains(nameLower, "bluetooth")
+	if strings.Contains(nameLower, "bluetooth") ||
+		strings.Contains(nameLower, "airpods") ||
+		strings.Contains(nameLower, "wireless") ||
+		strings.HasSuffix(nameLower, "bt") ||
+		strings.Contains(nameLower, " bt ") {
+		return true
+	}
+	// 延迟特征兜底：蓝牙 HFP 的高延迟通常远超有线设备
+	return device.DefaultHighInputLatency.Seconds() > 0.2
 }
 
 func findInputDeviceByName(name string) (*portaudio.DeviceInfo, error) {
@@ -233,7 +241,13 @@ func (m *MicrophoneSource) Read(ctx context.Context) ([]byte, error) {
 				return nil, io.EOF
 			default:
 			}
-			return nil, err
+			// Input overflow: hardware dropped some frames but the buffer still
+			// contains the latest audio data. Return it so the pipeline keeps running.
+			if err == portaudio.InputOverflowed {
+				logging.Warnf("MicrophoneSource: input overflowed (frames dropped by hardware)")
+			} else {
+				return nil, err
+			}
 		}
 	}
 

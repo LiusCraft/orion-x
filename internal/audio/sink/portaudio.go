@@ -46,6 +46,15 @@ func (s *PortAudioSink) Start(ctx context.Context, format audio.AudioFormat) err
 		frames = 1024
 	}
 
+	// 查询默认输出设备支持的最大声道数，蓝牙 HFP 模式下只支持 1 声道
+	if outputDevice, err := portaudio.DefaultOutputDevice(); err == nil {
+		if outputDevice.MaxOutputChannels < channels {
+			logging.Warnf("PortAudioSink: output device %q supports max %d channels, reducing from %d (likely Bluetooth HFP mode)",
+				outputDevice.Name, outputDevice.MaxOutputChannels, channels)
+			channels = outputDevice.MaxOutputChannels
+		}
+	}
+
 	s.buffer = make([]int16, frames*channels)
 	stream, err := portaudio.OpenDefaultStream(0, channels, float64(sampleRate), frames, &s.buffer)
 	if err != nil {
@@ -60,6 +69,7 @@ func (s *PortAudioSink) Start(ctx context.Context, format audio.AudioFormat) err
 	s.stream = stream
 	s.started = true
 	logging.Infof("PortAudioSink: started (sampleRate=%d, channels=%d, frames=%d)", sampleRate, channels, frames)
+
 	return nil
 }
 

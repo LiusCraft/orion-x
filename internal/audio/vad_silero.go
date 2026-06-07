@@ -24,6 +24,7 @@ func NewSileroVAD(modelPath string, sampleRate int, threshold float64, minSilenc
 	inner, err := speech.NewDetector(speech.DetectorConfig{
 		ModelPath:  modelPath,
 		SampleRate: sampleRate,
+		Threshold:  float32(threshold),
 	})
 	if err != nil {
 		return nil, err
