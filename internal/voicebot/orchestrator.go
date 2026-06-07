@@ -76,12 +76,12 @@ type orchestratorImpl struct {
 	stateMachine *StateMachine
 	eventBus     EventBus
 
-	voiceAgent     agent.VoiceAgent
-	audioOutPipe   audio.AudioOutPipe
-	audioInPipe    audio.AudioInPipe
-	toolExecutor   tools.ToolExecutor
-	segmenter      *text.Segmenter
-	markdownFilter agent.MarkdownFilter
+	voiceAgent   agent.VoiceAgent
+	audioOutPipe audio.AudioOutPipe
+	audioInPipe  audio.AudioInPipe
+	toolExecutor tools.ToolExecutor
+	segmenter    *text.Segmenter
+	textFilter   TextFilterNode
 
 	currentEmotion string
 	ctx            context.Context
@@ -157,7 +157,7 @@ func NewOrchestratorWithOptions(
 		audioInPipe:     audioInPipe,
 		toolExecutor:    toolExecutor,
 		segmenter:       text.NewSegmenter(120),
-		markdownFilter:  agent.NewMarkdownFilter(),
+		textFilter:      NewTextFilterNode(),
 		observer:        observer,
 		sentenceIndex:   make(map[int64]*SentenceRecord),
 		ttsSchedulerCfg: schedulerCfg,
@@ -737,12 +737,7 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 
 		sentences := o.segmenter.Feed(e.Chunk)
 		for _, sentence := range sentences {
-			if sentence != "" {
-				// 移除 Markdown 格式，避免 TTS 播放特殊符号
-				sentence = o.markdownFilter.Filter(sentence)
-				logging.Infof("Orchestrator: caching TTS sentence: %s", sentence)
-				o.cacheSentence(sentence, o.currentEmotion)
-			}
+			o.cacheSpeechSentence(sentence)
 		}
 	case *agent.EmotionChangedEvent:
 		o.currentEmotion = e.Emotion
@@ -751,10 +746,7 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 		o.OnToolCall(e.Tool, e.Args)
 	case *agent.FinishedEvent:
 		if last := o.segmenter.Flush(); last != "" {
-			// 移除 Markdown 格式，避免 TTS 播放特殊符号
-			last = o.markdownFilter.Filter(last)
-			logging.Infof("Orchestrator: caching final TTS sentence: %s", last)
-			o.cacheSentence(last, o.currentEmotion)
+			o.cacheSpeechSentence(last)
 		}
 		o.mu.Lock()
 		pending := o.ttsPendingCount
@@ -767,6 +759,18 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 			o.maybeFinalizeTurn()
 		}
 	}
+}
+
+func (o *orchestratorImpl) cacheSpeechSentence(sentence string) {
+	if strings.TrimSpace(sentence) == "" {
+		return
+	}
+	filtered := o.textFilter.Process(sentence)
+	if filtered == "" {
+		return
+	}
+	logging.Infof("Orchestrator: caching TTS sentence: %s", filtered)
+	o.cacheSentence(filtered, o.currentEmotion)
 }
 
 func (o *orchestratorImpl) appendAssistantText(text string) {

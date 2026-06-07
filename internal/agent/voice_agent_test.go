@@ -111,51 +111,6 @@ func TestEmotionExtractor(t *testing.T) {
 	}
 }
 
-func TestMarkdownFilter(t *testing.T) {
-	filter := NewMarkdownFilter()
-
-	tests := []struct {
-		name     string
-		input    string
-		contains []string
-	}{
-		{
-			"移除情绪标签",
-			"你好啊 [EMO:happy]",
-			[]string{"你好啊", "你好啊 [EMO:happy]"},
-		},
-		{
-			"情绪标签",
-			"天气很好 [EMO:happy]",
-			[]string{"天气很好"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := filter.Filter(tt.input)
-			for _, contain := range tt.contains {
-				if len(contain) > 20 {
-					if result == contain {
-						t.Logf("Result matches exactly: %s", result)
-					}
-				} else {
-					found := false
-					for _, s := range tt.contains {
-						if len(s) < len(contain) && result == s {
-							found = true
-							break
-						}
-					}
-					if !found {
-						t.Logf("Filtered: '%s' -> '%s'", tt.input, result)
-					}
-				}
-			}
-		})
-	}
-}
-
 func TestActionResponseGenerator(t *testing.T) {
 	generator := NewActionResponseGenerator()
 

@@ -31,7 +31,7 @@
 - [x] 实现工具识别和调用逻辑
 - [x] 区分查询类工具和动作类工具的流程
 - [x] 实现情绪标签注入到Prompt（优化为标签在句子开头）
-- [x] 集成 `EmotionExtractor` 和 `MarkdownFilter`
+- [x] 集成 `EmotionExtractor` 和 `internal/text` 文本清洗
 - [x] 集成 `text.Segmenter` 分句器
 - [x] 修复 LLM 流式增量输出，避免重复前缀
 
@@ -108,10 +108,10 @@
 - [ ] 支持自定义音色配置
 - [ ] 实现音色动态切换
 
-### 9. MarkdownFilter 实现 (优先级: 中)
+### 9. 文本清洗实现 (优先级: 中) ⭐️ 已完成
 - [x] 实现完整的正则过滤逻辑
 - [ ] 支持可配置的过滤规则
-- [ ] 测试各种Markdown格式
+- [x] 测试各种 Markdown 格式
 
 ### 9.1 多采样率支持 (优先级: 高) ⭐️ 已完成
 - [x] 创建 Resampler 接口和线性插值实现
@@ -137,7 +137,7 @@
 - [ ] 测试 `Orchestrator` 状态转换
 - [ ] 测试 `AudioMixer` 混音逻辑
 - [ ] 测试 `VoiceAgent` 流程
-- [ ] 测试 `MarkdownFilter` 过滤逻辑
+- [x] 测试 `internal/text` 文本清洗逻辑
 - [ ] 测试工具调用流程
 
 ### 12. 集成测试 (优先级: 中)

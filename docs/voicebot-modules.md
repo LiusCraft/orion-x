@@ -96,9 +96,10 @@ internal/
 - `Extract(text string) string`
 - 支持从文本中提取 `[EMO:xxx]` 标签
 
-#### MarkdownFilter (接口)
-- `Filter(text string) string`
-- 过滤加粗、代码块、链接、标题等Markdown标记
+#### 文本清洗
+- `text.FilterMarkdown(text string) string`
+- `voicebot.TextFilterNode.Process(text string) string`
+- `TextFilterNode` 在 Orchestrator 进入 TTS 前编排 Markdown 清洗与语音情绪标签移除
 
 #### ToolClassifier
 - `GetToolType(tool string) ToolType`
@@ -159,8 +160,9 @@ internal/
 
 ### 4. text 包
 
-#### MarkdownFilter (接口)
-- `Filter(text string) string`
+#### 文本清洗函数
+- `FilterMarkdown(text string) string`
+- `RemoveEmotionTags(text string) string`
 
 ### 5. tools 包
 
@@ -250,7 +252,7 @@ Idle ─────→ Processing ───→ Speaking
     - [x] `VoiceAgent` 完整实现
     - [x] 集成 `internal/agent`、`internal/tools` 与 `internal/provider/llm` 的工具调用逻辑
     - [x] 启用流式LLM输出
-    - [x] 集成 `EmotionExtractor` 和 `MarkdownFilter`
+    - [x] 集成 `EmotionExtractor` 和 `internal/text` 文本清洗
 
 3. **audio 包**
     - [x] `AudioMixer` 实现（音频混音）
@@ -258,7 +260,7 @@ Idle ─────→ Processing ───→ Speaking
     - [x] `AudioInPipe` 实现（基于现有ASR）
 
 4. **text 包**
-    - [ ] `MarkdownFilter` 完整实现
+    - [x] Markdown 与语音文本清洗完整实现
 
 5. **tools 包**
     - 实现真实工具（如天气API调用）

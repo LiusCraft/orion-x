@@ -20,7 +20,6 @@ import (
 type voiceAgentImpl struct {
 	chatModel         llmfactory.ChatModel
 	emotionExtractor  EmotionExtractor
-	markdownFilter    MarkdownFilter
 	actionResponseGen *ActionResponseGenerator
 	toolManager       tools.ToolManager
 	memorySvc         memory.Service
@@ -100,7 +99,6 @@ func NewVoiceAgentWithToolManagerAndMemory(ctx context.Context, cfg tools.Manage
 	return &voiceAgentImpl{
 		chatModel:         chatModel,
 		emotionExtractor:  NewEmotionExtractor(),
-		markdownFilter:    NewMarkdownFilter(),
 		actionResponseGen: responseGen,
 		toolManager:       toolManager,
 		memorySvc:         memorySvc,
@@ -175,7 +173,6 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 
 				if toolType == tools.ToolTypeAction {
 					response := v.actionResponseGen.GenerateResponse(toolCall.Function.Name, args)
-					filtered := v.markdownFilter.Filter(response)
 					emotion := v.emotionExtractor.Extract(response)
 
 					if emotion != "" && emotion != currentEmotion {
@@ -184,9 +181,9 @@ func (v *voiceAgentImpl) Process(ctx context.Context, input string) (<-chan Agen
 						eventChan <- &EmotionChangedEvent{Emotion: emotion}
 					}
 
-					if filtered != "" {
-						logging.Infof("VoiceAgent: action response: %s", filtered)
-						eventChan <- &TextChunkEvent{Chunk: filtered, Emotion: currentEmotion}
+					if strings.TrimSpace(response) != "" {
+						logging.Infof("VoiceAgent: action response: %s", response)
+						eventChan <- &TextChunkEvent{Chunk: response, Emotion: currentEmotion}
 					}
 				}
 			}

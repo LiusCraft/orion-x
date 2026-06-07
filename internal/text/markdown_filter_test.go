@@ -1,10 +1,8 @@
-package markdown
+package text
 
-import (
-	"testing"
-)
+import "testing"
 
-func TestFilter(t *testing.T) {
+func TestFilterMarkdown(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -124,31 +122,31 @@ func TestFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Filter(tt.input)
+			got := FilterMarkdown(tt.input)
 			if got != tt.expected {
-				t.Errorf("Filter() = %q, want %q", got, tt.expected)
+				t.Errorf("FilterMarkdown() = %q, want %q", got, tt.expected)
 			}
 		})
 	}
 }
 
-func TestFilterWithOptions(t *testing.T) {
+func TestFilterMarkdownWithOptions(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		opts     Options
+		opts     MarkdownOptions
 		expected string
 	}{
 		{
 			name:     "skip images",
 			input:    "text ![alt](img.png) more",
-			opts:     Options{SkipImages: true},
+			opts:     MarkdownOptions{SkipImages: true},
 			expected: "text  more",
 		},
 		{
 			name:     "keep list leaders",
 			input:    "* item",
-			opts:     Options{StripListLeaders: false},
+			opts:     MarkdownOptions{StripListLeaders: false},
 			expected: "item",
 		},
 		{
@@ -165,26 +163,24 @@ func TestFilterWithOptions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FilterWithOptions(tt.input, tt.opts)
+			got := FilterMarkdownWithOptions(tt.input, tt.opts)
 			if got != tt.expected {
-				t.Errorf("FilterWithOptions() = %q, want %q", got, tt.expected)
+				t.Errorf("FilterMarkdownWithOptions() = %q, want %q", got, tt.expected)
 			}
 		})
 	}
 }
 
-func BenchmarkFilter(b *testing.B) {
+func BenchmarkFilterMarkdown(b *testing.B) {
 	input := "# Heading\n\nThis is **bold** and *italic* text with [a link](https://example.com) and `code`."
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Filter(input)
+		FilterMarkdown(input)
 	}
 }
 
-func ExampleFilter() {
+func ExampleFilterMarkdown() {
 	input := "# Welcome\n\nThis is **bold** and [a link](https://example.com)."
-	output := Filter(input)
-	// Un-comment the following line to see the output:
-	// fmt.Println(output)
+	output := FilterMarkdown(input)
 	_ = output
 }
