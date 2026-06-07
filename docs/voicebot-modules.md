@@ -248,7 +248,7 @@ Idle ─────→ Processing ───→ Speaking
 
 2. **agent 包**
     - [x] `VoiceAgent` 完整实现
-    - [x] 集成现有 `internal/ai/llm.go` 的工具调用逻辑
+    - [x] 集成 `internal/agent`、`internal/tools` 与 `internal/provider/llm` 的工具调用逻辑
     - [x] 启用流式LLM输出
     - [x] 集成 `EmotionExtractor` 和 `MarkdownFilter`
 
@@ -266,9 +266,11 @@ Idle ─────→ Processing ───→ Speaking
 
 ### 需要集成的现有模块
 
-- `internal/ai/llm.go` - LLM工具调用
-- `internal/asr/*` - ASR模块
-- `internal/tts/*` - TTS模块
+- `internal/agent/*` - VoiceAgent 与 LLM 工具调用编排
+- `internal/tools/*` - 工具加载、注册与执行
+- `internal/provider/llm/*` - LLM provider 模块
+- `internal/provider/asr/*` - ASR provider 模块
+- `internal/provider/tts/*` - TTS provider 模块
 - `internal/text/segmenter.go` - 分句器
 
 ### 扩展功能

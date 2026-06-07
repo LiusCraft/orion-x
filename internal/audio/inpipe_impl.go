@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liuscraft/orion-x/internal/asr"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/provider/asr"
 )
 
 type InPipeState int

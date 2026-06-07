@@ -22,11 +22,11 @@ func TestLoadWSServer_DefaultFallback(t *testing.T) {
 	if profileID != "default" {
 		t.Fatalf("expected default profile, got %q", profileID)
 	}
-	if resolved.ASR.APIKey != "dash-key" {
-		t.Fatalf("expected ASR key from env, got %q", resolved.ASR.APIKey)
+	if resolved.Provider.ASR.Aliyun.APIKey != "dash-key" {
+		t.Fatalf("expected ASR key from env, got %q", resolved.Provider.ASR.Aliyun.APIKey)
 	}
-	if resolved.LLM.APIKey != "zhipu-key" {
-		t.Fatalf("expected LLM key from env, got %q", resolved.LLM.APIKey)
+	if resolved.Provider.LLM.OpenAI.APIKey != "zhipu-key" {
+		t.Fatalf("expected LLM key from env, got %q", resolved.Provider.LLM.OpenAI.APIKey)
 	}
 }
 
@@ -41,7 +41,11 @@ func TestLoadWSServer_DefaultDisabledRequiresBinding(t *testing.T) {
 			"default": null,
 			"profiles": {
 				"bot-a": {
-					"tts": {"voice": "zhichu"}
+					"provider": {
+						"tts": {
+							"aliyun": {"voice": "zhichu"}
+						}
+					}
 				}
 			},
 			"local_bindings": {
@@ -70,8 +74,8 @@ func TestLoadWSServer_DefaultDisabledRequiresBinding(t *testing.T) {
 	if profileID != "bot-a" {
 		t.Fatalf("expected profile bot-a, got %q", profileID)
 	}
-	if resolved.TTS.Voice != "zhichu" {
-		t.Fatalf("expected profile voice override, got %q", resolved.TTS.Voice)
+	if resolved.Provider.TTS.Aliyun.Voice != "zhichu" {
+		t.Fatalf("expected profile voice override, got %q", resolved.Provider.TTS.Aliyun.Voice)
 	}
 }
 

@@ -17,8 +17,9 @@ import (
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
+	_ "github.com/liuscraft/orion-x/internal/provider/llm/register"
+	"github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/tools"
-	"github.com/liuscraft/orion-x/internal/tts"
 	"github.com/liuscraft/orion-x/internal/voicebot"
 )
 
@@ -35,6 +36,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Invalid config: %v\n", err)
 		os.Exit(1)
 	}
+	asrCfg := appConfig.Provider.ASR.Aliyun
+	ttsCfg := appConfig.Provider.TTS.Aliyun
+	llmCfg := appConfig.Provider.LLM.OpenAI
 
 	if err := logging.Init(logging.Config{
 		Level:  appConfig.Logging.Level,
@@ -69,9 +73,10 @@ func main() {
 	memorySvc, err := memory.NewService(memCfg, memory.Options{
 		SystemPrompt: agent.DefaultSystemPrompt(),
 		LLM: memory.LLMConfig{
-			APIKey:  appConfig.LLM.APIKey,
-			BaseURL: appConfig.LLM.BaseURL,
-			Model:   appConfig.LLM.Model,
+			Provider: appConfig.Provider.LLM.Type,
+			APIKey:   llmCfg.APIKey,
+			BaseURL:  llmCfg.BaseURL,
+			Model:    llmCfg.Model,
 		},
 	})
 	if err != nil {
@@ -83,9 +88,10 @@ func main() {
 		}
 	}()
 	toolCfg := tools.ManagerConfig{
-		APIKey:          appConfig.LLM.APIKey,
-		BaseURL:         appConfig.LLM.BaseURL,
-		Model:           appConfig.LLM.Model,
+		Provider:        appConfig.Provider.LLM.Type,
+		APIKey:          llmCfg.APIKey,
+		BaseURL:         llmCfg.BaseURL,
+		Model:           llmCfg.Model,
 		ToolTypes:       appConfig.Tools.Types,
 		ActionResponses: appConfig.Tools.ActionResponses,
 		MCPServers:      toToolsMCPServers(appConfig.Tools.MCP),
@@ -144,6 +150,7 @@ func main() {
 	logging.Infof("Creating AudioOutPipe...")
 	outPipeCfg := audio.DefaultOutPipeConfig()
 	outPipeCfg.Mixer = mixerCfg
+	outPipeCfg.TTSProviderType = appConfig.Provider.TTS.Type
 	// 配置 TTS Pipeline
 	outPipeCfg.TTSPipeline = &audio.TTSPipelineConfig{
 		MaxTTSBuffer:     appConfig.Audio.TTSPipeline.MaxTTSBuffer,
@@ -161,22 +168,22 @@ func main() {
 		outPipeCfg.TTSPipeline.TextQueueSize = 100
 	}
 	outPipeCfg.TTS = tts.Config{
-		APIKey:               appConfig.TTS.APIKey,
-		Endpoint:             appConfig.TTS.Endpoint,
-		Workspace:            appConfig.TTS.Workspace,
-		Model:                appConfig.TTS.Model,
-		Voice:                appConfig.TTS.Voice,
-		Format:               appConfig.TTS.Format,
-		SampleRate:           appConfig.TTS.SampleRate,
-		Volume:               appConfig.TTS.Volume,
-		Rate:                 appConfig.TTS.Rate,
-		Pitch:                appConfig.TTS.Pitch,
-		EnableSSML:           appConfig.TTS.EnableSSML,
-		TextType:             appConfig.TTS.TextType,
-		EnableDataInspection: appConfig.TTS.EnableDataInspection,
+		APIKey:               ttsCfg.APIKey,
+		Endpoint:             ttsCfg.Endpoint,
+		Workspace:            ttsCfg.Workspace,
+		Model:                ttsCfg.Model,
+		Voice:                ttsCfg.Voice,
+		Format:               ttsCfg.Format,
+		SampleRate:           ttsCfg.SampleRate,
+		Volume:               ttsCfg.Volume,
+		Rate:                 ttsCfg.Rate,
+		Pitch:                ttsCfg.Pitch,
+		EnableSSML:           ttsCfg.EnableSSML,
+		TextType:             ttsCfg.TextType,
+		EnableDataInspection: ttsCfg.EnableDataInspection,
 	}
-	if len(appConfig.TTS.VoiceMap) > 0 {
-		outPipeCfg.VoiceMap = appConfig.TTS.VoiceMap
+	if len(ttsCfg.VoiceMap) > 0 {
+		outPipeCfg.VoiceMap = ttsCfg.VoiceMap
 	}
 	audioOutPipe := audio.NewOutPipeWithConfig(outPipeCfg)
 	audioOutPipe.SetMixer(mixer)
@@ -193,8 +200,9 @@ func main() {
 		VADModelPath:    appConfig.Audio.InPipe.VADModelPath,
 		VADMinSilenceMs: appConfig.Audio.InPipe.VADMinSilenceMs,
 		VADSpeechPadMs:  appConfig.Audio.InPipe.VADSpeechPadMs,
-		ASRModel:        appConfig.ASR.Model,
-		ASREndpoint:     appConfig.ASR.Endpoint,
+		ASRProviderType: appConfig.Provider.ASR.Type,
+		ASRModel:        asrCfg.Model,
+		ASREndpoint:     asrCfg.Endpoint,
 	}
 
 	// 配置缓冲区大小，默认 3200 样本 (200ms @ 16kHz)
@@ -219,7 +227,7 @@ func main() {
 
 	audioSource := audio.AudioSource(micSource)
 
-	audioInPipe, err := audio.NewInPipeWithAudioSource(appConfig.ASR.APIKey, inPipeCfg, audioSource)
+	audioInPipe, err := audio.NewInPipeWithAudioSource(asrCfg.APIKey, inPipeCfg, audioSource)
 	if err != nil {
 		logging.Fatalf("Failed to create AudioInPipe: %v", err)
 	}

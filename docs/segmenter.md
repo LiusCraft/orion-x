@@ -41,8 +41,8 @@ if last := seg.Flush(); last != "" {
 tts.Close(ctx)
 ```
 
-## CLI 使用
+## 测试
 
 ```bash
-go run ./cmd/tts -segmenter -segmenter-max 120 -text "你好。这里是第二句！"
+go test ./internal/text
 ```

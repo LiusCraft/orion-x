@@ -1,4 +1,4 @@
-package asr
+package aliyun
 
 import (
 	"context"
@@ -11,14 +11,21 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	asr "github.com/liuscraft/orion-x/internal/provider/asr"
 )
 
 const defaultDashScopeEndpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 
+func init() {
+	asr.Register(asr.TypeAliyun, func(cfg asr.Config) (asr.Recognizer, error) {
+		return NewDashScopeRecognizer(cfg)
+	})
+}
+
 type DashScopeRecognizer struct {
-	cfg       Config
+	cfg       asr.Config
 	conn      *websocket.Conn
-	onResult  func(Result)
+	onResult  func(asr.Result)
 	writeMu   sync.Mutex
 	startedCh chan struct{}
 	doneCh    chan struct{}
@@ -29,7 +36,7 @@ type DashScopeRecognizer struct {
 	doneOnce    sync.Once
 }
 
-func NewDashScopeRecognizer(cfg Config) (*DashScopeRecognizer, error) {
+func NewDashScopeRecognizer(cfg asr.Config) (*DashScopeRecognizer, error) {
 	if cfg.APIKey == "" {
 		return nil, errors.New("DASHSCOPE_API_KEY is required")
 	}
@@ -54,7 +61,7 @@ func NewDashScopeRecognizer(cfg Config) (*DashScopeRecognizer, error) {
 	}, nil
 }
 
-func (r *DashScopeRecognizer) OnResult(handler func(Result)) {
+func (r *DashScopeRecognizer) OnResult(handler func(asr.Result)) {
 	r.onResult = handler
 }
 
@@ -258,7 +265,7 @@ func (r *DashScopeRecognizer) handleEvent(event eventMessage) bool {
 			return false
 		}
 		if r.onResult != nil {
-			result := Result{
+			result := asr.Result{
 				Text:        sentence.Text,
 				IsFinal:     sentence.SentenceEnd,
 				BeginTimeMs: sentence.BeginTime,

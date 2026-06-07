@@ -3,38 +3,49 @@
         "level": "info",
         "format": "console"
     },
-    "asr": {
-        "api_key": "",
-        "model": "fun-asr-realtime",
-        "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
-    },
-    "tts": {
-        "api_key": "",
-        "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
-        "workspace": "",
-        "model": "cosyvoice-v3-flash",
-        "voice": "longanyang",
-        "format": "pcm",
-        "sample_rate": 16000,
-        "volume": 50,
-        "rate": 1.0,
-        "pitch": 1.0,
-        "text_type": "PlainText",
-        "enable_ssml": false,
-        "enable_data_inspection": true,
-        "voice_map": {
-            "happy": "longanyang",
-            "sad": "zhichu",
-            "angry": "zhimeng",
-            "calm": "longxiaochun",
-            "excited": "longanyang",
-            "default": "longanyang"
+    "provider": {
+        "asr": {
+            "type": "aliyun",
+            "aliyun": {
+                "api_key": "",
+                "model": "fun-asr-realtime",
+                "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+            }
+        },
+        "tts": {
+            "type": "aliyun",
+            "aliyun": {
+                "api_key": "",
+                "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+                "workspace": "",
+                "model": "cosyvoice-v3-flash",
+                "voice": "longanyang",
+                "format": "pcm",
+                "sample_rate": 16000,
+                "volume": 50,
+                "rate": 1.0,
+                "pitch": 1.0,
+                "text_type": "PlainText",
+                "enable_ssml": false,
+                "enable_data_inspection": true,
+                "voice_map": {
+                    "happy": "longanyang",
+                    "sad": "zhichu",
+                    "angry": "zhimeng",
+                    "calm": "longxiaochun",
+                    "excited": "longanyang",
+                    "default": "longanyang"
+                }
+            }
+        },
+        "llm": {
+            "type": "openai",
+            "openai": {
+                "api_key": "",
+                "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+                "model": "glm-4-flash"
+            }
         }
-    },
-    "llm": {
-        "api_key": "",
-        "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
-        "model": "glm-4-flash"
     },
     "audio": {
         "mixer": {
@@ -79,35 +90,13 @@
             "pauseMusic": "音乐已暂停"
         }
     },
-    "server": {
-        "address": ":8000",
-        "path": "/xiaozhi/v1/",
-        "read_timeout_ms": 10000,
-        "write_timeout_ms": 10000,
-        "auth": {
-            "enabled": false,
-            "token": "",
-            "allowed_devices": []
-        },
-        "origin_check": {
-            "enabled": false,
-            "allowed_origins": []
-        },
-        "audio_params": {
-            "format": "opus",
-            "sample_rate": 16000,
-            "channels": 1,
-            "frame_duration_ms": 60,
-            "bits_per_sample": 16,
-            "play_buffer_duration_ms": 300
-        }
-    },
-    "metrics": {
-        "enabled": true,
-        "address": "127.0.0.1:9100",
-        "path": "/metrics",
-        "enable_open_metrics": true,
-        "max_requests_in_flight": 5,
-        "bearer_token": ""
+    "memory": {
+        "mode": "session",
+        "session_max_turns": 10,
+        "session_summary_every_n": 20,
+        "long_term_db_path": "data/memory.db",
+        "long_term_max_results": 6,
+        "retention_days": 365,
+        "fts_min_score": 0
     }
 }

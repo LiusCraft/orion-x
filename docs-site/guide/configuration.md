@@ -25,10 +25,13 @@
 |---------|------|-----------|
 | `LOG_LEVEL` | 日志级别 | `logging.level` |
 | `LOG_FORMAT` | 日志格式 | `logging.format` |
-| `DASHSCOPE_API_KEY` | 阿里云 API Key | `asr.api_key`, `tts.api_key` |
-| `ZHIPU_API_KEY` | 智谱 AI API Key | `llm.api_key` |
+| `DASHSCOPE_API_KEY` | 阿里云 API Key | `provider.asr.aliyun.api_key`, `provider.tts.aliyun.api_key` |
+| `ZHIPU_API_KEY` | 智谱 AI API Key | `provider.llm.openai.api_key` |
 
 ## 配置结构
+
+本节描述本地 `cmd/voicebot` 使用的 `data/voicebot.json`。它不需要配置 `server` / `metrics`；
+这两个顶层字段属于 `cmd/ws-server` 的运行配置，见 `ws-server.example.json`。
 
 ```json
 {
@@ -36,56 +39,76 @@
     "level": "info",
     "format": "console"
   },
-  "asr": {
-    "api_key": "",
-    "model": "fun-asr-realtime",
-    "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
-  },
-  "tts": {
-    "api_key": "",
-    "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
-    "workspace": "",
-    "model": "cosyvoice-v3-flash",
-    "voice": "longanyang",
-    "format": "pcm",
-    "sample_rate": 16000,
-    "volume": 50,
-    "rate": 1.0,
-    "pitch": 1.0,
-    "text_type": "PlainText",
-    "enable_ssml": false,
-    "enable_data_inspection": true,
-    "voice_map": {
-      "happy": "longanyang",
-      "sad": "zhichu",
-      "angry": "zhimeng",
-      "calm": "longxiaochun",
-      "excited": "longanyang",
-      "default": "longanyang"
+  "provider": {
+    "asr": {
+      "type": "aliyun",
+      "aliyun": {
+        "api_key": "",
+        "model": "fun-asr-realtime",
+        "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+      }
+    },
+    "tts": {
+      "type": "aliyun",
+      "aliyun": {
+        "api_key": "",
+        "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+        "workspace": "",
+        "model": "cosyvoice-v3-flash",
+        "voice": "longanyang",
+        "format": "pcm",
+        "sample_rate": 16000,
+        "volume": 50,
+        "rate": 1.0,
+        "pitch": 1.0,
+        "text_type": "PlainText",
+        "enable_ssml": false,
+        "enable_data_inspection": true,
+        "voice_map": {
+          "happy": "longanyang",
+          "sad": "zhichu",
+          "angry": "zhimeng",
+          "calm": "longxiaochun",
+          "excited": "longanyang",
+          "default": "longanyang"
+        }
+      }
+    },
+    "llm": {
+      "type": "openai",
+      "openai": {
+        "api_key": "",
+        "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "model": "glm-4-flash"
+      }
     }
-  },
-  "llm": {
-    "api_key": "",
-    "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
-    "model": "glm-4-flash"
   },
   "audio": {
     "mixer": {
       "tts_volume": 1.0,
       "resource_volume": 1.0,
       "sample_rate": 16000,
-      "channels": 2
+      "channels": 2,
+      "frames_per_buffer": 1024
     },
     "tts_pipeline": {
       "max_tts_buffer": 3,
       "max_concurrent_tts": 2,
       "text_queue_size": 100
     },
+    "tts_scheduler": {
+      "max_in_flight_sentences": 2,
+      "max_cache_sentences": 0
+    },
     "in_pipe": {
       "sample_rate": 16000,
       "channels": 1,
       "enable_vad": true,
-      "vad_threshold": 0.5
+      "vad_threshold": 0.5,
+      "vad_type": "silero",
+      "vad_model_path": "models/silero_vad.onnx",
+      "vad_min_silence_ms": 500,
+      "vad_speech_pad_ms": 300
     }
   },
   "tools": {
@@ -101,7 +124,17 @@
       "playMusic": "正在为您播放{{song}}",
       "setVolume": "已将音量设置为{{level}}",
       "pauseMusic": "音乐已暂停"
-    }
+    },
+    "mcp": []
+  },
+  "memory": {
+    "mode": "session",
+    "session_max_turns": 10,
+    "session_summary_every_n": 20,
+    "long_term_db_path": "data/memory.db",
+    "long_term_max_results": 6,
+    "retention_days": 365,
+    "fts_min_score": 0
   }
 }
 ```
@@ -115,7 +148,7 @@
 | level | string | info | 日志级别：debug, info, warn, error |
 | format | string | console | 日志格式：console, json |
 
-### asr
+### provider.asr.aliyun
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -123,7 +156,7 @@
 | model | string | fun-asr-realtime | ASR 模型 |
 | endpoint | string | - | WebSocket 端点 |
 
-### tts
+### provider.tts.aliyun
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -168,10 +201,12 @@
 
 ## 校验规则
 
-- LLM 的 `api_key` 不能为空（或由 `ZHIPU_API_KEY` 覆盖）
-- ASR/TTS 的 `api_key` 不能为空（或由 `DASHSCOPE_API_KEY` 覆盖）
-- `audio.in_pipe.sample_rate` 与 `tts.sample_rate` 必须是正数
+- `provider.llm.openai.api_key` 不能为空（或由 `ZHIPU_API_KEY` 覆盖）
+- `provider.asr.aliyun.api_key` / `provider.tts.aliyun.api_key` 不能为空（或由 `DASHSCOPE_API_KEY` 覆盖）
+- `audio.in_pipe.sample_rate` 与 `provider.tts.aliyun.sample_rate` 必须是正数
+- `audio.tts_scheduler.max_in_flight_sentences` 必须是正数
 - `tools.types` 仅接受 `query` 或 `action`
+- `cmd/voicebot` 本地启动不会监听 `server.address`，也不会暴露 metrics；服务端监听与 metrics 配置在 `ws-server.example.json`
 
 ## 相关文档
 

@@ -10,15 +10,15 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/schema"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
+	llmfactory "github.com/liuscraft/orion-x/internal/provider/llm"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 
 type voiceAgentImpl struct {
-	chatModel         *openai.ChatModel
+	chatModel         llmfactory.ChatModel
 	emotionExtractor  EmotionExtractor
 	markdownFilter    MarkdownFilter
 	actionResponseGen *ActionResponseGenerator
@@ -81,7 +81,8 @@ func NewVoiceAgentWithToolManagerAndMemory(ctx context.Context, cfg tools.Manage
 		return nil, errors.New("tool manager is required")
 	}
 
-	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+	chatModel, err := llmfactory.NewChatModel(ctx, llmfactory.Config{
+		Type:    normalized.Provider,
 		BaseURL: normalized.BaseURL,
 		Model:   normalized.Model,
 		APIKey:  normalized.APIKey,
@@ -298,6 +299,9 @@ func deltaFromBufferedContent(content string, lastLength int) (string, int) {
 func normalizeConfig(cfg tools.ManagerConfig) (tools.ManagerConfig, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return tools.ManagerConfig{}, errors.New("llm api_key is required")
+	}
+	if strings.TrimSpace(cfg.Provider) == "" {
+		cfg.Provider = llmfactory.TypeOpenAI
 	}
 	if strings.TrimSpace(cfg.BaseURL) == "" {
 		cfg.BaseURL = defaultLLMBaseURL

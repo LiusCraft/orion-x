@@ -41,12 +41,10 @@
 ## 项目结构
 
 ```
-internal/asr/
-├── recognizer.go       # 通用接口定义 (Recognizer / Config / Result)
-└── dashscope.go        # DashScope WebSocket 实现
-
-cmd/asr/
-└── main.go            # 麦克风实时转写 CLI
+internal/provider/asr/
+├── factory.go          # ASR 通用接口与 provider 统一工厂
+└── aliyun/
+    └── dashscope.go    # DashScope WebSocket 实现
 ```
 
 ## 接口设计
@@ -95,38 +93,12 @@ type Result struct {
 
 ## 使用说明
 
-### CLI 运行
-
-```bash
-export DASHSCOPE_API_KEY=sk-xxx
-go run ./cmd/asr
-```
-
-可选参数
-
-```bash
-go run ./cmd/asr \
-    -model fun-asr-realtime \
-    -endpoint wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference \
-    -sample-rate 16000 \
-    -frames 3200 \
-    -semantic-punctuation \
-    -language-hints zh,en
-```
-
-参数说明
-
-- `-model`: ASR 模型名称 (默认: fun-asr-realtime)
-- `-endpoint`: WebSocket 端点 (可选)
-- `-sample-rate`: 采样率 (Hz)
-- `-frames`: 每次读取的帧数 (samples)
-- `-semantic-punctuation`: 开启语义断句 (默认: false，使用 VAD 断句)
-- `-language-hints`: 语言提示，逗号分隔 (例如: zh,en)
-
 ### 代码示例
 
 ```go
-import "github.com/liuscraft/orion-x/internal/asr"
+import (
+    asr "github.com/liuscraft/orion-x/internal/provider/asr"
+)
 
 cfg := asr.Config{
     APIKey:    os.Getenv("DASHSCOPE_API_KEY"),
@@ -135,7 +107,10 @@ cfg := asr.Config{
     SampleRate: 16000,
 }
 
-rec, err := asr.NewDashScopeRecognizer(cfg)
+rec, err := asr.NewRecognizer(asr.ProviderConfig{
+    Type:   asr.TypeAliyun,
+    Config: cfg,
+})
 if err != nil {
     log.Fatal(err)
 }

@@ -376,9 +376,11 @@ cmd/voicebot/
 
 ## 依赖关系
 
-- `internal/ai/llm.go`: 现有LLM工具调用框架
-- `internal/asr/*`: 现有ASR模块
-- `internal/tts/*`: 现有TTS模块
+- `internal/agent/*`: VoiceAgent 与 LLM 工具调用编排
+- `internal/tools/*`: 工具加载、注册与执行
+- `internal/provider/llm/*`: LLM provider 模块
+- `internal/provider/asr/*`: ASR provider 模块
+- `internal/provider/tts/*`: TTS provider 模块
 - `internal/text/segmenter.go`: 现有分句器
 
 ## 实现步骤

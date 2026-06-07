@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/logging"
-	"github.com/liuscraft/orion-x/internal/tts"
+	"github.com/liuscraft/orion-x/internal/provider/tts"
 )
 
 // eofNotifyReader wraps an io.Reader and signals when EOF is reached

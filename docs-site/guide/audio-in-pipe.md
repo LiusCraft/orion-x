@@ -87,7 +87,7 @@ ASR识别
 
 ## 依赖模块
 
-- `internal/asr/recognizer.go` - ASR 服务
+- `internal/provider/asr/factory.go` - ASR 服务接口与 provider 工厂
 - `AudioSource` 接口 - 音频源抽象
 
 ## 部署场景
@@ -218,7 +218,9 @@ audioInPipe, err := audio.NewInPipeWithAudioSource(apiKey, config, customSource)
 ## ASR 集成
 
 ```go
-import "github.com/liuscraft/orion-x/internal/asr"
+import (
+    asr "github.com/liuscraft/orion-x/internal/provider/asr"
+)
 
 cfg := asr.Config{
     APIKey:      os.Getenv("DASHSCOPE_API_KEY"),
@@ -227,7 +229,10 @@ cfg := asr.Config{
     SampleRate:  16000,
 }
 
-recognizer, _ := asr.NewDashScopeRecognizer(cfg)
+recognizer, _ := asr.NewRecognizer(asr.ProviderConfig{
+    Type:   asr.TypeAliyun,
+    Config: cfg,
+})
 ```
 
 ### VAD 方案选择

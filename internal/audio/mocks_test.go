@@ -5,7 +5,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/liuscraft/orion-x/internal/tts"
+	"github.com/liuscraft/orion-x/internal/provider/tts"
 )
 
 // mockTTSProvider 模拟 TTS Provider

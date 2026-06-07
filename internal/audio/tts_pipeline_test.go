@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liuscraft/orion-x/internal/tts"
+	"github.com/liuscraft/orion-x/internal/provider/tts"
 )
 
 // TestTTSPipelineCreate 测试创建 Pipeline

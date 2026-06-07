@@ -5,9 +5,10 @@ import "strings"
 // ManagerConfig 工具管理器配置
 type ManagerConfig struct {
 	// LLM 配置
-	APIKey  string `json:"api_key"`
-	BaseURL string `json:"base_url"`
-	Model   string `json:"model"`
+	Provider string `json:"provider"`
+	APIKey   string `json:"api_key"`
+	BaseURL  string `json:"base_url"`
+	Model    string `json:"model"`
 
 	// 工具类型映射（使用完整工具名）
 	// MCP 工具使用完整前缀名，如 "mcp.demo.get_device_status"

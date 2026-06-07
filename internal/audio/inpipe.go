@@ -3,7 +3,8 @@ package audio
 import (
 	"context"
 
-	"github.com/liuscraft/orion-x/internal/asr"
+	"github.com/liuscraft/orion-x/internal/provider/asr"
+	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
 )
 
 // AudioInPipe 音频输入管道，负责音频输入管理和ASR调用
@@ -31,6 +32,7 @@ type InPipeConfig struct {
 	VADModelPath    string // Silero VAD model path, default "models/silero_vad.onnx"
 	VADMinSilenceMs int    // Silero VAD min silence duration in ms, default 500
 	VADSpeechPadMs  int    // Silero VAD speech pad in ms, default 300
+	ASRProviderType string
 	ASRModel        string
 	ASREndpoint     string
 }
@@ -64,7 +66,10 @@ func NewInPipe(apiKey string, config *InPipeConfig) (AudioInPipe, error) {
 		SampleRate: config.SampleRate,
 	}
 
-	recognizer, err := asr.NewDashScopeRecognizer(asrCfg)
+	recognizer, err := asr.NewRecognizer(asr.ProviderConfig{
+		Type:   config.ASRProviderType,
+		Config: asrCfg,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +91,10 @@ func NewInPipeWithAudioSource(apiKey string, config *InPipeConfig, source AudioS
 		SampleRate: config.SampleRate,
 	}
 
-	recognizer, err := asr.NewDashScopeRecognizer(asrCfg)
+	recognizer, err := asr.NewRecognizer(asr.ProviderConfig{
+		Type:   config.ASRProviderType,
+		Config: asrCfg,
+	})
 	if err != nil {
 		return nil, err
 	}

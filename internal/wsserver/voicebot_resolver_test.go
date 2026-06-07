@@ -10,7 +10,11 @@ import (
 func TestLocalVoicebotResolver_BindingMatch(t *testing.T) {
 	cfg := config.DefaultWSServerConfig()
 	cfg.Voicebot.Profiles["bot-a"] = config.VoicebotSessionConfig{
-		TTS: config.TTSConfig{Voice: "zhichu"},
+		Provider: config.ProviderConfig{
+			TTS: config.TTSProviderConfig{
+				Aliyun: config.TTSConfig{Voice: "zhichu"},
+			},
+		},
 	}
 	cfg.Voicebot.LocalBindings["dev-1"] = "bot-a"
 
@@ -25,8 +29,8 @@ func TestLocalVoicebotResolver_BindingMatch(t *testing.T) {
 	if profileID != "bot-a" {
 		t.Fatalf("expected bot-a, got %q", profileID)
 	}
-	if resolved.TTS.Voice != "zhichu" {
-		t.Fatalf("expected voice override, got %q", resolved.TTS.Voice)
+	if resolved.Provider.TTS.Aliyun.Voice != "zhichu" {
+		t.Fatalf("expected voice override, got %q", resolved.Provider.TTS.Aliyun.Voice)
 	}
 }
 
@@ -35,7 +39,7 @@ func TestChainVoicebotResolver_SkipUnimplementedManager(t *testing.T) {
 	if cfg.Voicebot.Default == nil {
 		t.Fatalf("default voicebot should exist")
 	}
-	cfg.Voicebot.Default.TTS.Voice = "longxiaochun"
+	cfg.Voicebot.Default.Provider.TTS.Aliyun.Voice = "longxiaochun"
 
 	resolver := NewChainVoicebotResolver(
 		NewManagerVoicebotResolver(),
@@ -52,8 +56,8 @@ func TestChainVoicebotResolver_SkipUnimplementedManager(t *testing.T) {
 	if profileID != "default" {
 		t.Fatalf("expected default profile id, got %q", profileID)
 	}
-	if resolved.TTS.Voice != "longxiaochun" {
-		t.Fatalf("expected default voice override, got %q", resolved.TTS.Voice)
+	if resolved.Provider.TTS.Aliyun.Voice != "longxiaochun" {
+		t.Fatalf("expected default voice override, got %q", resolved.Provider.TTS.Aliyun.Voice)
 	}
 }
 

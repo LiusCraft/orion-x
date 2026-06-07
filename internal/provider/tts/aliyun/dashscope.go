@@ -1,4 +1,4 @@
-package tts
+package aliyun
 
 import (
 	"context"
@@ -14,17 +14,24 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/liuscraft/orion-x/internal/logging"
+	tts "github.com/liuscraft/orion-x/internal/provider/tts"
 )
 
 const defaultDashScopeEndpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 
 type DashScopeProvider struct{}
 
+func init() {
+	tts.Register(tts.TypeAliyun, func() tts.Provider {
+		return NewDashScopeProvider()
+	})
+}
+
 func NewDashScopeProvider() *DashScopeProvider {
 	return &DashScopeProvider{}
 }
 
-func (p *DashScopeProvider) Start(ctx context.Context, cfg Config) (Stream, error) {
+func (p *DashScopeProvider) Start(ctx context.Context, cfg tts.Config) (tts.Stream, error) {
 	normalized, err := normalizeConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -69,7 +76,7 @@ func (p *DashScopeProvider) Start(ctx context.Context, cfg Config) (Stream, erro
 }
 
 type dashScopeStream struct {
-	cfg       Config
+	cfg       tts.Config
 	conn      *websocket.Conn
 	audioBuf  *bufferedPipe
 	writeMu   sync.Mutex
@@ -374,9 +381,9 @@ func (s *dashScopeStream) streamErr() error {
 	}
 }
 
-func normalizeConfig(cfg Config) (Config, error) {
+func normalizeConfig(cfg tts.Config) (tts.Config, error) {
 	if cfg.APIKey == "" {
-		return Config{}, errors.New("DASHSCOPE_API_KEY is required")
+		return tts.Config{}, errors.New("DASHSCOPE_API_KEY is required")
 	}
 	if strings.TrimSpace(cfg.Endpoint) == "" {
 		cfg.Endpoint = defaultDashScopeEndpoint
@@ -412,7 +419,7 @@ func normalizeConfig(cfg Config) (Config, error) {
 	return cfg, nil
 }
 
-func connectDashScope(ctx context.Context, cfg Config) (*websocket.Conn, error) {
+func connectDashScope(ctx context.Context, cfg tts.Config) (*websocket.Conn, error) {
 	header := http.Header{}
 	header.Set("Authorization", fmt.Sprintf("bearer %s", cfg.APIKey))
 	if cfg.EnableDataInspection != nil && *cfg.EnableDataInspection {
@@ -468,11 +475,11 @@ func mapDashScopeError(code, message string) error {
 	lower := strings.ToLower(code + " " + message)
 	switch {
 	case strings.Contains(lower, "unauthorized"), strings.Contains(lower, "authentication"):
-		return fmt.Errorf("%w: %s", ErrAuth, message)
+		return fmt.Errorf("%w: %s", tts.ErrAuth, message)
 	case strings.Contains(lower, "invalidparameter"), strings.Contains(lower, "bad request"):
-		return fmt.Errorf("%w: %s", ErrBadRequest, message)
+		return fmt.Errorf("%w: %s", tts.ErrBadRequest, message)
 	case strings.Contains(lower, "timeout"), strings.Contains(lower, "tempor"):
-		return fmt.Errorf("%w: %s", ErrTransient, message)
+		return fmt.Errorf("%w: %s", tts.ErrTransient, message)
 	}
 	if message == "" {
 		message = "dashscope task failed"

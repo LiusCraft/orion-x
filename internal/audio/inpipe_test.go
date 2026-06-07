@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liuscraft/orion-x/internal/asr"
+	"github.com/liuscraft/orion-x/internal/provider/asr"
 )
 
 type mockRecognizer struct {

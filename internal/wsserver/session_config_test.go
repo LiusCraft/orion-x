@@ -17,7 +17,7 @@ func TestNewSession_UsesServerAudioDefaultsAndVoicebotProfile(t *testing.T) {
 		t.Fatalf("expected default voicebot config")
 	}
 	voicebotCopy := *voicebot
-	voicebotCopy.TTS.Voice = "zhichu"
+	voicebotCopy.Provider.TTS.Aliyun.Voice = "zhichu"
 
 	s := NewSession(wsCfg, voicebotCopy, "bot-a", nil, "dev-1", "client-1", "sid-1", nil, nil)
 
@@ -30,7 +30,7 @@ func TestNewSession_UsesServerAudioDefaultsAndVoicebotProfile(t *testing.T) {
 	if s.audioParams.FrameDuration != 40 {
 		t.Fatalf("expected frame_duration=40, got %d", s.audioParams.FrameDuration)
 	}
-	if s.voicebot.TTS.Voice != "zhichu" {
+	if s.voicebot.Provider.TTS.Aliyun.Voice != "zhichu" {
 		t.Fatalf("expected voicebot profile voice to be stored")
 	}
 }

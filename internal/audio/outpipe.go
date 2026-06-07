@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/liuscraft/orion-x/internal/tts"
+	"github.com/liuscraft/orion-x/internal/provider/tts"
 )
 
 // AudioOutPipe 音频输出管道，负责音频混合播放、队列管理、中断处理
@@ -27,10 +27,12 @@ type AudioOutPipe interface {
 
 // OutPipeConfig OutPipe配置
 type OutPipeConfig struct {
-	Mixer       *MixerConfig
-	TTS         tts.Config
-	TTSPipeline *TTSPipelineConfig
-	VoiceMap    map[string]string
+	Mixer           *MixerConfig
+	TTS             tts.Config
+	TTSProviderType string
+	TTSProvider     tts.Provider
+	TTSPipeline     *TTSPipelineConfig
+	VoiceMap        map[string]string
 }
 
 // DefaultOutPipeConfig 默认配置

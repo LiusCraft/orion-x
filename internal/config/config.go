@@ -13,15 +13,13 @@ import (
 const DefaultPath = "data/voicebot.json"
 
 type AppConfig struct {
-	Logging LoggingConfig `json:"logging"`
-	ASR     ASRConfig     `json:"asr"`
-	TTS     TTSConfig     `json:"tts"`
-	LLM     LLMConfig     `json:"llm"`
-	Audio   AudioConfig   `json:"audio"`
-	Tools   ToolsConfig   `json:"tools"`
-	Server  ServerConfig  `json:"server"`
-	Metrics MetricsConfig `json:"metrics"`
-	Memory  MemoryConfig  `json:"memory"`
+	Logging  LoggingConfig  `json:"logging"`
+	Provider ProviderConfig `json:"provider"`
+	Audio    AudioConfig    `json:"audio"`
+	Tools    ToolsConfig    `json:"tools"`
+	Server   ServerConfig   `json:"server"`
+	Metrics  MetricsConfig  `json:"metrics"`
+	Memory   MemoryConfig   `json:"memory"`
 }
 
 type LoggingConfig struct {
@@ -56,6 +54,27 @@ type LLMConfig struct {
 	APIKey  string `json:"api_key"`
 	BaseURL string `json:"base_url"`
 	Model   string `json:"model"`
+}
+
+type ProviderConfig struct {
+	ASR ASRProviderConfig `json:"asr"`
+	TTS TTSProviderConfig `json:"tts"`
+	LLM LLMProviderConfig `json:"llm"`
+}
+
+type ASRProviderConfig struct {
+	Type   string    `json:"type"`
+	Aliyun ASRConfig `json:"aliyun"`
+}
+
+type TTSProviderConfig struct {
+	Type   string    `json:"type"`
+	Aliyun TTSConfig `json:"aliyun"`
+}
+
+type LLMProviderConfig struct {
+	Type   string    `json:"type"`
+	OpenAI LLMConfig `json:"openai"`
 }
 
 type AudioConfig struct {
@@ -165,34 +184,48 @@ type AudioParamsConfig struct {
 
 func DefaultConfig() *AppConfig {
 	enableDataInspection := true
+	defaultASR := ASRConfig{
+		Model: "fun-asr-realtime",
+	}
+	defaultTTS := TTSConfig{
+		Model:                "cosyvoice-v3-flash",
+		Voice:                "longanyang",
+		Format:               "pcm",
+		SampleRate:           16000,
+		Volume:               50,
+		Rate:                 1.0,
+		Pitch:                1.0,
+		TextType:             "PlainText",
+		EnableDataInspection: &enableDataInspection,
+		VoiceMap: map[string]string{
+			"happy":   "longanyang",
+			"sad":     "zhichu",
+			"angry":   "zhimeng",
+			"calm":    "longxiaochun",
+			"excited": "longanyang",
+			"default": "longanyang",
+		},
+	}
+	defaultLLM := LLMConfig{
+		BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
+		Model:   "glm-4-flash",
+	}
 
 	return &AppConfig{
 		Logging: LoggingConfig{},
-		ASR: ASRConfig{
-			Model: "fun-asr-realtime",
-		},
-		TTS: TTSConfig{
-			Model:                "cosyvoice-v3-flash",
-			Voice:                "longanyang",
-			Format:               "pcm",
-			SampleRate:           16000,
-			Volume:               50,
-			Rate:                 1.0,
-			Pitch:                1.0,
-			TextType:             "PlainText",
-			EnableDataInspection: &enableDataInspection,
-			VoiceMap: map[string]string{
-				"happy":   "longanyang",
-				"sad":     "zhichu",
-				"angry":   "zhimeng",
-				"calm":    "longxiaochun",
-				"excited": "longanyang",
-				"default": "longanyang",
+		Provider: ProviderConfig{
+			ASR: ASRProviderConfig{
+				Type:   "aliyun",
+				Aliyun: defaultASR,
 			},
-		},
-		LLM: LLMConfig{
-			BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
-			Model:   "glm-4-flash",
+			TTS: TTSProviderConfig{
+				Type:   "aliyun",
+				Aliyun: defaultTTS,
+			},
+			LLM: LLMProviderConfig{
+				Type:   "openai",
+				OpenAI: defaultLLM,
+			},
 		},
 		Audio: AudioConfig{
 			Mixer: MixerConfig{
@@ -299,8 +332,21 @@ func Load(path string) (*AppConfig, error) {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
+	cfg.NormalizeProviders()
 	cfg.ApplyEnv()
 	return cfg, cfg.Validate()
+}
+
+func (c *AppConfig) NormalizeProviders() {
+	if strings.TrimSpace(c.Provider.ASR.Type) == "" {
+		c.Provider.ASR.Type = "aliyun"
+	}
+	if strings.TrimSpace(c.Provider.TTS.Type) == "" {
+		c.Provider.TTS.Type = "aliyun"
+	}
+	if strings.TrimSpace(c.Provider.LLM.Type) == "" {
+		c.Provider.LLM.Type = "openai"
+	}
 }
 
 func (c *AppConfig) ApplyEnv() {
@@ -312,15 +358,15 @@ func (c *AppConfig) ApplyEnv() {
 	}
 
 	if dash := strings.TrimSpace(os.Getenv("DASHSCOPE_API_KEY")); dash != "" {
-		c.ASR.APIKey = dash
-		c.TTS.APIKey = dash
-		if strings.TrimSpace(c.LLM.APIKey) == "" {
-			c.LLM.APIKey = dash
+		c.Provider.ASR.Aliyun.APIKey = dash
+		c.Provider.TTS.Aliyun.APIKey = dash
+		if strings.TrimSpace(c.Provider.LLM.OpenAI.APIKey) == "" {
+			c.Provider.LLM.OpenAI.APIKey = dash
 		}
 	}
 
 	if zhipu := strings.TrimSpace(os.Getenv("ZHIPU_API_KEY")); zhipu != "" {
-		c.LLM.APIKey = zhipu
+		c.Provider.LLM.OpenAI.APIKey = zhipu
 	}
 }
 
@@ -332,8 +378,29 @@ func (c *AppConfig) Validate() error {
 	if c.Audio.InPipe.EnableVAD && vadType != "" && vadType != "silero" {
 		return fmt.Errorf("audio.in_pipe.vad_type must be silero")
 	}
-	if c.TTS.SampleRate <= 0 {
-		return errors.New("tts.sample_rate must be positive")
+	asrCfg := c.Provider.ASR.Aliyun
+	ttsCfg := c.Provider.TTS.Aliyun
+	llmCfg := c.Provider.LLM.OpenAI
+	if strings.ToLower(strings.TrimSpace(c.Provider.ASR.Type)) != "aliyun" {
+		return fmt.Errorf("provider.asr.type must be aliyun")
+	}
+	if strings.ToLower(strings.TrimSpace(c.Provider.TTS.Type)) != "aliyun" {
+		return fmt.Errorf("provider.tts.type must be aliyun")
+	}
+	if strings.ToLower(strings.TrimSpace(c.Provider.LLM.Type)) != "openai" {
+		return fmt.Errorf("provider.llm.type must be openai")
+	}
+	if ttsCfg.SampleRate <= 0 {
+		return errors.New("provider.tts.aliyun.sample_rate must be positive")
+	}
+	if strings.TrimSpace(asrCfg.Model) == "" {
+		return errors.New("provider.asr.aliyun.model must not be empty")
+	}
+	if strings.TrimSpace(ttsCfg.Model) == "" {
+		return errors.New("provider.tts.aliyun.model must not be empty")
+	}
+	if strings.TrimSpace(llmCfg.Model) == "" {
+		return errors.New("provider.llm.openai.model must not be empty")
 	}
 	if c.Audio.Mixer.FramesPerBuffer < 0 {
 		return errors.New("audio.mixer.frames_per_buffer must be non-negative")
@@ -474,14 +541,87 @@ func (c *AppConfig) Validate() error {
 }
 
 func (c *AppConfig) ValidateKeys(requireASR, requireTTS, requireLLM bool) error {
-	if requireASR && strings.TrimSpace(c.ASR.APIKey) == "" {
-		return errors.New("asr api_key is required")
+	if requireASR && strings.TrimSpace(c.Provider.ASR.Aliyun.APIKey) == "" {
+		return errors.New("provider.asr.aliyun.api_key is required")
 	}
-	if requireTTS && strings.TrimSpace(c.TTS.APIKey) == "" {
-		return errors.New("tts api_key is required")
+	if requireTTS && strings.TrimSpace(c.Provider.TTS.Aliyun.APIKey) == "" {
+		return errors.New("provider.tts.aliyun.api_key is required")
 	}
-	if requireLLM && strings.TrimSpace(c.LLM.APIKey) == "" {
-		return errors.New("llm api_key is required")
+	if requireLLM && strings.TrimSpace(c.Provider.LLM.OpenAI.APIKey) == "" {
+		return errors.New("provider.llm.openai.api_key is required")
 	}
 	return nil
+}
+
+func mergeASRConfig(base, override ASRConfig) ASRConfig {
+	out := base
+	if strings.TrimSpace(override.APIKey) != "" {
+		out.APIKey = override.APIKey
+	}
+	if strings.TrimSpace(override.Model) != "" {
+		out.Model = override.Model
+	}
+	if strings.TrimSpace(override.Endpoint) != "" {
+		out.Endpoint = override.Endpoint
+	}
+	return out
+}
+
+func mergeTTSConfig(base, override TTSConfig) TTSConfig {
+	out := base
+	if strings.TrimSpace(override.APIKey) != "" {
+		out.APIKey = override.APIKey
+	}
+	if strings.TrimSpace(override.Endpoint) != "" {
+		out.Endpoint = override.Endpoint
+	}
+	if strings.TrimSpace(override.Workspace) != "" {
+		out.Workspace = override.Workspace
+	}
+	if strings.TrimSpace(override.Model) != "" {
+		out.Model = override.Model
+	}
+	if strings.TrimSpace(override.Voice) != "" {
+		out.Voice = override.Voice
+	}
+	if strings.TrimSpace(override.Format) != "" {
+		out.Format = override.Format
+	}
+	if override.SampleRate > 0 {
+		out.SampleRate = override.SampleRate
+	}
+	if override.Volume != 0 {
+		out.Volume = override.Volume
+	}
+	if override.Rate != 0 {
+		out.Rate = override.Rate
+	}
+	if override.Pitch != 0 {
+		out.Pitch = override.Pitch
+	}
+	out.EnableSSML = override.EnableSSML
+	if strings.TrimSpace(override.TextType) != "" {
+		out.TextType = override.TextType
+	}
+	if override.EnableDataInspection != nil {
+		out.EnableDataInspection = override.EnableDataInspection
+	}
+	if len(override.VoiceMap) > 0 {
+		out.VoiceMap = cloneStringMap(override.VoiceMap)
+	}
+	return out
+}
+
+func mergeLLMConfig(base, override LLMConfig) LLMConfig {
+	out := base
+	if strings.TrimSpace(override.APIKey) != "" {
+		out.APIKey = override.APIKey
+	}
+	if strings.TrimSpace(override.BaseURL) != "" {
+		out.BaseURL = override.BaseURL
+	}
+	if strings.TrimSpace(override.Model) != "" {
+		out.Model = override.Model
+	}
+	return out
 }

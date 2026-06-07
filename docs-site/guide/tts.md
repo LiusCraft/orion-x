@@ -53,8 +53,10 @@ var (
 ## 使用示例（调用方使用 segmenter 分句）
 
 ```go
-provider := tts.NewDashScopeProvider()
-stream, _ := provider.Start(ctx, cfg)
+import tts "github.com/liuscraft/orion-x/internal/provider/tts"
+
+ttsProvider, _ := tts.NewProvider(tts.ProviderConfig{Type: tts.TypeAliyun})
+stream, _ := ttsProvider.Start(ctx, cfg)
 
 seg := text.NewSegmenter(120)
 
@@ -69,13 +71,6 @@ if last := seg.Flush(); last != "" {
 
 go playAudio(stream.AudioReader())
 stream.Close(ctx)
-```
-
-## CLI 示例
-
-```bash
-DASHSCOPE_API_KEY=... go run ./cmd/tts -text "你好。" -player ffplay
-DASHSCOPE_API_KEY=... go run ./cmd/tts -text "..." -output out.mp3
 ```
 
 ## 注意事项

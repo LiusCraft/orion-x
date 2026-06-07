@@ -22,8 +22,9 @@ import (
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/metrics"
+	_ "github.com/liuscraft/orion-x/internal/provider/llm/register"
+	"github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/tools"
-	"github.com/liuscraft/orion-x/internal/tts"
 	"github.com/liuscraft/orion-x/internal/voicebot"
 )
 
@@ -221,6 +222,9 @@ func (s *Session) waitClientHello() error {
 }
 
 func (s *Session) initPipeline() error {
+	llmCfg := s.voicebot.Provider.LLM.OpenAI
+	ttsCfg := s.voicebot.Provider.TTS.Aliyun
+
 	memCfg := memory.Config{
 		Mode:                 memory.Mode(strings.TrimSpace(s.voicebot.Memory.Mode)),
 		SessionMaxTurns:      s.voicebot.Memory.SessionMaxTurns,
@@ -233,9 +237,10 @@ func (s *Session) initPipeline() error {
 	memorySvc, err := memory.NewService(memCfg, memory.Options{
 		SystemPrompt: agent.DefaultSystemPrompt(),
 		LLM: memory.LLMConfig{
-			APIKey:  s.voicebot.LLM.APIKey,
-			BaseURL: s.voicebot.LLM.BaseURL,
-			Model:   s.voicebot.LLM.Model,
+			Provider: s.voicebot.Provider.LLM.Type,
+			APIKey:   llmCfg.APIKey,
+			BaseURL:  llmCfg.BaseURL,
+			Model:    llmCfg.Model,
 		},
 	})
 	if err != nil {
@@ -244,9 +249,10 @@ func (s *Session) initPipeline() error {
 	s.memorySvc = memorySvc
 
 	toolCfg := tools.ManagerConfig{
-		APIKey:          s.voicebot.LLM.APIKey,
-		BaseURL:         s.voicebot.LLM.BaseURL,
-		Model:           s.voicebot.LLM.Model,
+		Provider:        s.voicebot.Provider.LLM.Type,
+		APIKey:          llmCfg.APIKey,
+		BaseURL:         llmCfg.BaseURL,
+		Model:           llmCfg.Model,
 		ToolTypes:       s.voicebot.Tools.Types,
 		ActionResponses: s.voicebot.Tools.ActionResponses,
 		MCPServers:      toToolsMCPServers(s.voicebot.Tools.MCP),
@@ -297,23 +303,24 @@ func (s *Session) initPipeline() error {
 
 	outPipeCfg := audio.DefaultOutPipeConfig()
 	outPipeCfg.Mixer = mixerConfig
+	outPipeCfg.TTSProviderType = s.voicebot.Provider.TTS.Type
 	outPipeCfg.TTS = tts.Config{
-		APIKey:               s.voicebot.TTS.APIKey,
-		Endpoint:             s.voicebot.TTS.Endpoint,
-		Workspace:            s.voicebot.TTS.Workspace,
-		Model:                s.voicebot.TTS.Model,
-		Voice:                s.voicebot.TTS.Voice,
-		Format:               s.voicebot.TTS.Format,
-		SampleRate:           s.voicebot.TTS.SampleRate,
-		Volume:               s.voicebot.TTS.Volume,
-		Rate:                 s.voicebot.TTS.Rate,
-		Pitch:                s.voicebot.TTS.Pitch,
-		EnableSSML:           s.voicebot.TTS.EnableSSML,
-		TextType:             s.voicebot.TTS.TextType,
-		EnableDataInspection: s.voicebot.TTS.EnableDataInspection,
+		APIKey:               ttsCfg.APIKey,
+		Endpoint:             ttsCfg.Endpoint,
+		Workspace:            ttsCfg.Workspace,
+		Model:                ttsCfg.Model,
+		Voice:                ttsCfg.Voice,
+		Format:               ttsCfg.Format,
+		SampleRate:           ttsCfg.SampleRate,
+		Volume:               ttsCfg.Volume,
+		Rate:                 ttsCfg.Rate,
+		Pitch:                ttsCfg.Pitch,
+		EnableSSML:           ttsCfg.EnableSSML,
+		TextType:             ttsCfg.TextType,
+		EnableDataInspection: ttsCfg.EnableDataInspection,
 	}
-	if len(s.voicebot.TTS.VoiceMap) > 0 {
-		outPipeCfg.VoiceMap = s.voicebot.TTS.VoiceMap
+	if len(ttsCfg.VoiceMap) > 0 {
+		outPipeCfg.VoiceMap = ttsCfg.VoiceMap
 	}
 
 	audioOutPipe := audio.NewOutPipeWithConfig(outPipeCfg)
@@ -595,14 +602,16 @@ func (s *Session) createAudioInPipe() error {
 	if err != nil {
 		return err
 	}
+	asrCfg := s.voicebot.Provider.ASR.Aliyun
 
-	audioInPipe, err := audio.NewInPipeWithAudioSource(s.voicebot.ASR.APIKey, &audio.InPipeConfig{
-		SampleRate:   s.audioParams.SampleRate,
-		Channels:     s.audioParams.Channels,
-		EnableVAD:    s.voicebot.Audio.InPipe.EnableVAD,
-		VADThreshold: s.voicebot.Audio.InPipe.VADThreshold,
-		ASRModel:     s.voicebot.ASR.Model,
-		ASREndpoint:  s.voicebot.ASR.Endpoint,
+	audioInPipe, err := audio.NewInPipeWithAudioSource(asrCfg.APIKey, &audio.InPipeConfig{
+		SampleRate:      s.audioParams.SampleRate,
+		Channels:        s.audioParams.Channels,
+		EnableVAD:       s.voicebot.Audio.InPipe.EnableVAD,
+		VADThreshold:    s.voicebot.Audio.InPipe.VADThreshold,
+		ASRProviderType: s.voicebot.Provider.ASR.Type,
+		ASRModel:        asrCfg.Model,
+		ASREndpoint:     asrCfg.Endpoint,
 	}, wsSource)
 	if err != nil {
 		return err

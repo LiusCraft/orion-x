@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,13 +37,13 @@ func TestLoad_MergesDefaultsAndEnv(t *testing.T) {
 	if cfg.Tools.Types["playMusic"] != "action" {
 		t.Fatalf("expected default tool types to be preserved")
 	}
-	if cfg.ASR.APIKey != "dash-key" {
+	if cfg.Provider.ASR.Aliyun.APIKey != "dash-key" {
 		t.Fatalf("expected ASR api key from env")
 	}
-	if cfg.TTS.APIKey != "dash-key" {
+	if cfg.Provider.TTS.Aliyun.APIKey != "dash-key" {
 		t.Fatalf("expected TTS api key from env")
 	}
-	if cfg.LLM.APIKey != "zhipu-key" {
+	if cfg.Provider.LLM.OpenAI.APIKey != "zhipu-key" {
 		t.Fatalf("expected LLM api key from env")
 	}
 }
@@ -53,11 +54,53 @@ func TestValidateKeys(t *testing.T) {
 		t.Fatalf("expected error when keys are missing")
 	}
 
-	cfg.ASR.APIKey = "asr"
-	cfg.TTS.APIKey = "tts"
-	cfg.LLM.APIKey = "llm"
+	cfg.Provider.ASR.Aliyun.APIKey = "asr"
+	cfg.Provider.TTS.Aliyun.APIKey = "tts"
+	cfg.Provider.LLM.OpenAI.APIKey = "llm"
 	if err := cfg.ValidateKeys(true, true, true); err != nil {
 		t.Fatalf("unexpected key validation error: %v", err)
+	}
+}
+
+func TestVoicebotExampleConfigLoadsForLocalVoicebot(t *testing.T) {
+	path := filepath.Join("..", "..", "voicebot.example.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read voicebot example: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("parse voicebot example: %v", err)
+	}
+	if _, ok := raw["server"]; ok {
+		t.Fatalf("voicebot.example.json should not contain top-level server config")
+	}
+	if _, ok := raw["metrics"]; ok {
+		t.Fatalf("voicebot.example.json should not contain top-level metrics config")
+	}
+	if _, ok := raw["asr"]; ok {
+		t.Fatalf("voicebot.example.json should not contain top-level asr config")
+	}
+	if _, ok := raw["tts"]; ok {
+		t.Fatalf("voicebot.example.json should not contain top-level tts config")
+	}
+	if _, ok := raw["llm"]; ok {
+		t.Fatalf("voicebot.example.json should not contain top-level llm config")
+	}
+	if _, ok := raw["provider"]; !ok {
+		t.Fatalf("voicebot.example.json should contain top-level provider config")
+	}
+
+	t.Setenv("DASHSCOPE_API_KEY", "dash-key")
+	t.Setenv("ZHIPU_API_KEY", "zhipu-key")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(voicebot.example.json) error = %v", err)
+	}
+	if err := cfg.ValidateKeys(true, true, true); err != nil {
+		t.Fatalf("ValidateKeys(voicebot.example.json) error = %v", err)
 	}
 }
 

@@ -310,11 +310,7 @@ func TestMixer_WithMultipleSampleRates(t *testing.T)
 ### 集成测试
 
 ```bash
-# 测试不同采样率的 TTS
-go run ./cmd/tts -sample-rate 16000 -text "测试16k"
-go run ./cmd/tts -sample-rate 24000 -text "测试24k"
-
-# 播放并验证音质
+go test ./internal/audio
 ```
 
 ## 未来扩展

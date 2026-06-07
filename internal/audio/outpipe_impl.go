@@ -7,7 +7,8 @@ import (
 	"sync"
 
 	"github.com/liuscraft/orion-x/internal/logging"
-	"github.com/liuscraft/orion-x/internal/tts"
+	"github.com/liuscraft/orion-x/internal/provider/tts"
+	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
 )
 
 // outPipeImpl AudioOutPipe 实现
@@ -51,14 +52,22 @@ func NewOutPipeWithConfig(cfg *OutPipeConfig) AudioOutPipe {
 	}
 
 	// 创建 TTS Pipeline
-	provider := tts.NewDashScopeProvider()
+	ttsProvider := cfg.TTSProvider
+	if ttsProvider == nil {
+		created, err := tts.NewProvider(tts.ProviderConfig{Type: cfg.TTSProviderType})
+		if err != nil {
+			logging.Errorf("AudioOutPipe: failed to create TTS provider: %v", err)
+			created, _ = tts.NewProvider(tts.ProviderConfig{})
+		}
+		ttsProvider = created
+	}
 	pipelineConfig := cfg.TTSPipeline
 	if pipelineConfig == nil {
 		pipelineConfig = DefaultTTSPipelineConfig()
 	}
 
 	pipeline := NewTTSPipeline(
-		provider,
+		ttsProvider,
 		pipelineConfig,
 		cfg.TTS,
 		voiceMap,

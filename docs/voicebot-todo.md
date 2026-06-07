@@ -26,7 +26,7 @@
 
 ### 2. VoiceAgent 实现 (优先级: 高)
 - [x] 实现 `VoiceAgent.Process()` 方法
-- [x] 集成 `internal/ai/llm.go` 的工具调用逻辑
+- [x] 集成 `internal/agent`、`internal/tools` 与 `internal/provider/llm` 的工具调用逻辑
 - [x] 启用流式LLM输出（当前被注释）
 - [x] 实现工具识别和调用逻辑
 - [x] 区分查询类工具和动作类工具的流程
@@ -47,7 +47,7 @@
 - [x] 实现 `PlayResource()` 方法
 - [x] 实现 `Interrupt()` 方法（立即停止播放）
 - [x] 集成 `AudioMixer`
-- [x] 集成 `internal/tts/dashscope.go` 的TTS服务
+- [x] 集成 `internal/provider/tts/aliyun/dashscope.go` 的 TTS 服务
 - [x] 实现音色切换逻辑（基于情绪）
 - [x] 实现异步 TTS Pipeline（预缓冲、非阻塞播放）
 - [x] 支持 Agent context 取消（快速打断 LLM 生成）
@@ -256,8 +256,10 @@ LLM Prompt要求格式: "回答内容 [EMO:emotion]"
 
 ## 依赖模块
 
-- `internal/ai/llm.go` - LLM工具调用框架
-- `internal/asr/*` - ASR模块
-- `internal/tts/*` - TTS模块
+- `internal/agent/*` - VoiceAgent 与 LLM 工具调用编排
+- `internal/tools/*` - 工具加载、注册与执行
+- `internal/provider/llm/*` - LLM provider 模块
+- `internal/provider/asr/*` - ASR provider 模块
+- `internal/provider/tts/*` - TTS provider 模块
 - `internal/text/segmenter.go` - 分句器
 - `github.com/gordonklaus/portaudio` - 音频播放

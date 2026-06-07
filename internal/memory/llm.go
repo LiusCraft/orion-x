@@ -7,19 +7,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/schema"
+	llmfactory "github.com/liuscraft/orion-x/internal/provider/llm"
 )
 
 // LLMConfig 提供 LLM 连接信息。
 type LLMConfig struct {
-	APIKey  string
-	BaseURL string
-	Model   string
+	Provider string
+	APIKey   string
+	BaseURL  string
+	Model    string
 }
 
 type llmSummarizer struct {
-	model *openai.ChatModel
+	model llmfactory.ChatModel
 }
 
 func (s *llmSummarizer) Summarize(ctx context.Context, turns []Turn) (string, error) {
@@ -45,7 +46,7 @@ func (s *llmSummarizer) Summarize(ctx context.Context, turns []Turn) (string, er
 }
 
 type llmExtractor struct {
-	model             *openai.ChatModel
+	model             llmfactory.ChatModel
 	now               func() time.Time
 	retentionDays     int
 	defaultType       string
@@ -159,14 +160,15 @@ func looksLikeQuestion(text string) bool {
 	return strings.ContainsAny(text, "?？")
 }
 
-func newLLMModel(ctx context.Context, cfg LLMConfig) (*openai.ChatModel, error) {
+func newLLMModel(ctx context.Context, cfg LLMConfig) (llmfactory.ChatModel, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, nil
 	}
-	model, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+	model, err := llmfactory.NewChatModel(ctx, llmfactory.Config{
+		Type:    cfg.Provider,
+		APIKey:  cfg.APIKey,
 		BaseURL: cfg.BaseURL,
 		Model:   cfg.Model,
-		APIKey:  cfg.APIKey,
 	})
 	if err != nil {
 		return nil, err

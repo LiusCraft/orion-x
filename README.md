@@ -99,7 +99,7 @@ go run cmd/ws-server/main.go -config data/ws-server.json
 
 `ws-server` 配置与本地 `voicebot` 配置分离：
 
-- `data/voicebot.json`：`cmd/voicebot` / `cmd/agent`
+- `data/voicebot.json`：`cmd/voicebot`
 - `data/ws-server.json`：`cmd/ws-server`
 
 `ws-server` 会按 `device-id` 解析会话级 `voicebot` 配置：
@@ -193,15 +193,12 @@ go test -cover ./...
 orion-x/
 ├── cmd/                    # 命令行入口
 │   ├── voicebot/          # 主程序
-│   ├── asr/               # ASR 独立测试
-│   ├── tts/               # TTS 独立测试
-│   └── mixer/             # 音频混音测试
+│   └── ws-server/         # WebSocket 服务
 ├── internal/              # 内部包
 │   ├── voicebot/          # Orchestrator 核心
 │   ├── agent/             # VoiceAgent 实现
 │   ├── audio/             # 音频处理管道
-│   ├── asr/               # ASR 实现
-│   ├── tts/               # TTS 实现
+│   ├── provider/          # ASR/TTS/LLM provider 实现
 │   ├── tools/             # 工具执行
 │   ├── text/              # 文本处理
 │   └── logging/           # 日志工具

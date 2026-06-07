@@ -36,38 +36,49 @@
     },
     "voicebot": {
         "default": {
-            "asr": {
-                "api_key": "",
-                "model": "fun-asr-realtime",
-                "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
-            },
-            "tts": {
-                "api_key": "",
-                "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
-                "workspace": "",
-                "model": "cosyvoice-v3-flash",
-                "voice": "longanyang",
-                "format": "pcm",
-                "sample_rate": 16000,
-                "volume": 50,
-                "rate": 1.0,
-                "pitch": 1.0,
-                "text_type": "PlainText",
-                "enable_ssml": false,
-                "enable_data_inspection": true,
-                "voice_map": {
-                    "happy": "longanyang",
-                    "sad": "zhichu",
-                    "angry": "zhimeng",
-                    "calm": "longxiaochun",
-                    "excited": "longanyang",
-                    "default": "longanyang"
+            "provider": {
+                "asr": {
+                    "type": "aliyun",
+                    "aliyun": {
+                        "api_key": "",
+                        "model": "fun-asr-realtime",
+                        "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+                    }
+                },
+                "tts": {
+                    "type": "aliyun",
+                    "aliyun": {
+                        "api_key": "",
+                        "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+                        "workspace": "",
+                        "model": "cosyvoice-v3-flash",
+                        "voice": "longanyang",
+                        "format": "pcm",
+                        "sample_rate": 16000,
+                        "volume": 50,
+                        "rate": 1.0,
+                        "pitch": 1.0,
+                        "text_type": "PlainText",
+                        "enable_ssml": false,
+                        "enable_data_inspection": true,
+                        "voice_map": {
+                            "happy": "longanyang",
+                            "sad": "zhichu",
+                            "angry": "zhimeng",
+                            "calm": "longxiaochun",
+                            "excited": "longanyang",
+                            "default": "longanyang"
+                        }
+                    }
+                },
+                "llm": {
+                    "type": "openai",
+                    "openai": {
+                        "api_key": "",
+                        "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+                        "model": "glm-4-flash"
+                    }
                 }
-            },
-            "llm": {
-                "api_key": "",
-                "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
-                "model": "glm-4-flash"
             },
             "audio": {
                 "mixer": {
@@ -120,8 +131,12 @@
         },
         "profiles": {
             "child-mode": {
-                "tts": {
-                    "voice": "longxiaochun"
+                "provider": {
+                    "tts": {
+                        "aliyun": {
+                            "voice": "longxiaochun"
+                        }
+                    }
                 }
             }
         },

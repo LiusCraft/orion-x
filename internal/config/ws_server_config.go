@@ -24,12 +24,10 @@ type WSServerVoicebotConfig struct {
 }
 
 type VoicebotSessionConfig struct {
-	ASR    ASRConfig    `json:"asr"`
-	TTS    TTSConfig    `json:"tts"`
-	LLM    LLMConfig    `json:"llm"`
-	Audio  AudioConfig  `json:"audio"`
-	Tools  ToolsConfig  `json:"tools"`
-	Memory MemoryConfig `json:"memory"`
+	Provider ProviderConfig `json:"provider"`
+	Audio    AudioConfig    `json:"audio"`
+	Tools    ToolsConfig    `json:"tools"`
+	Memory   MemoryConfig   `json:"memory"`
 }
 
 func DefaultWSServerConfig() *WSServerAppConfig {
@@ -67,8 +65,31 @@ func LoadWSServer(path string) (*WSServerAppConfig, error) {
 		return nil, fmt.Errorf("parse ws server config %s: %w", path, err)
 	}
 
+	cfg.NormalizeVoicebotProviders()
 	cfg.ApplyEnv()
 	return cfg, cfg.Validate()
+}
+
+func (c *WSServerAppConfig) NormalizeVoicebotProviders() {
+	if c.Voicebot.Default != nil {
+		c.Voicebot.Default.NormalizeProviders()
+	}
+	for id, profile := range c.Voicebot.Profiles {
+		profile.NormalizeProviders()
+		c.Voicebot.Profiles[id] = profile
+	}
+}
+
+func (c *VoicebotSessionConfig) NormalizeProviders() {
+	if strings.TrimSpace(c.Provider.ASR.Type) == "" {
+		c.Provider.ASR.Type = "aliyun"
+	}
+	if strings.TrimSpace(c.Provider.TTS.Type) == "" {
+		c.Provider.TTS.Type = "aliyun"
+	}
+	if strings.TrimSpace(c.Provider.LLM.Type) == "" {
+		c.Provider.LLM.Type = "openai"
+	}
 }
 
 func (c *WSServerAppConfig) ApplyEnv() {
@@ -156,6 +177,7 @@ func (c *WSServerAppConfig) ResolveVoicebotForDeviceProfile(profileID string) (V
 	if !ok {
 		return VoicebotSessionConfig{}, fmt.Errorf("voicebot profile not found: %s", profileID)
 	}
+	profile.NormalizeProviders()
 	resolved := c.resolvedDefaultSession()
 	resolved = mergeVoicebotSessionConfig(resolved, profile)
 	return resolved, nil
@@ -178,12 +200,11 @@ func (c *WSServerAppConfig) validateServerAndMetrics() error {
 
 func validateVoicebotSessionConfig(name string, cfg VoicebotSessionConfig) error {
 	base := DefaultConfig()
-	base.ASR = cfg.ASR
-	base.TTS = cfg.TTS
-	base.LLM = cfg.LLM
+	base.Provider = cfg.Provider
 	base.Audio = cfg.Audio
 	base.Tools = cfg.Tools
 	base.Memory = cfg.Memory
+	base.NormalizeProviders()
 	if err := base.Validate(); err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
@@ -195,78 +216,17 @@ func validateVoicebotSessionConfig(name string, cfg VoicebotSessionConfig) error
 
 func voicebotSessionFromApp(app *AppConfig) VoicebotSessionConfig {
 	return VoicebotSessionConfig{
-		ASR:    app.ASR,
-		TTS:    app.TTS,
-		LLM:    app.LLM,
-		Audio:  app.Audio,
-		Tools:  app.Tools,
-		Memory: app.Memory,
+		Provider: app.Provider,
+		Audio:    app.Audio,
+		Tools:    app.Tools,
+		Memory:   app.Memory,
 	}
 }
 
 func mergeVoicebotSessionConfig(base VoicebotSessionConfig, override VoicebotSessionConfig) VoicebotSessionConfig {
 	out := base
 
-	if strings.TrimSpace(override.ASR.APIKey) != "" {
-		out.ASR.APIKey = override.ASR.APIKey
-	}
-	if strings.TrimSpace(override.ASR.Model) != "" {
-		out.ASR.Model = override.ASR.Model
-	}
-	if strings.TrimSpace(override.ASR.Endpoint) != "" {
-		out.ASR.Endpoint = override.ASR.Endpoint
-	}
-
-	if strings.TrimSpace(override.TTS.APIKey) != "" {
-		out.TTS.APIKey = override.TTS.APIKey
-	}
-	if strings.TrimSpace(override.TTS.Endpoint) != "" {
-		out.TTS.Endpoint = override.TTS.Endpoint
-	}
-	if strings.TrimSpace(override.TTS.Workspace) != "" {
-		out.TTS.Workspace = override.TTS.Workspace
-	}
-	if strings.TrimSpace(override.TTS.Model) != "" {
-		out.TTS.Model = override.TTS.Model
-	}
-	if strings.TrimSpace(override.TTS.Voice) != "" {
-		out.TTS.Voice = override.TTS.Voice
-	}
-	if strings.TrimSpace(override.TTS.Format) != "" {
-		out.TTS.Format = override.TTS.Format
-	}
-	if override.TTS.SampleRate > 0 {
-		out.TTS.SampleRate = override.TTS.SampleRate
-	}
-	if override.TTS.Volume != 0 {
-		out.TTS.Volume = override.TTS.Volume
-	}
-	if override.TTS.Rate != 0 {
-		out.TTS.Rate = override.TTS.Rate
-	}
-	if override.TTS.Pitch != 0 {
-		out.TTS.Pitch = override.TTS.Pitch
-	}
-	out.TTS.EnableSSML = override.TTS.EnableSSML
-	if strings.TrimSpace(override.TTS.TextType) != "" {
-		out.TTS.TextType = override.TTS.TextType
-	}
-	if override.TTS.EnableDataInspection != nil {
-		out.TTS.EnableDataInspection = override.TTS.EnableDataInspection
-	}
-	if len(override.TTS.VoiceMap) > 0 {
-		out.TTS.VoiceMap = cloneStringMap(override.TTS.VoiceMap)
-	}
-
-	if strings.TrimSpace(override.LLM.APIKey) != "" {
-		out.LLM.APIKey = override.LLM.APIKey
-	}
-	if strings.TrimSpace(override.LLM.BaseURL) != "" {
-		out.LLM.BaseURL = override.LLM.BaseURL
-	}
-	if strings.TrimSpace(override.LLM.Model) != "" {
-		out.LLM.Model = override.LLM.Model
-	}
+	out.Provider = mergeProviderConfig(out.Provider, override.Provider)
 
 	if override.Audio.Mixer.TTSVolume != 0 {
 		out.Audio.Mixer.TTSVolume = override.Audio.Mixer.TTSVolume
@@ -367,15 +327,32 @@ func mergeVoicebotSessionConfig(base VoicebotSessionConfig, override VoicebotSes
 
 func applyAPIKeys(cfg *VoicebotSessionConfig, dash, zhipu string) {
 	if strings.TrimSpace(dash) != "" {
-		cfg.ASR.APIKey = dash
-		cfg.TTS.APIKey = dash
-		if strings.TrimSpace(cfg.LLM.APIKey) == "" {
-			cfg.LLM.APIKey = dash
+		cfg.Provider.ASR.Aliyun.APIKey = dash
+		cfg.Provider.TTS.Aliyun.APIKey = dash
+		if strings.TrimSpace(cfg.Provider.LLM.OpenAI.APIKey) == "" {
+			cfg.Provider.LLM.OpenAI.APIKey = dash
 		}
 	}
 	if strings.TrimSpace(zhipu) != "" {
-		cfg.LLM.APIKey = zhipu
+		cfg.Provider.LLM.OpenAI.APIKey = zhipu
 	}
+}
+
+func mergeProviderConfig(base, override ProviderConfig) ProviderConfig {
+	out := base
+	if strings.TrimSpace(override.ASR.Type) != "" {
+		out.ASR.Type = override.ASR.Type
+	}
+	out.ASR.Aliyun = mergeASRConfig(out.ASR.Aliyun, override.ASR.Aliyun)
+	if strings.TrimSpace(override.TTS.Type) != "" {
+		out.TTS.Type = override.TTS.Type
+	}
+	out.TTS.Aliyun = mergeTTSConfig(out.TTS.Aliyun, override.TTS.Aliyun)
+	if strings.TrimSpace(override.LLM.Type) != "" {
+		out.LLM.Type = override.LLM.Type
+	}
+	out.LLM.OpenAI = mergeLLMConfig(out.LLM.OpenAI, override.LLM.OpenAI)
+	return out
 }
 
 func cloneStringMap(in map[string]string) map[string]string {
