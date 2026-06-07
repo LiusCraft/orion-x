@@ -4,33 +4,48 @@ import (
 	"github.com/streamer45/silero-vad-go/speech"
 )
 
-// sileroVAD is a voice activity detector based on Silero VAD model
 type sileroVAD struct {
-	detector *speech.Detector
+	inner      *speech.Detector
+	windowSize int
+	threshold  float32
+	hyp        float32 // threshold - hysteresis, the floor for ending speech
+	minSilenceSamples int
+
+	triggered  bool
+	tempEnd    int
+	currSample int
 }
 
-// NewSileroVAD creates a new Silero VAD detector
 func NewSileroVAD(modelPath string, sampleRate int, threshold float64, minSilenceMs int, speechPadMs int) (VADDetector, error) {
-	// Ensure model is downloaded
 	if err := ensureVADModel(modelPath); err != nil {
 		return nil, err
 	}
 
-	cfg := speech.DetectorConfig{
-		ModelPath:            modelPath,
-		SampleRate:           sampleRate,
-		Threshold:            float32(threshold),
-		MinSilenceDurationMs: minSilenceMs,
-		SpeechPadMs:          speechPadMs,
-	}
-
-	detector, err := speech.NewDetector(cfg)
+	inner, err := speech.NewDetector(speech.DetectorConfig{
+		ModelPath:  modelPath,
+		SampleRate: sampleRate,
+	})
 	if err != nil {
 		return nil, err
 	}
 
+	ws := 512
+	if sampleRate == 8000 {
+		ws = 256
+	}
+
+	thr := float32(threshold)
+	hyp := thr - 0.15
+	if hyp < 0 {
+		hyp = 0
+	}
+
 	return &sileroVAD{
-		detector: detector,
+		inner:             inner,
+		windowSize:        ws,
+		threshold:         thr,
+		hyp:               hyp,
+		minSilenceSamples: minSilenceMs * sampleRate / 1000,
 	}, nil
 }
 
@@ -40,24 +55,34 @@ func (v *sileroVAD) Detect(audio []byte) (bool, error) {
 	}
 
 	floats := Int16PCMToFloat32(audio)
+	ws := v.windowSize
 
-	// Detect speech segments in the audio chunk
-	segments, err := v.detector.Detect(floats)
-	if err != nil {
-		return false, err
-	}
+	for i := 0; i <= len(floats)-ws; i += ws {
+		prob, err := v.inner.Infer(floats[i : i+ws])
+		if err != nil {
+			return false, err
+		}
+		v.currSample += ws
 
-	// If we got any segments with speech, return true
-	for _, seg := range segments {
-		if seg.SpeechEndAt > 0 {
-			// Speech segment with end time - speech was detected
-			return true, nil
+		if prob >= v.threshold {
+			v.tempEnd = 0
+			if !v.triggered {
+				v.triggered = true
+			}
+		} else if prob < v.hyp && v.triggered {
+			if v.tempEnd == 0 {
+				v.tempEnd = v.currSample
+			}
+			if v.currSample-v.tempEnd >= v.minSilenceSamples {
+				v.tempEnd = 0
+				v.triggered = false
+			}
 		}
 	}
 
-	return false, nil
+	return v.triggered, nil
 }
 
 func (v *sileroVAD) Close() error {
-	return v.detector.Destroy()
+	return v.inner.Destroy()
 }
