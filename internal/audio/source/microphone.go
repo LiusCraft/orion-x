@@ -97,6 +97,12 @@ func NewMicrophoneSourceWithDevice(sampleRate, channels, bufferSize int, highLat
 		}
 	}
 
+	// 蓝牙设备需要高延迟模式，否则容易 Input overflowed
+	if !highLatency && isBluetoothDevice(inputDevice) {
+		highLatency = true
+		logging.Infof("MicrophoneSource: detected Bluetooth device %q, auto-switching to high latency mode", inputDevice.Name)
+	}
+
 	// 选择延迟模式
 	latency := inputDevice.DefaultLowInputLatency
 	latencyMode := "low"
@@ -138,6 +144,12 @@ func NewMicrophoneSourceWithDevice(sampleRate, channels, bufferSize int, highLat
 }
 
 // findInputDeviceByName 按名称查找输入设备（支持部分匹配）
+// isBluetoothDevice 检测设备是否为蓝牙设备（通过设备名称匹配）
+func isBluetoothDevice(device *portaudio.DeviceInfo) bool {
+	nameLower := strings.ToLower(device.Name)
+	return strings.Contains(nameLower, "bluetooth")
+}
+
 func findInputDeviceByName(name string) (*portaudio.DeviceInfo, error) {
 	devices, err := portaudio.Devices()
 	if err != nil {
