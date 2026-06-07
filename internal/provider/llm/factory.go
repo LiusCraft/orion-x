@@ -12,10 +12,11 @@ import (
 const TypeOpenAI = "openai"
 
 type Config struct {
-	Type    string
-	APIKey  string
-	BaseURL string
-	Model   string
+	Type        string
+	APIKey      string
+	BaseURL     string
+	Model       string
+	ExtraFields map[string]any
 }
 
 type ChatModel interface {

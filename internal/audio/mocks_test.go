@@ -96,6 +96,10 @@ func (s *mockTTSStream) WriteTextChunk(ctx context.Context, text string) error {
 	return nil
 }
 
+func (s *mockTTSStream) Finish(ctx context.Context) error {
+	return s.Close(ctx)
+}
+
 func (s *mockTTSStream) Close(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

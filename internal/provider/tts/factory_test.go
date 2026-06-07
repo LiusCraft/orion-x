@@ -35,6 +35,7 @@ func (fakeProvider) Start(context.Context, Config) (Stream, error) {
 type fakeStream struct{}
 
 func (fakeStream) WriteTextChunk(context.Context, string) error { return nil }
+func (fakeStream) Finish(context.Context) error                  { return nil }
 func (fakeStream) Close(context.Context) error                  { return nil }
 func (fakeStream) AudioReader() io.ReadCloser                   { return nil }
 func (fakeStream) SampleRate() int                              { return 16000 }

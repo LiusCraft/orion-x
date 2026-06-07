@@ -32,6 +32,8 @@ type Provider interface {
 
 type Stream interface {
 	WriteTextChunk(ctx context.Context, text string) error
+	// Finish 通知 TTS 服务文本已发送完毕，立即返回，不等待音频合成完成
+	Finish(ctx context.Context) error
 	Close(ctx context.Context) error
 	AudioReader() io.ReadCloser
 	SampleRate() int

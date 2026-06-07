@@ -152,6 +152,21 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 	return p.pipeline.EnqueueText(text, emotion)
 }
 
+// BeginTTSStream 开始流式 TTS 会话
+func (p *outPipeImpl) BeginTTSStream(emotion string) error {
+	return p.pipeline.BeginSession(emotion)
+}
+
+// WriteTTSChunk 向当前流式会话写入文本 chunk
+func (p *outPipeImpl) WriteTTSChunk(chunk string) error {
+	return p.pipeline.WriteChunk(chunk)
+}
+
+// EndTTSStream 结束流式会话的文本输入（不等待合成完成）
+func (p *outPipeImpl) EndTTSStream() error {
+	return p.pipeline.EndSession()
+}
+
 // PlayResource 播放资源音频
 func (p *outPipeImpl) PlayResource(audio io.Reader) error {
 	p.mu.Lock()

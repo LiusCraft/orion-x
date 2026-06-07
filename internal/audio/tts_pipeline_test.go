@@ -786,6 +786,10 @@ func (s *delayMockTTSStream) WriteTextChunk(ctx context.Context, text string) er
 	return nil
 }
 
+func (s *delayMockTTSStream) Finish(ctx context.Context) error {
+	return s.Close(ctx)
+}
+
 func (s *delayMockTTSStream) Close(ctx context.Context) error {
 	if s.reader != nil {
 		s.reader.markClosed()
@@ -1012,6 +1016,10 @@ type slowMockTTSStream struct {
 }
 
 func (s *slowMockTTSStream) WriteTextChunk(ctx context.Context, text string) error {
+	return nil
+}
+
+func (s *slowMockTTSStream) Finish(ctx context.Context) error {
 	return nil
 }
 

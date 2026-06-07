@@ -26,10 +26,11 @@ func NewAgent(ctx context.Context, cfg Config, toolManager tools.ToolManager, me
 	}
 
 	chatModel, err := llmfactory.NewChatModel(ctx, llmfactory.Config{
-		Type:    normalized.Provider,
-		BaseURL: normalized.BaseURL,
-		Model:   normalized.Model,
-		APIKey:  normalized.APIKey,
+		Type:        normalized.Provider,
+		BaseURL:     normalized.BaseURL,
+		Model:       normalized.Model,
+		APIKey:      normalized.APIKey,
+		ExtraFields: normalized.ExtraFields,
 	})
 	if err != nil {
 		return nil, err

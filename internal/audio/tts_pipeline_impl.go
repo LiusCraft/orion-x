@@ -83,6 +83,10 @@ type ttsPipelineImpl struct {
 	pendingItems   map[int64]*ttsItem // 已完成但等待播放的 TTS 项
 	pendingMu      sync.Mutex         // 保护 pendingItems
 
+	// 流式 session 状态
+	activeStream tts.Stream
+	sessionMu    sync.Mutex
+
 	// 状态
 	currentItem   *ttsItem
 	parentCtx     context.Context
@@ -279,6 +283,11 @@ func (p *ttsPipelineImpl) Interrupt() error {
 	p.mu.Unlock()
 
 	logging.Infof("TTSPipeline: interrupting...")
+
+	// 清理流式 session：不再向 TTS 服务写入数据
+	p.sessionMu.Lock()
+	p.activeStream = nil
+	p.sessionMu.Unlock()
 
 	p.mu.Lock()
 	// 1. 取消当前 context（通知所有 worker 停止）
@@ -587,6 +596,99 @@ func (p *ttsPipelineImpl) generateTTS(ctx context.Context, text string, emotion 
 	}
 
 	return reader, nil
+}
+
+// BeginSession 开始流式 TTS 会话：建立连接并立即把 audioReader 推给 audioPlayer
+func (p *ttsPipelineImpl) BeginSession(emotion string) error {
+	p.mu.Lock()
+	ctx := p.ctx
+	if !p.started {
+		p.mu.Unlock()
+		return errors.New("TTSPipeline: not started")
+	}
+	p.mu.Unlock()
+
+	voice := p.getVoice(emotion)
+	cfg := p.ttsConfig
+	cfg.Voice = voice
+
+	stream, err := p.provider.Start(ctx, cfg)
+	if err != nil {
+		return err
+	}
+
+	p.sessionMu.Lock()
+	p.activeStream = stream
+	p.sessionMu.Unlock()
+
+	audioReader := stream.AudioReader()
+
+	ttsSampleRate := stream.SampleRate()
+	ttsChannels := stream.Channels()
+	systemSampleRate := 16000
+	if p.mixerConfig != nil && p.mixerConfig.SampleRate > 0 {
+		systemSampleRate = p.mixerConfig.SampleRate
+	}
+	var reader io.Reader = audioReader
+	if ttsSampleRate != systemSampleRate {
+		resampler := NewLinearResampler()
+		reader = NewResamplingReader(audioReader, ttsSampleRate, systemSampleRate, ttsChannels, resampler)
+	}
+
+	streamID := atomic.AddInt64(&p.streamCounter, 1)
+	notifyReader := newEOFNotifyReader(reader)
+	item := &ttsItem{
+		Reader:     notifyReader,
+		OrigReader: audioReader,
+		Text:       "[stream]",
+		Emotion:    emotion,
+		DoneCh:     make(chan struct{}),
+		StreamID:   streamID,
+	}
+
+	select {
+	case p.ttsBuffer <- item:
+		atomic.AddInt64(&p.totalEnqueued, 1)
+		return nil
+	case <-ctx.Done():
+		_ = stream.Close(ctx)
+		return ctx.Err()
+	}
+}
+
+// WriteChunk 向当前流式会话写入文本 chunk
+func (p *ttsPipelineImpl) WriteChunk(chunk string) error {
+	p.sessionMu.Lock()
+	stream := p.activeStream
+	p.sessionMu.Unlock()
+
+	if stream == nil {
+		return errors.New("TTSPipeline: no active session")
+	}
+
+	p.mu.Lock()
+	ctx := p.ctx
+	p.mu.Unlock()
+
+	return stream.WriteTextChunk(ctx, chunk)
+}
+
+// EndSession 结束流式会话的文本输入（不等待合成完成）
+func (p *ttsPipelineImpl) EndSession() error {
+	p.sessionMu.Lock()
+	stream := p.activeStream
+	p.activeStream = nil
+	p.sessionMu.Unlock()
+
+	if stream == nil {
+		return nil
+	}
+
+	p.mu.Lock()
+	ctx := p.ctx
+	p.mu.Unlock()
+
+	return stream.Finish(ctx)
 }
 
 func (p *ttsPipelineImpl) getVoice(emotion string) string {

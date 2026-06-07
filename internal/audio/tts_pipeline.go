@@ -17,6 +17,15 @@ type TTSPipeline interface {
 	// EnqueueText 入队文本（非阻塞，立即返回）
 	EnqueueText(text string, emotion string) error
 
+	// BeginSession 开始流式 TTS 会话：建立 TTS 连接，立即开始接收音频
+	BeginSession(emotion string) error
+
+	// WriteChunk 向当前流式会话写入文本 chunk
+	WriteChunk(chunk string) error
+
+	// EndSession 结束流式会话的文本输入（不等待合成完成）
+	EndSession() error
+
 	// Interrupt 中断所有任务（清空队列、停止播放）
 	Interrupt() error
 

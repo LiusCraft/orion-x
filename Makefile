@@ -1,7 +1,5 @@
 UNAME := $(shell uname -s)
 
-GO_TOOLCHAIN ?= go1.24.4
-
 ifeq ($(UNAME),Darwin)
 BREW_PREFIX := $(shell brew --prefix)
 CGO_FLAGS := CGO_CFLAGS="-I$(BREW_PREFIX)/include/onnxruntime" CGO_LDFLAGS="-L$(BREW_PREFIX)/lib"

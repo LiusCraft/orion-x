@@ -14,10 +14,11 @@ var (
 )
 
 type Config struct {
-	Provider string
-	APIKey   string
-	BaseURL  string
-	Model    string
+	Provider    string
+	APIKey      string
+	BaseURL     string
+	Model       string
+	ExtraFields map[string]any
 }
 
 func normalizeConfig(cfg Config) (Config, error) {

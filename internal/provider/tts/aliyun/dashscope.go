@@ -181,14 +181,20 @@ func (s *dashScopeStream) WriteTextChunk(ctx context.Context, text string) error
 	return s.sendContinueTask(ctx, text)
 }
 
-func (s *dashScopeStream) Close(ctx context.Context) error {
-	var finishErr error
+func (s *dashScopeStream) Finish(ctx context.Context) error {
+	var err error
 	s.finishOnce.Do(func() {
-		finishErr = s.sendFinishTask(ctx)
+		err = s.sendFinishTask(ctx)
 	})
-	if finishErr != nil {
-		s.closeWithError(finishErr)
-		return finishErr
+	if err != nil {
+		s.closeWithError(err)
+	}
+	return err
+}
+
+func (s *dashScopeStream) Close(ctx context.Context) error {
+	if err := s.Finish(ctx); err != nil {
+		return err
 	}
 	select {
 	case <-s.doneCh:

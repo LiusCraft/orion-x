@@ -57,8 +57,20 @@ func (m *mockOutPipe) PlayTTS(text string, emotion string) error {
 	return nil
 }
 func (m *mockOutPipe) PlayResource(audio io.Reader) error { return nil }
-func (m *mockOutPipe) Interrupt() error                   { return nil }
-func (m *mockOutPipe) Stats() audio.PipelineStats         { return audio.PipelineStats{} }
+func (m *mockOutPipe) BeginTTSStream(emotion string) error {
+	// 模拟异步播放完成
+	if m.onFinished != nil {
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			m.onFinished()
+		}()
+	}
+	return nil
+}
+func (m *mockOutPipe) WriteTTSChunk(chunk string) error { return nil }
+func (m *mockOutPipe) EndTTSStream() error              { return nil }
+func (m *mockOutPipe) Interrupt() error                 { return nil }
+func (m *mockOutPipe) Stats() audio.PipelineStats       { return audio.PipelineStats{} }
 
 type interruptMockOutPipe struct {
 	mu         sync.Mutex
@@ -80,11 +92,14 @@ func (m *interruptMockOutPipe) SetOnPlaybackFinished(callback audio.PlaybackFini
 	m.mu.Unlock()
 }
 func (m *interruptMockOutPipe) SetOnTTSItemStarted(callback audio.TTSItemStartedCallback) {}
-func (m *interruptMockOutPipe) PlayTTS(text string, emotion string) error {
+func (m *interruptMockOutPipe) PlayTTS(text string, emotion string) error { return nil }
+func (m *interruptMockOutPipe) PlayResource(audio io.Reader) error        { return nil }
+func (m *interruptMockOutPipe) BeginTTSStream(emotion string) error {
 	m.startOnce.Do(func() { close(m.startedCh) })
 	return nil
 }
-func (m *interruptMockOutPipe) PlayResource(audio io.Reader) error { return nil }
+func (m *interruptMockOutPipe) WriteTTSChunk(chunk string) error { return nil }
+func (m *interruptMockOutPipe) EndTTSStream() error              { return nil }
 func (m *interruptMockOutPipe) Interrupt() error {
 	m.mu.Lock()
 	callback := m.onFinished
@@ -149,7 +164,7 @@ func TestOrchestratorObserver(t *testing.T) {
 
 	orchestrator.OnASRFinal("hi")
 
-	want := []string{"llm:hi. [EMO:happy]", "tts_start", "tts_sentence:hi.", "tts_stop"}
+	want := []string{"llm:hi. [EMO:happy]", "tts_start", "tts_stop"}
 	got := make([]string, 0, len(want))
 
 	timer := time.NewTimer(2 * time.Second)
@@ -203,7 +218,7 @@ func TestOrchestratorObserverInterruptDoesNotEmitNormalStop(t *testing.T) {
 	select {
 	case <-outPipe.startedCh:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for PlayTTS")
+		t.Fatal("timeout waiting for BeginTTSStream")
 	}
 
 	orchestrator.OnUserSpeakingDetected()

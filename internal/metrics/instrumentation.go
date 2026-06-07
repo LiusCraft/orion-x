@@ -200,6 +200,18 @@ func (i *instrumentedAudioOutPipe) PlayResource(audioReader io.Reader) error {
 	return i.next.PlayResource(audioReader)
 }
 
+func (i *instrumentedAudioOutPipe) BeginTTSStream(emotion string) error {
+	return i.next.BeginTTSStream(emotion)
+}
+
+func (i *instrumentedAudioOutPipe) WriteTTSChunk(chunk string) error {
+	return i.next.WriteTTSChunk(chunk)
+}
+
+func (i *instrumentedAudioOutPipe) EndTTSStream() error {
+	return i.next.EndTTSStream()
+}
+
 func (i *instrumentedAudioOutPipe) Interrupt() error {
 	err := i.next.Interrupt()
 	i.metrics.IncTTSInterrupts()

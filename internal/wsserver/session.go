@@ -254,10 +254,11 @@ func (s *Session) initPipeline() error {
 	s.memorySvc = memorySvc
 
 	agentCfg := agent.Config{
-		Provider: s.voicebot.Provider.LLM.Type,
-		APIKey:   llmCfg.APIKey,
-		BaseURL:  llmCfg.BaseURL,
-		Model:    llmCfg.Model,
+		Provider:    s.voicebot.Provider.LLM.Type,
+		APIKey:      llmCfg.APIKey,
+		BaseURL:     llmCfg.BaseURL,
+		Model:       llmCfg.Model,
+		ExtraFields: llmCfg.ExtraFields,
 	}
 	toolCfg := tools.ManagerConfig{
 		MCPServers: toToolsMCPServers(s.voicebot.Tools.MCP),
@@ -356,11 +357,7 @@ func (s *Session) initPipeline() error {
 		s.toolExecutor,
 		&voicebot.OrchestratorOptions{
 			Observer: observer,
-			TTSScheduler: voicebot.TTSSchedulerConfig{
-				MaxInFlightSentences: s.voicebot.Audio.TTSScheduler.MaxInFlightSentences,
-				MaxCacheSentences:    s.voicebot.Audio.TTSScheduler.MaxCacheSentences,
-			},
-			Memory: memorySvc,
+			Memory:   memorySvc,
 		},
 	)
 	s.orchestrator = orchestrator
