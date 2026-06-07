@@ -69,3 +69,28 @@ func TestBuildToolSummaryMessages(t *testing.T) {
 		t.Fatalf("expected user message content")
 	}
 }
+
+func TestParseToolArgs(t *testing.T) {
+	args, err := parseToolArgs("")
+	if err != nil {
+		t.Fatalf("empty args error = %v", err)
+	}
+	if len(args) != 0 {
+		t.Fatalf("empty args len = %d, want 0", len(args))
+	}
+
+	args, err = parseToolArgs(`{"city":"北京","days":3}`)
+	if err != nil {
+		t.Fatalf("valid args error = %v", err)
+	}
+	if args["city"] != "北京" {
+		t.Fatalf("city = %v, want 北京", args["city"])
+	}
+	if args["days"] != float64(3) {
+		t.Fatalf("days = %v, want 3", args["days"])
+	}
+
+	if _, err := parseToolArgs(`{"city":`); err == nil {
+		t.Fatalf("expected invalid json error")
+	}
+}

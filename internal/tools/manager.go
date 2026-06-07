@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -23,12 +22,6 @@ type ToolManager interface {
 	// Has 检查工具是否存在
 	Has(name string) bool
 
-	// GetToolType 获取工具类型（query/action）
-	GetToolType(name string) ToolType
-
-	// GetActionResponse 获取动作响应模板
-	GetActionResponse(name string) (string, bool)
-
 	// Tools 获取所有加载的工具（用于 compose.NewToolsNode）
 	Tools() []tool.BaseTool
 
@@ -38,14 +31,12 @@ type ToolManager interface {
 
 // toolManager 工具管理器实现
 type toolManager struct {
-	loaders          []ToolLoader
-	tools            []tool.BaseTool
-	toolByName       map[string]tool.BaseTool
-	toolInfos        []*schema.ToolInfo
-	toolInfosByName  map[string]*schema.ToolInfo
-	toolTypes        map[string]ToolType
-	actionResponses  map[string]string
-	mu               sync.RWMutex
+	loaders         []ToolLoader
+	tools           []tool.BaseTool
+	toolByName      map[string]tool.BaseTool
+	toolInfos       []*schema.ToolInfo
+	toolInfosByName map[string]*schema.ToolInfo
+	mu              sync.RWMutex
 }
 
 // NewToolManager 创建新的工具管理器
@@ -56,23 +47,6 @@ func NewToolManager(ctx context.Context, cfg ManagerConfig) (ToolManager, error)
 		toolByName:      make(map[string]tool.BaseTool),
 		toolInfos:       make([]*schema.ToolInfo, 0),
 		toolInfosByName: make(map[string]*schema.ToolInfo),
-		toolTypes:       make(map[string]ToolType),
-		actionResponses: make(map[string]string),
-	}
-
-	// 解析工具类型配置
-	for name, toolTypeStr := range cfg.ToolTypes {
-		toolType, err := ParseToolType(toolTypeStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid tool type for %s: %w", name, err)
-		}
-		m.toolTypes[name] = toolType
-	}
-
-	// 解析动作响应配置
-	m.actionResponses = cfg.ActionResponses
-	if m.actionResponses == nil {
-		m.actionResponses = make(map[string]string)
 	}
 
 	// 创建并添加本地工具加载器
@@ -94,16 +68,12 @@ func NewToolManager(ctx context.Context, cfg ManagerConfig) (ToolManager, error)
 		return nil, err
 	}
 
-	// 设置默认工具类型（未配置的工具默认为 query）
-	m.setDefaultToolTypes()
-
 	// 输出工具总览
 	logging.Infof("[ToolManager] =====================================")
 	logging.Infof("[ToolManager] Total tools loaded: %d", len(m.toolInfos))
 	logging.Infof("[ToolManager] Tool names:")
 	for _, info := range m.toolInfos {
-		toolType := m.toolTypes[info.Name]
-		logging.Infof("[ToolManager]   - %s (type: %s)", info.Name, toolType)
+		logging.Infof("[ToolManager]   - %s", info.Name)
 	}
 	logging.Infof("[ToolManager] =====================================")
 
@@ -138,17 +108,6 @@ func (m *toolManager) addTool(t tool.BaseTool, info *schema.ToolInfo) {
 	m.toolInfosByName[info.Name] = info
 }
 
-func (m *toolManager) setDefaultToolTypes() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for name := range m.toolInfosByName {
-		if _, exists := m.toolTypes[name]; !exists {
-			m.toolTypes[name] = ToolTypeQuery
-		}
-	}
-}
-
 func (m *toolManager) ToolInfos() []*schema.ToolInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -167,44 +126,6 @@ func (m *toolManager) Has(name string) bool {
 	defer m.mu.RUnlock()
 	_, ok := m.toolByName[name]
 	return ok
-}
-
-func (m *toolManager) GetToolType(name string) ToolType {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	// 精确匹配
-	if t, ok := m.toolTypes[name]; ok {
-		return t
-	}
-
-	// 对于 MCP 工具，尝试匹配前缀
-	// 例如：配置 "mcp.demo.get_device_status" -> "query"
-	//        工具名 "mcp.demo.get_device_status" 匹配成功
-	//        工具名 "mcp.demo.other" 可能需要配置
-	for pattern, toolType := range m.toolTypes {
-		if strings.HasPrefix(name, pattern) {
-			// 如果是精确前缀匹配（即配置的名称就是工具名或工具名的前缀）
-			// 例如配置 "mcp.demo" 匹配所有 "mcp.demo.*" 的工具
-			if name == pattern || strings.HasPrefix(name, pattern+".") {
-				return toolType
-			}
-		}
-	}
-
-	return ToolTypeQuery
-}
-
-func (m *toolManager) GetActionResponse(name string) (string, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	// 精确匹配
-	if resp, ok := m.actionResponses[name]; ok {
-		return resp, true
-	}
-
-	return "", false
 }
 
 func (m *toolManager) Tools() []tool.BaseTool {

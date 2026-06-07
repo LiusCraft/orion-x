@@ -49,7 +49,7 @@ func TestOrchestrator(t *testing.T) {
 
 **模块职责示例**：
 - `Orchestrator`: 状态管理、事件路由、组件协调
-- `VoiceAgent`: LLM 调用、工具识别、情绪标注
+- `Agent`: LLM 调用、工具识别、工具结果总结
 - `AudioMixer`: 音频混合、音量控制
 - `ToolExecutor`: 工具执行、结果返回
 
@@ -216,7 +216,7 @@ logging.Errorf("Tool execution error: %v", err)
 ### 模块依赖关系
 ```
 voicebot (Orchestrator)
-    ├── agent (VoiceAgent)
+    ├── agent (Agent)
     ├── audio (AudioOutPipe/AudioInPipe/AudioMixer)
     ├── tools (ToolExecutor)
     ├── asr (ASR - 已有)
@@ -232,7 +232,7 @@ Idle → Listening → Processing → Speaking → Idle
 
 ### 事件流
 ```
-ASRFinal → Orchestrator → VoiceAgent → LLM/Tool → AudioOutPipe
+ASRFinal → Orchestrator → Agent → LLM/Tool → AudioOutPipe
 UserSpeakingDetected → Orchestrator → AudioOutPipe.Interrupt()
 ```
 

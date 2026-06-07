@@ -111,19 +111,6 @@
     }
   },
   "tools": {
-    "types": {
-      "getTime": "query",
-      "getWeather": "query",
-      "search": "query",
-      "playMusic": "action",
-      "setVolume": "action",
-      "pauseMusic": "action"
-    },
-    "action_responses": {
-      "playMusic": "正在为您播放{{song}}",
-      "setVolume": "已将音量设置为{{level}}",
-      "pauseMusic": "音乐已暂停"
-    },
     "mcp": []
   },
   "memory": {
@@ -144,7 +131,6 @@
 - `provider.asr.aliyun.api_key` / `provider.tts.aliyun.api_key` 不能为空（或由 `DASHSCOPE_API_KEY` 覆盖）。
 - `audio.in_pipe.sample_rate` 与 `provider.tts.aliyun.sample_rate` 必须是正数。
 - `audio.in_pipe.sample_rate` 同时用于 ASR 请求采样率。
-- `tools.types` 仅接受 `query` 或 `action`。
 - `tools.mcp.transport` 仅接受 `stdio` / `sse` / `streamable`，`stdio` 必须提供 `command`，其余必须提供 `endpoint`。
 - `audio.tts_scheduler.max_in_flight_sentences` 必须是正数。
 
@@ -153,11 +139,7 @@
 - 未设置的字段将使用默认值，保持当前运行行为。
 - 同名环境变量会覆盖配置文件值，便于部署时注入密钥。
 - ASR / TTS / LLM 只通过 `provider` 结构配置。
-- `tools.action_responses` 支持 `{{key}}` 形式的简单模板替换。
 - `tools.mcp` 支持 `stdio` / `sse` / `streamable` 三种连接方式，工具会以 `mcp.<id>.<tool>` 作为统一名称前缀。
-  - **重要**：配置 MCP 工具的类型和动作响应时，必须使用完整前缀名称（如 `mcp.demo.get_device_status`），不能使用短名称。
-- **本地工具**：使用短名称配置（如 `getTime`、`getWeather`）。
-- **MCP 工具**：使用完整前缀名称配置（如 `mcp.demo.get_device_status`）。
 - 未配置的工具类型默认为 `query`。
 - `cmd/voicebot` 本地启动不会监听 `server.address`，也不会暴露 metrics；服务端监听与 metrics 配置在 `ws-server.example.json`。
 

@@ -10,35 +10,23 @@ type AgentEventType int
 
 const (
 	AgentEventTypeTextChunk         AgentEventType = iota // 文本块
-	AgentEventTypeEmotionChanged                          // 情绪变化
 	AgentEventTypeToolCallRequested                       // 工具调用请求
 	AgentEventTypeFinished                                // 完成
 )
 
 // TextChunkEvent 文本块事件
 type TextChunkEvent struct {
-	Chunk   string
-	Emotion string
+	Chunk string
 }
 
 func (e *TextChunkEvent) Type() AgentEventType {
 	return AgentEventTypeTextChunk
 }
 
-// EmotionChangedEvent 情绪变化事件
-type EmotionChangedEvent struct {
-	Emotion string
-}
-
-func (e *EmotionChangedEvent) Type() AgentEventType {
-	return AgentEventTypeEmotionChanged
-}
-
 // ToolCallRequestedEvent 工具调用请求事件
 type ToolCallRequestedEvent struct {
-	Tool     string
-	Args     map[string]interface{}
-	ToolType ToolType // 查询类 or 动作类
+	Tool string
+	Args map[string]interface{}
 }
 
 func (e *ToolCallRequestedEvent) Type() AgentEventType {

@@ -57,10 +57,10 @@
 - ASRFinal: 记录识别到的文本
 - ToolCallRequested: 记录工具名称和参数
 - ToolAudioReady: 记录资源音频播放
-- LLMEmotionChanged: 记录情绪变化
+- OutputEmotionChanged: 记录情绪变化
 - AgentEvent: 记录每个句子、工具调用、完成事件
 
-### VoiceAgent
+### Agent
 
 **流程日志**
 - 输入文本
@@ -112,8 +112,8 @@
         VoiceBot Starting...
 ========================================
 API key loaded successfully
-Creating VoiceAgent...
-VoiceAgent created successfully
+Creating Agent...
+Agent created successfully
 Creating AudioMixer...
 AudioMixer created successfully
 Creating AudioOutPipe...
@@ -146,9 +146,9 @@ Orchestrator: user speaking detected: 你好
 Orchestrator: ASR final result: 你好
 Orchestrator: ASR final event received: 你好
 State changed: Idle -> Processing
-VoiceAgent: processing input: 你好
-VoiceAgent: starting LLM stream...
-VoiceAgent: text chunk: 你好 (emotion: happy)
+Agent: processing input: 你好
+Agent: starting LLM stream...
+Agent: text chunk: 你好 (emotion: happy)
 Orchestrator: playing TTS for sentence: 你好
 AudioOutPipe: PlayTTS - text: 你好, emotion: happy, voice: longanyang
 AudioOutPipe: starting TTS stream...
@@ -162,10 +162,10 @@ AudioOutPipe: TTS stream removed from mixer
 AudioOutPipe: PlayTTS completed
 State changed: Processing -> Speaking
 State changed: Speaking -> Idle
-VoiceAgent: processing finished
+Agent: processing finished
 
 [工具调用时]
-VoiceAgent: tool call requested: getTime (type: Query), args: map[]
+Agent: tool call requested: getTime, args: map[]
 ToolExecutor: executing tool: getTime, args: map[]
 GetTimeTool: getting current time
 GetTimeTool: time result: map[...]

@@ -118,9 +118,7 @@ type InPipeConfig struct {
 }
 
 type ToolsConfig struct {
-	Types           map[string]string `json:"types"`
-	ActionResponses map[string]string `json:"action_responses"`
-	MCP             []MCPServerConfig `json:"mcp"`
+	MCP []MCPServerConfig `json:"mcp"`
 }
 
 type MemoryConfig struct {
@@ -253,22 +251,7 @@ func DefaultConfig() *AppConfig {
 				VADSpeechPadMs:  300,
 			},
 		},
-		Tools: ToolsConfig{
-			Types: map[string]string{
-				"getWeather": "query",
-				"getTime":    "query",
-				"search":     "query",
-				"playMusic":  "action",
-				"setVolume":  "action",
-				"pauseMusic": "action",
-			},
-			ActionResponses: map[string]string{
-				"playMusic":  "正在为您播放{{song}}",
-				"setVolume":  "已将音量设置为{{level}}",
-				"pauseMusic": "音乐已暂停",
-			},
-			MCP: nil,
-		},
+		Tools: ToolsConfig{MCP: nil},
 		Server: ServerConfig{
 			Address:        ":8000",
 			Path:           "/xiaozhi/v1/",
@@ -467,16 +450,6 @@ func (c *AppConfig) Validate() error {
 			if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 				return fmt.Errorf("invalid origin in server.origin_check.allowed_origins: %s", raw)
 			}
-		}
-	}
-
-	for name, value := range c.Tools.Types {
-		lower := strings.ToLower(strings.TrimSpace(value))
-		switch lower {
-		case "query", "action":
-			continue
-		default:
-			return fmt.Errorf("invalid tool type for %s: %s", name, value)
 		}
 	}
 

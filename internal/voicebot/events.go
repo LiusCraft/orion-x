@@ -83,16 +83,16 @@ func NewToolAudioReadyEvent(audio io.Reader) *ToolAudioReadyEvent {
 	}
 }
 
-// LLMEmotionChangedEvent LLM情绪变化事件
-type LLMEmotionChangedEvent struct {
+// OutputEmotionChangedEvent 输出情绪变化事件
+type OutputEmotionChangedEvent struct {
 	BaseEvent
 	Emotion string
 }
 
-func NewLLMEmotionChangedEvent(emotion string) *LLMEmotionChangedEvent {
-	return &LLMEmotionChangedEvent{
+func NewOutputEmotionChangedEvent(emotion string) *OutputEmotionChangedEvent {
+	return &OutputEmotionChangedEvent{
 		BaseEvent: BaseEvent{
-			eventType: EventTypeLLMEmotionChanged,
+			eventType: EventTypeOutputEmotionChanged,
 			timestamp: time.Now(),
 		},
 		Emotion: emotion,

@@ -40,8 +40,8 @@ type Orchestrator interface {
 }
 ```
 
-### 2. VoiceAgent（语音Agent）
-**职责**: LLM流式调用、工具调用、情绪标注、Markdown过滤
+### 2. Agent（Agent）
+**职责**: LLM流式调用、工具调用、工具结果总结
 
 **流式约定**:
 - LLM流式输出必须只发送新增的增量文本（delta）
@@ -55,21 +55,17 @@ type Orchestrator interface {
   → 调用工具 → 工具返回资源音频 → TTS播报回复
 ```
 
-#### 流程2: 查询类工具（如查询天气）
+#### 流程2: 工具结果总结
 ```
 用户输入 → 意图识别 → 识别工具 → 调用工具获取数据
   → LLM总结数据 → 情绪标注 → Markdown过滤 → TTS播放
 ```
 
-**工具分类**:
-- `ToolTypeQuery`: 查询类（需要LLM总结）
-- `ToolTypeAction`: 动作类（直接执行+播报）
-
-**接口**:
+**公开类型**:
 ```go
-type VoiceAgent interface {
-    Process(ctx context.Context, text string) (<-chan AgentEvent, error)
-}
+type Agent struct { ... }
+
+func (a *Agent) Process(ctx context.Context, text string) (<-chan AgentEvent, error)
 
 type AgentEvent interface {
     Type() EventType
@@ -181,7 +177,7 @@ if isTTSPlaying {
 - `ASRFinal` (识别完成)
 - `ToolCallRequested` (工具调用请求)
 - `ToolAudioReady` (工具返回音频)
-- `LLMEmotionChanged` (情绪变化)
+- `OutputEmotionChanged` (情绪变化)
 - `TTSInterrupt` (播放中断)
 
 ## 数据流设计
@@ -192,7 +188,7 @@ if isTTSPlaying {
   ↓
 [ASR识别] → "播放周杰伦的晴天"
   ↓
-[VoiceAgent意图识别] → 识别为播放音乐工具
+[Agent意图识别] → 识别为播放音乐工具
   ↓
 [生成回复] → "正在为您播放周杰伦的晴天" [EMO:calm]
   ↓
@@ -205,13 +201,13 @@ if isTTSPlaying {
 [TTS播报完成] → 资源音频恢复正常音量
 ```
 
-### 流程2: 查询类工具（查询天气）
+### 流程2: 工具结果总结（查询天气）
 ```
 用户: "今天北京天气怎么样"
   ↓
 [ASR识别] → "今天北京天气怎么样"
   ↓
-[VoiceAgent意图识别] → 识别为天气工具（查询类）
+[Agent意图识别] → 识别为天气工具
   ↓
 [调用天气工具] → 返回: "北京，晴，25°C"
   ↓
@@ -247,38 +243,10 @@ if isTTSPlaying {
 - 默认路径 `data/voicebot.json`，支持命令行 `-config` 覆盖。
 - 加载顺序：默认值 → 配置文件 → 环境变量（`LOG_LEVEL`/`LOG_FORMAT`/`DASHSCOPE_API_KEY`/`ZHIPU_API_KEY`）。
 
-### 1. 工具分类
-```go
-type ToolType int
+### 1. 工具加载
+工具由本地加载器和 MCP 加载器提供，Agent 只接收 LLM 发出的工具调用事件。
 
-const (
-    ToolTypeQuery ToolType = iota  // 查询类：需要LLM总结
-    ToolTypeAction                 // 动作类：直接执行+播报
-)
-
-var toolTypes = map[string]ToolType{
-    "getWeather":  ToolTypeQuery,
-    "getTime":     ToolTypeQuery,
-    "playMusic":   ToolTypeAction,
-    "setVolume":   ToolTypeAction,
-}
-```
-
-### 2. 直接播放类工具的回复生成
-```go
-func generateActionResponse(tool, args string) string {
-    switch tool {
-    case "playMusic":
-        return fmt.Sprintf("正在为您播放%s", args["song"])
-    case "setVolume":
-        return fmt.Sprintf("已将音量设置为%s", args["level"])
-    default:
-        return "好的，正在为您处理"
-    }
-}
-```
-
-### 3. 音频混音逻辑
+### 2. 音频混音逻辑
 ```go
 type AudioMixer struct {
     ttsVolume      float64
@@ -338,9 +306,8 @@ internal/
 │   ├── events.go            # 事件定义
 │   └── eventbus.go          # 事件总线
 ├── agent/
-│   ├── voice_agent.go       # VoiceAgent
-│   ├── tools.go             # 工具分类器
-│   ├── processor.go         # LLM流处理器
+│   ├── agent.go       # Agent
+│   ├── runtime.go           # Agent运行主流程
 │   └── events.go            # Agent事件定义
 ├── audio/
 │   ├── mixer.go             # AudioMixer
@@ -376,7 +343,7 @@ cmd/voicebot/
 
 ## 依赖关系
 
-- `internal/agent/*`: VoiceAgent 与 LLM 工具调用编排
+- `internal/agent/*`: Agent 与 LLM 工具调用编排
 - `internal/tools/*`: 工具加载、注册与执行
 - `internal/provider/llm/*`: LLM provider 模块
 - `internal/provider/asr/*`: ASR provider 模块
@@ -387,7 +354,7 @@ cmd/voicebot/
 
 1. 创建核心包结构（voicebot、agent、audio、tools）
 2. 实现 ConversationOrchestrator 和状态机
-3. 实现 VoiceAgent（集成现有工具调用逻辑）
+3. 实现 Agent（集成现有工具调用逻辑）
 4. 实现 AudioMixer（双通道混音）
 5. 实现 TTSPipeline（异步 TTS 处理）
 6. 实现 AudioOutPipe（集成 TTSPipeline）

@@ -1,0 +1,37 @@
+package agent
+
+import (
+	"errors"
+	"strings"
+
+	llmfactory "github.com/liuscraft/orion-x/internal/provider/llm"
+)
+
+var (
+	errLLMAPIKeyRequired  = errors.New("llm api_key is required")
+	errLLMBaseURLRequired = errors.New("llm base_url is required")
+	errLLMModelRequired   = errors.New("llm model is required")
+)
+
+type Config struct {
+	Provider string
+	APIKey   string
+	BaseURL  string
+	Model    string
+}
+
+func normalizeConfig(cfg Config) (Config, error) {
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return Config{}, errLLMAPIKeyRequired
+	}
+	if strings.TrimSpace(cfg.Provider) == "" {
+		cfg.Provider = llmfactory.TypeOpenAI
+	}
+	if strings.TrimSpace(cfg.BaseURL) == "" {
+		return Config{}, errLLMBaseURLRequired
+	}
+	if strings.TrimSpace(cfg.Model) == "" {
+		return Config{}, errLLMModelRequired
+	}
+	return cfg, nil
+}

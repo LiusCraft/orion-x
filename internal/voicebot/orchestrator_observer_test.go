@@ -12,11 +12,11 @@ import (
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 
-type mockVoiceAgent struct {
+type mockAgent struct {
 	events []agent.AgentEvent
 }
 
-func (m *mockVoiceAgent) Process(ctx context.Context, text string) (<-chan agent.AgentEvent, error) {
+func (m *mockAgent) Process(ctx context.Context, text string) (<-chan agent.AgentEvent, error) {
 	ch := make(chan agent.AgentEvent, len(m.events))
 	go func() {
 		for _, e := range m.events {
@@ -27,17 +27,13 @@ func (m *mockVoiceAgent) Process(ctx context.Context, text string) (<-chan agent
 	return ch, nil
 }
 
-func (m *mockVoiceAgent) SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan agent.AgentEvent, error) {
+func (m *mockAgent) SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan agent.AgentEvent, error) {
 	ch := make(chan agent.AgentEvent, len(m.events))
 	for _, event := range m.events {
 		ch <- event
 	}
 	close(ch)
 	return ch, nil
-}
-
-func (m *mockVoiceAgent) GetToolType(tool string) agent.ToolType {
-	return agent.ToolTypeQuery
 }
 
 type mockOutPipe struct {
@@ -125,9 +121,9 @@ func (o *testObserver) OnTTSStop(isAborted bool) {
 }
 
 func TestOrchestratorObserver(t *testing.T) {
-	voice := &mockVoiceAgent{
+	voice := &mockAgent{
 		events: []agent.AgentEvent{
-			&agent.TextChunkEvent{Chunk: "hi.", Emotion: "happy"},
+			&agent.TextChunkEvent{Chunk: "hi. [EMO:happy]"},
 			&agent.FinishedEvent{Error: nil},
 		},
 	}
@@ -153,7 +149,7 @@ func TestOrchestratorObserver(t *testing.T) {
 
 	orchestrator.OnASRFinal("hi")
 
-	want := []string{"llm:hi.", "tts_start", "tts_sentence:hi.", "tts_stop"}
+	want := []string{"llm:hi. [EMO:happy]", "tts_start", "tts_sentence:hi.", "tts_stop"}
 	got := make([]string, 0, len(want))
 
 	timer := time.NewTimer(2 * time.Second)
@@ -176,9 +172,9 @@ func TestOrchestratorObserver(t *testing.T) {
 }
 
 func TestOrchestratorObserverInterruptDoesNotEmitNormalStop(t *testing.T) {
-	voice := &mockVoiceAgent{
+	voice := &mockAgent{
 		events: []agent.AgentEvent{
-			&agent.TextChunkEvent{Chunk: "hi.", Emotion: "happy"},
+			&agent.TextChunkEvent{Chunk: "hi. [EMO:happy]"},
 			&agent.FinishedEvent{Error: nil},
 		},
 	}

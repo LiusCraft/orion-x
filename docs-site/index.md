@@ -25,7 +25,7 @@ features:
     details: 根据对话内容自动切换情感音色
   - icon: 🔧
     title: 工具调用
-    details: 支持查询类和动作类工具扩展
+    details: 支持本地工具和 MCP 工具扩展
   - icon: 🎵
     title: 音频混音
     details: 双通道音频混音，支持背景音乐播放

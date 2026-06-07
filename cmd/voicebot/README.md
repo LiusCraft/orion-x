@@ -40,7 +40,7 @@ go build -o voicebot ./cmd/voicebot
 ```
 麦克风 AudioSource
         ↓
-AudioInPipe (ASR) → Orchestrator → VoiceAgent (LLM) → AudioOutPipe (TTS) → 扬声器
+AudioInPipe (ASR) → Orchestrator → Agent (LLM) → AudioOutPipe (TTS) → 扬声器
                                                                  ↓
                                                             ToolExecutor
 ```

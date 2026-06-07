@@ -87,14 +87,14 @@ func main() {
 			logging.Warnf("Close memory service failed: %v", err)
 		}
 	}()
+	agentCfg := agent.Config{
+		Provider: appConfig.Provider.LLM.Type,
+		APIKey:   llmCfg.APIKey,
+		BaseURL:  llmCfg.BaseURL,
+		Model:    llmCfg.Model,
+	}
 	toolCfg := tools.ManagerConfig{
-		Provider:        appConfig.Provider.LLM.Type,
-		APIKey:          llmCfg.APIKey,
-		BaseURL:         llmCfg.BaseURL,
-		Model:           llmCfg.Model,
-		ToolTypes:       appConfig.Tools.Types,
-		ActionResponses: appConfig.Tools.ActionResponses,
-		MCPServers:      toToolsMCPServers(appConfig.Tools.MCP),
+		MCPServers: toToolsMCPServers(appConfig.Tools.MCP),
 	}
 
 	logging.Infof("Creating ToolManager...")
@@ -109,12 +109,12 @@ func main() {
 	}()
 	logging.Infof("ToolManager created successfully")
 
-	logging.Infof("Creating VoiceAgent...")
-	voiceAgent, err := agent.NewVoiceAgentWithToolManagerAndMemory(baseCtx, toolCfg, toolManager, memorySvc)
+	logging.Infof("Creating Agent...")
+	agentRuntime, err := agent.NewAgent(baseCtx, agentCfg, toolManager, memorySvc)
 	if err != nil {
-		logging.Fatalf("Failed to create VoiceAgent: %v", err)
+		logging.Fatalf("Failed to create Agent: %v", err)
 	}
-	logging.Infof("VoiceAgent created successfully")
+	logging.Infof("Agent created successfully")
 
 	logging.Infof("Creating AudioMixer...")
 	mixerCfg := &audio.MixerConfig{
@@ -238,7 +238,7 @@ func main() {
 
 	logging.Infof("Creating Orchestrator...")
 	orchestrator := voicebot.NewOrchestratorWithOptions(
-		voiceAgent,
+		agentRuntime,
 		audioOutPipe,
 		audioInPipe,
 		toolExecutor,

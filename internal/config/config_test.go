@@ -12,8 +12,7 @@ func TestLoad_MergesDefaultsAndEnv(t *testing.T) {
 	path := filepath.Join(tmpDir, "voicebot.json")
 	data := `{
 		"logging": {"level": "debug"},
-		"audio": {"in_pipe": {"sample_rate": 8000}},
-		"tools": {"types": {"getTime": "query"}}
+		"audio": {"in_pipe": {"sample_rate": 8000}}
 	}`
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -33,9 +32,6 @@ func TestLoad_MergesDefaultsAndEnv(t *testing.T) {
 	}
 	if cfg.Audio.InPipe.SampleRate != 8000 {
 		t.Fatalf("expected sample rate to be 8000, got %d", cfg.Audio.InPipe.SampleRate)
-	}
-	if cfg.Tools.Types["playMusic"] != "action" {
-		t.Fatalf("expected default tool types to be preserved")
 	}
 	if cfg.Provider.ASR.Aliyun.APIKey != "dash-key" {
 		t.Fatalf("expected ASR api key from env")
@@ -101,14 +97,6 @@ func TestVoicebotExampleConfigLoadsForLocalVoicebot(t *testing.T) {
 	}
 	if err := cfg.ValidateKeys(true, true, true); err != nil {
 		t.Fatalf("ValidateKeys(voicebot.example.json) error = %v", err)
-	}
-}
-
-func TestValidateToolTypes(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Tools.Types["getTime"] = "invalid"
-	if err := cfg.Validate(); err == nil {
-		t.Fatalf("expected invalid tool type error")
 	}
 }
 

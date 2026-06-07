@@ -78,7 +78,7 @@ type Service interface {
 ```
 ASRFinal → Orchestrator
          ├─ 初始化 Turn（UserText + StartedAt）
-         ├─ 调用 VoiceAgent.Process
+         ├─ 调用 Agent.Process
          │      ├─ MemoryService.BuildContextMessages
          │      │      ├─ LongTerm Query (SQLite FTS)
          │      │      └─ Session History
@@ -108,7 +108,7 @@ ASRFinal → Orchestrator
 ## 7. 模块依赖
 ```
 voicebot/orchestrator ──> memory.Service
-agent/voice_agent_impl ──> memory.Service
+agent/runtime ──> memory.Service
 wsserver/session ──> memory.Context + memory.Service
 ```
 

@@ -46,27 +46,18 @@ func MyToolFunc(ctx context.Context, args map[string]interface{}) (interface{}, 
 ```go
 executor := tools.NewExecutor()
 
-// 注册 query 类型工具
-executor.RegisterTool("myTool", tools.ToolTypeQuery, myToolFunc)
-
-// 注册 action 类型工具
-executor.RegisterTool("playMusic", tools.ToolTypeAction, playMusicFunc)
+executor.RegisterTool("myTool", myToolFunc)
+executor.RegisterTool("playMusic", playMusicFunc)
 ```
 
 ### 3. 配置文件注册
 
-在 `data/voicebot.json` 中添加工具类型：
+在 `data/voicebot.json` 中添加 MCP 工具配置：
 
 ```json
 {
   "tools": {
-    "types": {
-      "myTool": "query",
-      "playMusic": "action"
-    },
-    "action_responses": {
-      "playMusic": "正在为您播放{{song}}"
-    }
+    "mcp": []
   }
 }
 ```
@@ -111,14 +102,12 @@ func PlayMusicTool(ctx context.Context, args map[string]interface{}) (interface{
 }
 ```
 
-配置文件中的响应模板：
+MCP 工具通过配置文件加载：
 
 ```json
 {
   "tools": {
-    "action_responses": {
-      "playMusic": "正在为您播放{{song}}"
-    }
+    "mcp": []
   }
 }
 ```

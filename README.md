@@ -10,7 +10,7 @@ Orion-X 是一个基于 Go 语言开发的智能语音机器人系统，采用�
 - **AudioSink 解耦输出** - 支持多种音频输出目标
 - **智能打断** - 支持用户在 AI 播放时随时打断
 - **情感语音合成** - 根据对话内容自动切换情感音色
-- **工具调用** - 支持查询类和动作类工具扩展
+- **工具调用** - 支持本地工具和 MCP 工具扩展
 - **音频混音** - 双通道音频混音，支持背景音乐播放
 - **事件驱动架构** - 基于 EventBus 的松耦合设计
 
@@ -27,7 +27,7 @@ User Speech → ASR → LLM Processing → TTS → Audio Output
 | 模块 | 职责 |
 |------|------|
 | `Orchestrator` | 状态机管理、事件路由、组件协调 |
-| `VoiceAgent` | LLM 调用、工具识别、情绪标注 |
+| `Agent` | LLM 调用、工具识别、工具结果总结 |
 | `AudioMixer` | 音频混合、音量控制 |
 | `AudioOutPipe` | TTS/资源音频播放、队列管理 |
 | `AudioInPipe` | 麦克风输入、ASR 集成 |
@@ -138,10 +138,7 @@ go run cmd/ws-server/main.go -config data/ws-server.json
     "model": "glm-4-flash"
   },
   "tools": {
-    "types": {              // 工具类型定义
-      "getTime": "query",   // query: 需要返回给 LLM
-      "playMusic": "action" // action: 直接执行并返回预设响应
-    }
+    "mcp": []
   }
 }
 ```
@@ -196,7 +193,7 @@ orion-x/
 │   └── ws-server/         # WebSocket 服务
 ├── internal/              # 内部包
 │   ├── voicebot/          # Orchestrator 核心
-│   ├── agent/             # VoiceAgent 实现
+│   ├── agent/             # Agent 实现
 │   ├── audio/             # 音频处理管道
 │   ├── provider/          # ASR/TTS/LLM provider 实现
 │   ├── tools/             # 工具执行

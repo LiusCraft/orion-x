@@ -71,17 +71,24 @@ type OrchestratorOptions struct {
 	Memory       memory.Service
 }
 
+// AgentRunner 是 Orchestrator 对 agent 运行体的最小依赖。
+type AgentRunner interface {
+	Process(ctx context.Context, text string) (<-chan agent.AgentEvent, error)
+	SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan agent.AgentEvent, error)
+}
+
 // orchestratorImpl Orchestrator 实现
 type orchestratorImpl struct {
 	stateMachine *StateMachine
 	eventBus     EventBus
 
-	voiceAgent   agent.VoiceAgent
+	agentRunner  AgentRunner
 	audioOutPipe audio.AudioOutPipe
 	audioInPipe  audio.AudioInPipe
 	toolExecutor tools.ToolExecutor
 	segmenter    *text.Segmenter
 	textFilter   TextFilterNode
+	metadataNode OutputMetadataNode
 
 	currentEmotion string
 	ctx            context.Context
@@ -120,17 +127,17 @@ type orchestratorImpl struct {
 
 // NewOrchestrator 创建新的Orchestrator
 func NewOrchestrator(
-	voiceAgent agent.VoiceAgent,
+	agentRunner AgentRunner,
 	audioOutPipe audio.AudioOutPipe,
 	audioInPipe audio.AudioInPipe,
 	toolExecutor tools.ToolExecutor,
 ) Orchestrator {
-	return NewOrchestratorWithOptions(voiceAgent, audioOutPipe, audioInPipe, toolExecutor, nil)
+	return NewOrchestratorWithOptions(agentRunner, audioOutPipe, audioInPipe, toolExecutor, nil)
 }
 
 // NewOrchestratorWithOptions 创建新的Orchestrator（带可选参数）
 func NewOrchestratorWithOptions(
-	voiceAgent agent.VoiceAgent,
+	agentRunner AgentRunner,
 	audioOutPipe audio.AudioOutPipe,
 	audioInPipe audio.AudioInPipe,
 	toolExecutor tools.ToolExecutor,
@@ -152,12 +159,14 @@ func NewOrchestratorWithOptions(
 	return &orchestratorImpl{
 		stateMachine:    NewStateMachine(),
 		eventBus:        NewEventBus(),
-		voiceAgent:      voiceAgent,
+		agentRunner:     agentRunner,
 		audioOutPipe:    audioOutPipe,
 		audioInPipe:     audioInPipe,
 		toolExecutor:    toolExecutor,
 		segmenter:       text.NewSegmenter(120),
 		textFilter:      NewTextFilterNode(),
+		metadataNode:    NewOutputMetadataNode(),
+		currentEmotion:  "default",
 		observer:        observer,
 		sentenceIndex:   make(map[int64]*SentenceRecord),
 		ttsSchedulerCfg: schedulerCfg,
@@ -183,7 +192,7 @@ func (o *orchestratorImpl) Start(ctx context.Context) error {
 	o.eventBus.Subscribe(EventTypeASRFinal, o.handleASRFinal)
 	o.eventBus.Subscribe(EventTypeToolCallRequested, o.handleToolCallRequested)
 	o.eventBus.Subscribe(EventTypeToolAudioReady, o.handleToolAudioReady)
-	o.eventBus.Subscribe(EventTypeLLMEmotionChanged, o.handleLLMEmotionChanged)
+	o.eventBus.Subscribe(EventTypeOutputEmotionChanged, o.handleOutputEmotionChanged)
 
 	logging.Infof("Orchestrator: event handlers registered")
 
@@ -622,12 +631,12 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 		defer o.decAgentStreams()
 
 		// 使用 agentCtx 调用 Agent（可被打断）
-		eventChan, err := o.voiceAgent.Process(agentCtx, asrEvent.Text)
+		eventChan, err := o.agentRunner.Process(agentCtx, asrEvent.Text)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				logging.Infof("Orchestrator: VoiceAgent process cancelled (normal interruption)")
+				logging.Infof("Orchestrator: Agent process cancelled (normal interruption)")
 			} else {
-				logging.Errorf("Orchestrator: VoiceAgent process error: %v", err)
+				logging.Errorf("Orchestrator: Agent process error: %v", err)
 			}
 			o.transitionTo(StateIdle)
 			return
@@ -681,14 +690,11 @@ func (o *orchestratorImpl) handleToolCallRequested(event Event) {
 
 		logging.Infof("Orchestrator: Tool execution result: %v", result)
 
-		if o.voiceAgent == nil {
-			return
-		}
-		if o.voiceAgent.GetToolType(toolEvent.Tool) != agent.ToolTypeQuery {
+		if o.agentRunner == nil {
 			return
 		}
 
-		summaryChan, err := o.voiceAgent.SummarizeToolResult(o.ctx, toolEvent.Tool, toolEvent.Args, result)
+		summaryChan, err := o.agentRunner.SummarizeToolResult(o.ctx, toolEvent.Tool, toolEvent.Args, result)
 		if err != nil {
 			logging.Errorf("Orchestrator: Tool summary error: %v", err)
 			return
@@ -712,36 +718,35 @@ func (o *orchestratorImpl) handleToolAudioReady(event Event) {
 	}
 }
 
-func (o *orchestratorImpl) handleLLMEmotionChanged(event Event) {
-	emotionEvent, ok := event.(*LLMEmotionChangedEvent)
+func (o *orchestratorImpl) handleOutputEmotionChanged(event Event) {
+	emotionEvent, ok := event.(*OutputEmotionChangedEvent)
 	if !ok {
 		return
 	}
 
 	o.currentEmotion = emotionEvent.Emotion
-	logging.Infof("Orchestrator: LLM emotion changed to: %s", emotionEvent.Emotion)
+	logging.Infof("Orchestrator: output emotion changed to: %s", emotionEvent.Emotion)
 }
 
 func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 	switch e := event.(type) {
 	case *agent.TextChunkEvent:
+		metadata := o.metadataNode.Process(e.Chunk)
+		if metadata.Emotion != "" && metadata.Emotion != o.currentEmotion {
+			o.currentEmotion = metadata.Emotion
+			o.eventBus.Publish(NewOutputEmotionChangedEvent(metadata.Emotion))
+		}
+
 		o.appendAssistantText(e.Chunk)
 		if o.observer != nil {
-			o.observer.OnLLMTextChunk(e.Chunk, e.Emotion)
+			o.observer.OnLLMTextChunk(e.Chunk, o.currentEmotion)
 		}
 		o.OnLLMTextChunk(e.Chunk)
-		if e.Emotion != "" && e.Emotion != o.currentEmotion {
-			o.currentEmotion = e.Emotion
-			o.eventBus.Publish(NewLLMEmotionChangedEvent(e.Emotion))
-		}
 
 		sentences := o.segmenter.Feed(e.Chunk)
 		for _, sentence := range sentences {
 			o.cacheSpeechSentence(sentence)
 		}
-	case *agent.EmotionChangedEvent:
-		o.currentEmotion = e.Emotion
-		o.eventBus.Publish(NewLLMEmotionChangedEvent(e.Emotion))
 	case *agent.ToolCallRequestedEvent:
 		o.OnToolCall(e.Tool, e.Args)
 	case *agent.FinishedEvent:
@@ -752,7 +757,7 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 		pending := o.ttsPendingCount
 		hasPendingQueue := len(o.pendingQueue) > 0
 		o.mu.Unlock()
-		logging.Infof("Orchestrator: VoiceAgent finished (TTS pending: %d)", pending)
+		logging.Infof("Orchestrator: Agent finished (TTS pending: %d)", pending)
 		// 注意：不转为 Idle，保持 Speaking 状态直到所有 TTS 播放完成
 		// onTTSPlaybackFinished 会在每个 TTS 播放完成时被调用
 		if pending <= 0 && !hasPendingQueue {
@@ -858,7 +863,7 @@ const (
 	EventTypeASRFinal
 	EventTypeToolCallRequested
 	EventTypeToolAudioReady
-	EventTypeLLMEmotionChanged
+	EventTypeOutputEmotionChanged
 	EventTypeTTSInterrupt
 	EventTypeStateChanged
 )

@@ -290,12 +290,6 @@ func mergeVoicebotSessionConfig(base VoicebotSessionConfig, override VoicebotSes
 		out.Audio.TTSScheduler.MaxCacheSentences = override.Audio.TTSScheduler.MaxCacheSentences
 	}
 
-	if len(override.Tools.Types) > 0 {
-		out.Tools.Types = cloneStringMap(override.Tools.Types)
-	}
-	if len(override.Tools.ActionResponses) > 0 {
-		out.Tools.ActionResponses = cloneStringMap(override.Tools.ActionResponses)
-	}
 	if len(override.Tools.MCP) > 0 {
 		out.Tools.MCP = append([]MCPServerConfig(nil), override.Tools.MCP...)
 	}

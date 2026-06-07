@@ -12,20 +12,25 @@ import (
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 
-// NewInstrumentedVoiceAgent wraps a VoiceAgent with metrics.
-func NewInstrumentedVoiceAgent(next agent.VoiceAgent, m *VoicebotMetrics) agent.VoiceAgent {
-	if next == nil || m == nil {
-		return next
-	}
-	return &instrumentedVoiceAgent{next: next, metrics: m}
+type agentRunner interface {
+	Process(ctx context.Context, input string) (<-chan agent.AgentEvent, error)
+	SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan agent.AgentEvent, error)
 }
 
-type instrumentedVoiceAgent struct {
-	next    agent.VoiceAgent
+// NewInstrumentedAgent wraps an Agent with metrics.
+func NewInstrumentedAgent(next agentRunner, m *VoicebotMetrics) *InstrumentedAgent {
+	if next == nil || m == nil {
+		return nil
+	}
+	return &InstrumentedAgent{next: next, metrics: m}
+}
+
+type InstrumentedAgent struct {
+	next    agentRunner
 	metrics *VoicebotMetrics
 }
 
-func (i *instrumentedVoiceAgent) Process(ctx context.Context, input string) (<-chan agent.AgentEvent, error) {
+func (i *InstrumentedAgent) Process(ctx context.Context, input string) (<-chan agent.AgentEvent, error) {
 	start := time.Now()
 	eventChan, err := i.next.Process(ctx, input)
 	if err != nil {
@@ -63,12 +68,8 @@ func (i *instrumentedVoiceAgent) Process(ctx context.Context, input string) (<-c
 	return out, nil
 }
 
-func (i *instrumentedVoiceAgent) SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan agent.AgentEvent, error) {
+func (i *InstrumentedAgent) SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan agent.AgentEvent, error) {
 	return i.next.SummarizeToolResult(ctx, tool, args, result)
-}
-
-func (i *instrumentedVoiceAgent) GetToolType(tool string) agent.ToolType {
-	return i.next.GetToolType(tool)
 }
 
 // NewInstrumentedToolExecutor wraps a ToolExecutor with metrics.

@@ -4,7 +4,7 @@
 
 ### 0. 模块串联 (优先级: 高) ⭐️ 已完成
 - [x] 创建主程序 `cmd/voicebot/main.go`
-- [x] 集成 Orchestrator、VoiceAgent、AudioOutPipe、AudioInPipe
+- [x] 集成 Orchestrator、Agent、AudioOutPipe、AudioInPipe
 - [x] 集成 ToolExecutor 和工具
 - [x] 验证各模块能够正确协作
 - [x] 添加集成测试
@@ -24,14 +24,14 @@
 - [x] 集成各模块接口（先使用mock验证流程）
 - [x] 集成 `text.Segmenter` 分句器和 TTS 生成
 
-### 2. VoiceAgent 实现 (优先级: 高)
-- [x] 实现 `VoiceAgent.Process()` 方法
+### 2. Agent 实现 (优先级: 高)
+- [x] 实现 `Agent.Process()` 方法
 - [x] 集成 `internal/agent`、`internal/tools` 与 `internal/provider/llm` 的工具调用逻辑
 - [x] 启用流式LLM输出（当前被注释）
 - [x] 实现工具识别和调用逻辑
-- [x] 区分查询类工具和动作类工具的流程
+- [x] 工具调用统一交给 Orchestrator 处理
 - [x] 实现情绪标签注入到Prompt（优化为标签在句子开头）
-- [x] 集成 `EmotionExtractor` 和 `internal/text` 文本清洗
+- [x] 集成 `OutputMetadataNode` 和 `internal/text` 文本清洗
 - [x] 集成 `text.Segmenter` 分句器
 - [x] 修复 LLM 流式增量输出，避免重复前缀
 
@@ -98,7 +98,7 @@
 ### 7. 工具注册 (优先级: 中)
 - [ ] 实现工具自动发现机制
 - [ ] 实现工具配置管理
-- [ ] 工具类型配置化（查询类/动作类）
+- [x] 工具配置收敛为 `tools.mcp` 加载配置
 
 ## 阶段三：功能完善
 
@@ -123,7 +123,7 @@
 ### 11. 单元测试 (优先级: 中)
 - [ ] 测试 `Orchestrator` 状态转换
 - [ ] 测试 `AudioMixer` 混音逻辑
-- [ ] 测试 `VoiceAgent` 流程
+- [ ] 测试 `Agent` 流程
 - [x] 测试 `internal/text` 文本清洗逻辑
 - [ ] 测试工具调用流程
 
@@ -165,7 +165,7 @@
 ## 建议实现顺序（自顶向下）
 
 1. **Orchestrator** ⭐️ - 外壳框架，先搭建整体流程，使用mock验证
-2. **VoiceAgent** - 逻辑层，实现LLM调用和工具识别
+2. **Agent** - 逻辑层，实现LLM调用和工具识别
 3. **AudioMixer** - 工具层，实现音频混音功能
 4. **AudioOutPipe** - 硬件层，实现音频输出（依赖AudioMixer）
 5. **AudioInPipe** - 硬件层，实现音频输入（基于现有ASR）
@@ -183,8 +183,8 @@
 - 保持低延迟，边生成边播放
 
 ### 工具调用流程
-- 查询类: ASR → 识别工具 → 调用 → 获取数据 → LLM总结 → TTS
-- 动作类: ASR → 识别工具 → 生成回复 → TTS → 调用工具 → 播放音频
+- 工具调用: ASR → Agent 工具调用事件 → Orchestrator 执行工具 → LLM 总结结果 → TTS
+- 资源音频: 工具返回音频 → AudioMixer 播放
 
 ### 混音逻辑
 ```
@@ -205,7 +205,7 @@ LLM Prompt要求格式: "回答内容 [EMO:emotion]"
 
 ## 依赖模块
 
-- `internal/agent/*` - VoiceAgent 与 LLM 工具调用编排
+- `internal/agent/*` - Agent 与 LLM 工具调用编排
 - `internal/tools/*` - 工具加载、注册与执行
 - `internal/provider/llm/*` - LLM provider 模块
 - `internal/provider/asr/*` - ASR provider 模块

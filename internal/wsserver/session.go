@@ -33,6 +33,11 @@ type outboundMessage struct {
 	data    []byte
 }
 
+type agentRunner interface {
+	Process(ctx context.Context, text string) (<-chan agent.AgentEvent, error)
+	SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan agent.AgentEvent, error)
+}
+
 const (
 	sttStatePartial             = "partial"
 	sttStateFinal               = "final"
@@ -61,7 +66,7 @@ type Session struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 
-	voiceAgent   agent.VoiceAgent
+	agentRunner  agentRunner
 	memorySvc    memory.Service
 	toolManager  tools.ToolManager
 	toolExecutor tools.ToolExecutor
@@ -248,14 +253,14 @@ func (s *Session) initPipeline() error {
 	}
 	s.memorySvc = memorySvc
 
+	agentCfg := agent.Config{
+		Provider: s.voicebot.Provider.LLM.Type,
+		APIKey:   llmCfg.APIKey,
+		BaseURL:  llmCfg.BaseURL,
+		Model:    llmCfg.Model,
+	}
 	toolCfg := tools.ManagerConfig{
-		Provider:        s.voicebot.Provider.LLM.Type,
-		APIKey:          llmCfg.APIKey,
-		BaseURL:         llmCfg.BaseURL,
-		Model:           llmCfg.Model,
-		ToolTypes:       s.voicebot.Tools.Types,
-		ActionResponses: s.voicebot.Tools.ActionResponses,
-		MCPServers:      toToolsMCPServers(s.voicebot.Tools.MCP),
+		MCPServers: toToolsMCPServers(s.voicebot.Tools.MCP),
 	}
 
 	toolManager, err := tools.NewToolManager(s.ctx, toolCfg)
@@ -264,14 +269,15 @@ func (s *Session) initPipeline() error {
 	}
 	s.toolManager = toolManager
 
-	voiceAgent, err := agent.NewVoiceAgentWithToolManagerAndMemory(s.ctx, toolCfg, toolManager, memorySvc)
+	agentRuntime, err := agent.NewAgent(s.ctx, agentCfg, toolManager, memorySvc)
 	if err != nil {
 		return err
 	}
+	var agentRunner agentRunner = agentRuntime
 	if s.voicebotMetrics != nil {
-		voiceAgent = metrics.NewInstrumentedVoiceAgent(voiceAgent, s.voicebotMetrics)
+		agentRunner = metrics.NewInstrumentedAgent(agentRuntime, s.voicebotMetrics)
 	}
-	s.voiceAgent = voiceAgent
+	s.agentRunner = agentRunner
 
 	mixerConfig := &audio.MixerConfig{
 		TTSVolume:       s.voicebot.Audio.Mixer.TTSVolume,
@@ -344,7 +350,7 @@ func (s *Session) initPipeline() error {
 
 	observer := &sessionObserver{session: s}
 	orchestrator := voicebot.NewOrchestratorWithOptions(
-		voiceAgent,
+		agentRunner,
 		audioOutPipe,
 		nil,
 		s.toolExecutor,

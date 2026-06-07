@@ -175,7 +175,7 @@ func TestTTSSchedulerOrder(t *testing.T) {
 
 func TestTTSSchedulerNewTurnClearsQueues(t *testing.T) {
 	outPipe := &schedulerOutPipe{}
-	voice := &mockVoiceAgent{events: nil}
+	voice := &mockAgent{events: nil}
 	orchestrator := NewOrchestratorWithOptions(
 		voice,
 		outPipe,

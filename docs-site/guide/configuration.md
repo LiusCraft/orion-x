@@ -112,19 +112,6 @@
     }
   },
   "tools": {
-    "types": {
-      "getTime": "query",
-      "getWeather": "query",
-      "search": "query",
-      "playMusic": "action",
-      "setVolume": "action",
-      "pauseMusic": "action"
-    },
-    "action_responses": {
-      "playMusic": "正在为您播放{{song}}",
-      "setVolume": "已将音量设置为{{level}}",
-      "pauseMusic": "音乐已暂停"
-    },
     "mcp": []
   },
   "memory": {
@@ -196,8 +183,7 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| types | object | 工具类型映射（query/action） |
-| action_responses | object | action 类工具的预设响应模板 |
+| mcp | array | MCP 服务器配置 |
 
 ## 校验规则
 
@@ -205,7 +191,6 @@
 - `provider.asr.aliyun.api_key` / `provider.tts.aliyun.api_key` 不能为空（或由 `DASHSCOPE_API_KEY` 覆盖）
 - `audio.in_pipe.sample_rate` 与 `provider.tts.aliyun.sample_rate` 必须是正数
 - `audio.tts_scheduler.max_in_flight_sentences` 必须是正数
-- `tools.types` 仅接受 `query` 或 `action`
 - `cmd/voicebot` 本地启动不会监听 `server.address`，也不会暴露 metrics；服务端监听与 metrics 配置在 `ws-server.example.json`
 
 ## 相关文档

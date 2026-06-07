@@ -9,10 +9,10 @@ internal/
 │   ├── state.go       # 状态机实现
 │   ├── events.go      # 事件定义和实现
 │   └── eventbus.go    # 事件总线实现
-├── agent/             # 语音Agent模块
-│   ├── voice_agent.go # VoiceAgent接口
-│   ├── tools.go       # 工具分类器和回复生成器
-│   ├── processor.go   # LLM处理器（情绪提取、Markdown过滤）
+├── agent/             # 通用 Agent 模块
+│   ├── agent.go # Agent接口
+│   ├── runtime.go     # Agent运行主流程
+│   ├── output_metadata_node.go # 输出元数据提取
 │   └── events.go      # Agent事件定义
 ├── audio/             # 音频处理模块
 │   ├── mixer.go       # AudioMixer接口
@@ -57,7 +57,7 @@ internal/
 
 **实现细节**：
 - 集成 `text.Segmenter` 进行流式文本分句
-- 接收 `VoiceAgent` 的 `TextChunkEvent` 进行分句处理
+- 接收 `Agent` 的 `TextChunkEvent` 进行分句处理
 - 对每个完整句子调用 `AudioOutPipe.PlayTTS()` 生成和播放音频
 - 在 `FinishedEvent` 时调用 `Segmenter.Flush()` 处理剩余文本
 - 状态转换：`Processing` → `Speaking`（开始播放时）→ `Idle`（完成时）
@@ -75,40 +75,27 @@ internal/
 - `ASRFinal` - ASR识别完成事件
 - `ToolCallRequested` - 工具调用请求事件
 - `ToolAudioReady` - 工具返回音频事件
-- `LLMEmotionChanged` - LLM情绪变化事件
+- `OutputEmotionChanged` - 输出情绪变化事件
 - `TTSInterrupt` - TTS播放中断事件
 - `StateChanged` - 状态变化事件
 
 ### 2. agent 包
 
-#### VoiceAgent (接口)
+#### Agent（具体类型）
 - `Process(ctx context.Context, text string) (<-chan AgentEvent, error)`
-- `GetToolType(tool string) ToolType`
 
-#### 工具类型
-- `ToolTypeQuery` - 查询类（需要LLM总结）
-- `ToolTypeAction` - 动作类（直接执行+播报）
+#### Agent Runtime
+- `Process(ctx context.Context, text string) (<-chan AgentEvent, error)`
+- 负责 LLM 流式输出、工具调用请求事件、工具结果总结
 
-#### LLMProcessor (接口)
-- `ProcessStream(ctx context.Context, text string) (<-chan TextChunkEvent, <-chan error)`
-
-#### EmotionExtractor (接口)
-- `Extract(text string) string`
-- 支持从文本中提取 `[EMO:xxx]` 标签
+#### OutputMetadataNode (接口)
+- `Process(text string) OutputMetadata`
+- 在 Orchestrator 输出链路中从文本提取 `[EMO:xxx]` 标签
 
 #### 文本清洗
 - `text.FilterMarkdown(text string) string`
 - `voicebot.TextFilterNode.Process(text string) string`
 - `TextFilterNode` 在 Orchestrator 进入 TTS 前编排 Markdown 清洗与语音情绪标签移除
-
-#### ToolClassifier
-- `GetToolType(tool string) ToolType`
-- `RegisterTool(name string, toolType ToolType)`
-
-#### ActionResponseGenerator
-- `GenerateResponse(tool string, args map[string]interface{}) string`
-- 生成动作类工具的回复
-- 支持自定义回复模板
 
 ### 3. audio 包
 
@@ -188,13 +175,13 @@ internal/
 
 ### 1. 工具调用流程
 
-#### 直接播放类工具（如播放音乐）
+#### 资源音频工具（如播放音乐）
 ```
 用户输入 → 意图识别 → 识别工具 → 生成固定回复
   → 调用工具 → 工具返回资源音频 → TTS播报回复
 ```
 
-#### 查询类工具（如查询天气）
+#### 工具结果总结（如查询天气）
 ```
 用户输入 → 意图识别 → 识别工具 → 调用工具获取数据
   → LLM总结数据 → 情绪标注 → Markdown过滤 → TTS播放
@@ -249,10 +236,10 @@ Idle ─────→ Processing ───→ Speaking
     - [x] 集成 `text.Segmenter` 分句器和 TTS 生成
 
 2. **agent 包**
-    - [x] `VoiceAgent` 完整实现
+    - [x] `Agent` 完整实现
     - [x] 集成 `internal/agent`、`internal/tools` 与 `internal/provider/llm` 的工具调用逻辑
     - [x] 启用流式LLM输出
-    - [x] 集成 `EmotionExtractor` 和 `internal/text` 文本清洗
+    - [x] 集成 `OutputMetadataNode` 和 `internal/text` 文本清洗
 
 3. **audio 包**
     - [x] `AudioMixer` 实现（音频混音）
@@ -268,7 +255,7 @@ Idle ─────→ Processing ───→ Speaking
 
 ### 需要集成的现有模块
 
-- `internal/agent/*` - VoiceAgent 与 LLM 工具调用编排
+- `internal/agent/*` - Agent 与 LLM 工具调用编排
 - `internal/tools/*` - 工具加载、注册与执行
 - `internal/provider/llm/*` - LLM provider 模块
 - `internal/provider/asr/*` - ASR provider 模块
