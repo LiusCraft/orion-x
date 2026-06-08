@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/gordonklaus/portaudio"
 	"github.com/liuscraft/orion-x/internal/audio"
@@ -17,6 +18,8 @@ type PortAudioSink struct {
 	stream  *portaudio.Stream
 	buffer  []int16
 	started bool
+
+	lastUnderflowLog time.Time
 }
 
 func NewPortAudioSink() *PortAudioSink {
@@ -86,7 +89,29 @@ func (s *PortAudioSink) WritePCM(samples []int16) error {
 		s.buffer[i] = 0
 	}
 
-	return s.stream.Write()
+	if err := s.stream.Write(); err != nil {
+		if isOutputUnderflow(err) {
+			now := time.Now()
+			if now.Sub(s.lastUnderflowLog) >= 5*time.Second {
+				s.lastUnderflowLog = now
+				logging.Warnf("PortAudioSink: output underflowed; continuing local playback")
+			}
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func isOutputUnderflow(err error) bool {
+	if err == nil {
+		return false
+	}
+	if err == portaudio.OutputUnderflowed {
+		return true
+	}
+	var paErr portaudio.Error
+	return errors.As(err, &paErr) && paErr == portaudio.OutputUnderflowed
 }
 
 func (s *PortAudioSink) Stop() error {

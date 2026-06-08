@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/liuscraft/orion-x/internal/logging"
 )
@@ -14,6 +15,7 @@ func (v *Agent) Process(ctx context.Context, input string) (<-chan AgentEvent, e
 	logging.Infof("Agent: processing input: %s", input)
 	eventChan := make(chan AgentEvent)
 	var wg sync.WaitGroup
+	processStart := time.Now()
 
 	wg.Add(1)
 	go func() {
@@ -23,6 +25,7 @@ func (v *Agent) Process(ctx context.Context, input string) (<-chan AgentEvent, e
 		messages := v.buildMessages(ctx, input)
 
 		logging.Infof("Agent: starting LLM stream...")
+		streamStart := time.Now()
 		stream, err := v.chatModel.Stream(ctx, messages)
 		if err != nil {
 			logging.Errorf("Agent: LLM stream error: %v", err)
@@ -30,14 +33,23 @@ func (v *Agent) Process(ctx context.Context, input string) (<-chan AgentEvent, e
 			return
 		}
 		defer stream.Close()
+		logging.Infof("Agent: LLM stream established in %v", time.Since(streamStart))
 
 		fullText := ""
 		bufferedContent := ""
 		lastFilteredLength := 0
+		firstChunkLogged := false
 
 		for {
 			msg, err := stream.Recv()
 			if err == io.EOF {
+				if !firstChunkLogged {
+					logging.Infof(
+						"Agent: LLM stream completed without text chunk (request_to_finish=%v, process_to_finish=%v)",
+						time.Since(streamStart),
+						time.Since(processStart),
+					)
+				}
 				logging.Infof("Agent: LLM stream completed, total text length: %d", len(fullText))
 				break
 			}
@@ -52,6 +64,14 @@ func (v *Agent) Process(ctx context.Context, input string) (<-chan AgentEvent, e
 
 				newContent, nextLength := deltaFromBufferedContent(bufferedContent, lastFilteredLength)
 				if newContent != "" {
+					if !firstChunkLogged {
+						firstChunkLogged = true
+						logging.Infof(
+							"Agent: first LLM text chunk received (request_to_first_chunk=%v, process_to_first_chunk=%v)",
+							time.Since(streamStart),
+							time.Since(processStart),
+						)
+					}
 					eventChan <- &TextChunkEvent{Chunk: newContent}
 					fullText += newContent
 				}

@@ -96,7 +96,7 @@ type orchestratorImpl struct {
 
 	// 流式 TTS session 状态
 	ttsStreamActive   bool // 当前是否有 TTS stream 在接收文本
-	ttsPendingStreams  int  // 已建立但尚未播放完毕的 TTS stream 数量
+	ttsPendingStreams int  // 已建立但尚未播放完毕的 TTS stream 数量
 	currentTurnID     int64
 
 	wg sync.WaitGroup
@@ -111,6 +111,8 @@ type orchestratorImpl struct {
 	turnAborted        bool
 	turnRecorded       bool
 	activeAgentStreams int
+	lastASRInterimAt   time.Time
+	lastASRFinalAt     time.Time
 }
 
 // NewOrchestrator 创建新的Orchestrator
@@ -186,6 +188,9 @@ func (o *orchestratorImpl) Start(ctx context.Context) error {
 				logging.Infof("Orchestrator: ASR final result: %s", text)
 				o.OnASRFinal(text)
 			} else if text != "" {
+				o.mu.Lock()
+				o.lastASRInterimAt = time.Now()
+				o.mu.Unlock()
 				// 只有非 final 的中间结果才触发打断（用户正在说话）
 				logging.Infof("Orchestrator: user speaking detected (interim): %s", text)
 				o.OnUserSpeakingDetected()
@@ -379,8 +384,10 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 		logging.Infof("Orchestrator: cancelling previous Agent before starting new one...")
 		o.agentCancel()
 	}
+	now := time.Now()
+	lastInterimAt := o.lastASRInterimAt
 	o.currentTurnID++
-	o.turnStartedAt = time.Now()
+	o.turnStartedAt = now
 	o.turnUserText = asrEvent.Text
 	o.turnAssistantBuf.Reset()
 	o.turnAborted = false
@@ -388,6 +395,7 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 	o.activeAgentStreams = 0
 	o.ttsStreamActive = false
 	o.ttsPendingStreams = 0
+	o.lastASRFinalAt = now
 
 	// 为新的 Agent 调用创建独立的 context
 	o.agentCtx, o.agentCancel = context.WithCancel(o.ctx)
@@ -396,6 +404,9 @@ func (o *orchestratorImpl) handleASRFinal(event Event) {
 
 	logging.StartTurn()
 	logging.Infof("Orchestrator: ASR final event received: %s", asrEvent.Text)
+	if !lastInterimAt.IsZero() {
+		logging.Infof("Orchestrator: ASR final arrived %v after last interim", now.Sub(lastInterimAt))
+	}
 	o.transitionTo(StateProcessing)
 
 	o.wg.Add(1)
@@ -523,6 +534,7 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 			o.ttsStreamActive = true
 			o.ttsPendingStreams++
 			emotion := o.currentEmotion
+			asrFinalAt := o.lastASRFinalAt
 			o.mu.Unlock()
 			if err := o.audioOutPipe.BeginTTSStream(emotion); err != nil {
 				if !errors.Is(err, context.Canceled) {
@@ -533,6 +545,9 @@ func (o *orchestratorImpl) handleAgentEvent(event agent.AgentEvent) {
 				o.ttsPendingStreams--
 				o.mu.Unlock()
 			} else {
+				if !asrFinalAt.IsZero() {
+					logging.Infof("Orchestrator: TTS stream started %v after ASR final", time.Since(asrFinalAt))
+				}
 				if o.observer != nil {
 					o.observer.OnTTSStart()
 				}
