@@ -205,6 +205,7 @@
 - [x] web-ui `/voice-chat` 增加 realtime STT capability 开关，便于兼容验收
 - [x] 打断策略改为优先依赖 VAD（开启 VAD 时 partial 不直接触发打断）
 - [x] VAD 开启时，partial 仅在最近 1.5s 内检测到语音后才下发
+- [x] AudioInPipe 切句改为由 VAD 驱动，ASR 只处理 VAD 切出的语音片段
 - [x] 同步更新协议与设计文档（`docs/WS_PROTOCOL.md`、`docs/ws-server-design.md`、`docs/ws-realtime-stt-feedback-design.md`）
 
 ## 优先级说明

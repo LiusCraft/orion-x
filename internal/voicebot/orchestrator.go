@@ -176,12 +176,6 @@ func (o *orchestratorImpl) Start(ctx context.Context) error {
 
 	if o.audioInPipe != nil {
 		logging.Infof("Orchestrator: starting AudioInPipe...")
-		if err := o.audioInPipe.Start(o.ctx); err != nil {
-			logging.Errorf("Orchestrator: failed to start AudioInPipe: %v", err)
-			return err
-		}
-		logging.Infof("Orchestrator: AudioInPipe started")
-
 		o.audioInPipe.OnASRResult(func(text string, isFinal bool) {
 			if isFinal {
 				// ASR final 表示用户说完了，直接处理，不触发打断
@@ -200,6 +194,12 @@ func (o *orchestratorImpl) Start(ctx context.Context) error {
 			logging.Infof("Orchestrator: VAD user speaking detected")
 			o.OnUserSpeakingDetected()
 		})
+
+		if err := o.audioInPipe.Start(o.ctx); err != nil {
+			logging.Errorf("Orchestrator: failed to start AudioInPipe: %v", err)
+			return err
+		}
+		logging.Infof("Orchestrator: AudioInPipe started")
 	}
 
 	if o.audioOutPipe != nil {
@@ -310,6 +310,7 @@ func (o *orchestratorImpl) handleUserSpeakingDetected(event Event) {
 
 	// 只在 Processing、Speaking 状态或有 TTS 活跃时才需要打断
 	needInterrupt := currentState == StateSpeaking || currentState == StateProcessing || ttsActive
+	notifyTTSAbort := currentState == StateSpeaking || ttsActive
 	if needInterrupt {
 		o.mu.Lock()
 		o.turnAborted = true
@@ -333,7 +334,7 @@ func (o *orchestratorImpl) handleUserSpeakingDetected(event Event) {
 			o.audioOutPipe.Interrupt()
 		}
 
-		if o.observer != nil && ttsActive {
+		if o.observer != nil && notifyTTSAbort {
 			o.observer.OnTTSStop(true)
 		}
 

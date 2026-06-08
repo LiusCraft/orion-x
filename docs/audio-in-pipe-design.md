@@ -2,15 +2,15 @@
 
 ## 模块职责
 
-AudioInPipe 是音频输入管道，负责音频数据接收、VAD监听、ASR调用。
+AudioInPipe 是音频输入管道，负责音频数据接收、VAD 监听与切句、ASR 调用。
 
 **重要说明**：AudioInPipe 本身不负责音频采集，而是通过 `AudioSource` 接口抽象音频输入源。具体的音频采集实现（如本地麦克风、WebSocket、文件等）位于 `internal/audio/source/` 包中。
 
 ## 核心功能
 
 1. **音频数据接收**：通过 `AudioSource` 接口或 `SendAudio()` 方法接收音频数据
-2. **VAD检测**：检测用户说话活动
-3. **ASR调用**：调用 ASR 服务进行语音识别
+2. **VAD检测与切句**：检测用户说话活动，并以 VAD 的语音开始/结束作为输入切句边界
+3. **ASR调用**：按 VAD 切出的语音片段调用 ASR 服务进行识别，避免持续向 ASR 输入长流
 4. **事件发布**：发布识别结果和用户说话检测事件
 5. **中断处理**：响应中断信号，停止接收和识别
 
@@ -19,7 +19,7 @@ AudioInPipe 是音频输入管道，负责音频数据接收、VAD监听、ASR�
 ```
 Idle (初始状态)
   ↓
-Listening (监听中) - 正在采集音频和识别
+Listening (监听中) - 正在采集音频；启用 VAD 时只在完整语音片段结束后启动 ASR 任务识别
   ↓
 Stopping (停止中) - 清理资源中
   ↓
@@ -67,11 +67,11 @@ type InPipeConfig struct {
 ## 数据流
 
 ```
-麦克风采集
+麦克风/WS 音频输入
     ↓
-VAD检测（可选）
+VAD检测与语音片段缓冲（启用 VAD 时）
     ↓
-ASR识别
+ASR识别（每个 VAD 片段一个 ASR task）
     ↓
 结果回调
     ├─ partial（中间结果）
@@ -86,7 +86,7 @@ ASR识别
 
 | 事件 | 触发条件 | 说明 |
 |------|---------|------|
-| UserSpeakingDetectedEvent | ASR 返回非空结果 | 检测到用户说话，触发 AudioOutPipe 中断 |
+| UserSpeakingDetectedEvent | VAD 检测到语音开始 | 检测到用户说话，触发 AudioOutPipe 中断 |
 | ASRFinalEvent | ASR 返回 final 结果 | 识别完成，传递文本给 Orchestrator |
 
 ## 依赖模块
@@ -137,14 +137,17 @@ type AudioSource interface {
 
 - 在 `AudioInPipe.readAudioFromSource()` 中先通过 `AudioLevelMonitor` 计算 RMS、peak、clipping ratio 和动态噪声基线，用于静音前置过滤、输入健康检查和调试日志。
 - 非静音音频进入 Silero VAD，由模型判断是否为用户语音。
-- 当 Silero VAD 检测到语音且距离上次触发超过最小间隔时，触发 `OnUserSpeakingDetected()`。
+- 当 Silero VAD 检测到语音开始且距离上次触发超过最小间隔时，触发 `OnUserSpeakingDetected()`。
+- 启用 VAD 时，AudioInPipe 会先缓存语音片段；VAD 从语音态落回静音态后，将该片段作为一个完整 ASR task 发送：`Start()` → `SendAudio()` × N → `Finish()`。
+- `VADSpeechPadMs` 同时用于保留语音开始前的短音频，避免首字被截断。
+- `Stop()` 会 flush 当前未结束的 VAD 片段，覆盖客户端停止录音但没有尾部静音帧的场景。
 - 通过 `EnableVAD` 开关控制，默认启用。
 
 ### 参数与策略
 
 - `VADThreshold`：0~1，Silero 语音概率阈值。
 - RMS 不再作为 VAD 判断依据，只作为前置静音过滤、底噪估计、爆音/高噪声健康检查和日志指标。
-- 最小触发间隔：300ms（防止频繁触发）。
+- 最小触发间隔：300ms（防止频繁触发打断事件）。
 - 若音频读取返回 `context.Canceled`/`io.EOF`，直接退出，不触发 VAD。
 
 ## 使用方式
@@ -216,14 +219,7 @@ audioInPipe, err := audio.NewInPipeWithAudioSource(apiKey, config, customSource)
 
 ### VAD 检测
 
-**方案 1**：使用 ASR 的 VAD 能力（推荐）
-- DashScope ASR 内置 VAD
-- 通过 `IsFinal=true` 判断句子结束
-
-**方案 2**：自实现 VAD
-- 计算音频能量
-- 超过阈值判定为说话
-- 连续静音超过阈值判定为静音
+AudioInPipe 以本地 VAD 作为切句来源。ASR 不再负责输入切句，也不应持续接收整段会话音频流；它只处理 VAD 输出的单次语音片段。
 
 ### ASR 集成
 
@@ -268,9 +264,10 @@ recognizer.OnResult(func(result asr.Result) {
 
 收到 Stop 请求时：
 1. 停止音频采集
-2. 关闭 ASR 连接
-3. 清理资源
-4. 状态转换回 Idle
+2. flush 当前 VAD 片段并等待 ASR task 完成
+3. 关闭 ASR 连接
+4. 清理资源
+5. 状态转换回 Idle
 
 ## 并发安全
 

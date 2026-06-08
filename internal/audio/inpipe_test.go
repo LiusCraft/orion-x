@@ -16,6 +16,11 @@ type mockRecognizer struct {
 	finishCalled bool
 	closeCalled  bool
 	onResult     func(asr.Result)
+	startCount   int
+	sendCount    int
+	finishCount  int
+	sentAudio    [][]byte
+	mu           sync.Mutex
 }
 
 type blockingRecognizer struct {
@@ -75,12 +80,19 @@ func (s *blockingAudioSource) Close() error {
 }
 
 func (m *mockRecognizer) Start(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.startCalled = true
+	m.startCount++
 	return nil
 }
 
 func (m *mockRecognizer) SendAudio(ctx context.Context, data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sendCalled = true
+	m.sendCount++
+	m.sentAudio = append(m.sentAudio, cloneBytes(data))
 	return nil
 }
 
@@ -108,11 +120,16 @@ func (b *blockingRecognizer) Close() error {
 func (b *blockingRecognizer) OnResult(handler func(asr.Result)) {}
 
 func (m *mockRecognizer) Finish(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.finishCalled = true
+	m.finishCount++
 	return nil
 }
 
 func (m *mockRecognizer) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.closeCalled = true
 	return nil
 }
@@ -125,6 +142,28 @@ func (m *mockRecognizer) SendResult(result asr.Result) {
 	if m.onResult != nil {
 		m.onResult(result)
 	}
+}
+
+func (m *mockRecognizer) counts() (start, send, finish int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.startCount, m.sendCount, m.finishCount
+}
+
+func (m *mockRecognizer) sentFrameCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.sentAudio)
+}
+
+func (m *mockRecognizer) sentBytes() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	total := 0
+	for _, frame := range m.sentAudio {
+		total += len(frame)
+	}
+	return total
 }
 
 func TestNewInPipeWithRecognizer(t *testing.T) {
@@ -408,6 +447,161 @@ func TestInPipeStopUnblocksSendAudio(t *testing.T) {
 	}
 }
 
+func TestInPipeVADSegmentsAudioBeforeASR(t *testing.T) {
+	config := DefaultInPipeConfig()
+	config.EnableVAD = true
+	config.VADSpeechPadMs = 0
+
+	mock := &mockRecognizer{}
+	pipe := NewInPipeWithRecognizer(config, mock)
+	impl, ok := pipe.(*inPipeImpl)
+	if !ok {
+		t.Fatal("expected inPipeImpl")
+	}
+	impl.vadDetector = &staticVAD{detected: true}
+	impl.vadEnabled = true
+
+	if err := pipe.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if err := pipe.SendAudio(makePCM(12000, 160)); err != nil {
+		t.Fatalf("SendAudio speech failed: %v", err)
+	}
+
+	start, send, finish := mock.counts()
+	if start != 0 || send != 0 || finish != 0 {
+		t.Fatalf("expected active speech to be buffered before ASR, got start=%d send=%d finish=%d", start, send, finish)
+	}
+
+	impl.vadDetector = &staticVAD{detected: false}
+	if err := pipe.SendAudio(makePCM(0, 160)); err != nil {
+		t.Fatalf("SendAudio silence failed: %v", err)
+	}
+
+	waitForCondition(t, func() bool {
+		start, send, finish = mock.counts()
+		return start == 1 && send == 1 && finish == 1
+	})
+
+	if frames := mock.sentFrameCount(); frames != 1 {
+		t.Fatalf("expected one speech frame sent to ASR, got %d", frames)
+	}
+
+	if err := pipe.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+}
+
+func TestInPipeVADIgnoresSilenceOnlyAudio(t *testing.T) {
+	config := DefaultInPipeConfig()
+	config.EnableVAD = true
+
+	mock := &mockRecognizer{}
+	pipe := NewInPipeWithRecognizer(config, mock)
+	impl, ok := pipe.(*inPipeImpl)
+	if !ok {
+		t.Fatal("expected inPipeImpl")
+	}
+	impl.vadDetector = &staticVAD{detected: false}
+	impl.vadEnabled = true
+
+	if err := pipe.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if err := pipe.SendAudio(makePCM(0, 160)); err != nil {
+		t.Fatalf("SendAudio failed: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	start, send, finish := mock.counts()
+	if start != 0 || send != 0 || finish != 0 {
+		t.Fatalf("expected silence to not reach ASR, got start=%d send=%d finish=%d", start, send, finish)
+	}
+
+	if err := pipe.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+}
+
+func TestInPipeVADFlushesPendingSegmentOnStop(t *testing.T) {
+	config := DefaultInPipeConfig()
+	config.EnableVAD = true
+	config.VADSpeechPadMs = 0
+
+	mock := &mockRecognizer{}
+	pipe := NewInPipeWithRecognizer(config, mock)
+	impl, ok := pipe.(*inPipeImpl)
+	if !ok {
+		t.Fatal("expected inPipeImpl")
+	}
+	impl.vadDetector = &staticVAD{detected: true}
+	impl.vadEnabled = true
+
+	if err := pipe.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if err := pipe.SendAudio(makePCM(12000, 160)); err != nil {
+		t.Fatalf("SendAudio failed: %v", err)
+	}
+
+	if err := pipe.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	start, send, finish := mock.counts()
+	if start != 1 || send != 1 || finish != 1 {
+		t.Fatalf("expected Stop to flush pending segment, got start=%d send=%d finish=%d", start, send, finish)
+	}
+}
+
+func TestInPipeVADIncludesSpeechPadAndFirstSpeechFrame(t *testing.T) {
+	config := DefaultInPipeConfig()
+	config.EnableVAD = true
+	config.VADSpeechPadMs = 100
+
+	mock := &mockRecognizer{}
+	pipe := NewInPipeWithRecognizer(config, mock)
+	impl, ok := pipe.(*inPipeImpl)
+	if !ok {
+		t.Fatal("expected inPipeImpl")
+	}
+	impl.vadDetector = &staticVAD{detected: false}
+	impl.vadEnabled = true
+
+	if err := pipe.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	silence := makePCM(0, 160)
+	if err := pipe.SendAudio(silence); err != nil {
+		t.Fatalf("SendAudio silence failed: %v", err)
+	}
+
+	impl.vadDetector = &staticVAD{detected: true}
+	speech := makePCM(12000, 160)
+	if err := pipe.SendAudio(speech); err != nil {
+		t.Fatalf("SendAudio speech failed: %v", err)
+	}
+
+	impl.vadDetector = &staticVAD{detected: false}
+	if err := pipe.SendAudio(makePCM(0, 160)); err != nil {
+		t.Fatalf("SendAudio ending silence failed: %v", err)
+	}
+
+	wantBytes := len(silence) + len(speech)
+	waitForCondition(t, func() bool {
+		start, _, finish := mock.counts()
+		return start == 1 && finish == 1 && mock.sentBytes() == wantBytes
+	})
+
+	if err := pipe.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+}
+
 func TestInPipeDetectSpeech(t *testing.T) {
 	impl := &inPipeImpl{vadDetector: &staticVAD{detected: false}}
 
@@ -430,4 +624,21 @@ func makePCM(sample int16, count int) []byte {
 		buf[i*2+1] = byte(sample >> 8)
 	}
 	return buf
+}
+
+func waitForCondition(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.After(500 * time.Millisecond)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if condition() {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("condition was not met before timeout")
+		case <-ticker.C:
+		}
+	}
 }

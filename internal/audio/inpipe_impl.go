@@ -42,7 +42,8 @@ type inPipeImpl struct {
 	audioSource AudioSource
 	ctx         context.Context
 	cancel      context.CancelFunc
-	wg          sync.WaitGroup
+	readWG      sync.WaitGroup
+	asrWG       sync.WaitGroup
 	mu          sync.Mutex
 
 	vadEnabled     bool
@@ -51,6 +52,21 @@ type inPipeImpl struct {
 	vadMinInterval time.Duration
 	lastVADTime    time.Time
 	lastLevelLog   time.Time
+
+	segments chan audioSegment
+
+	segmentMu       sync.Mutex
+	segmentActive   bool
+	segmentFrames   [][]byte
+	segmentBytes    int
+	preSpeechFrames [][]byte
+	preSpeechBytes  int
+	preSpeechMax    int
+}
+
+type audioSegment struct {
+	frames [][]byte
+	bytes  int
 }
 
 func NewInPipeWithRecognizer(config *InPipeConfig, recognizer asr.Recognizer) AudioInPipe {
@@ -66,7 +82,7 @@ func NewInPipeWithRecognizer(config *InPipeConfig, recognizer asr.Recognizer) Au
 		state:          InPipeStateIdle,
 		config:         config,
 		recognizer:     recognizer,
-		vadEnabled:     config.EnableVAD,
+		vadEnabled:     config.EnableVAD && !isNoopVAD(vadDetector),
 		vadDetector:    vadDetector,
 		levelMonitor:   NewAudioLevelMonitor(config.SampleRate),
 		vadMinInterval: 300 * time.Millisecond,
@@ -89,19 +105,26 @@ func (p *inPipeImpl) Start(ctx context.Context) error {
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
 
-	if err := p.recognizer.Start(p.ctx); err != nil {
-		return logError("AudioInPipe: ASR start error: %v", err)
-	}
-
 	p.recognizer.OnResult(func(result asr.Result) {
 		p.handleASRResult(result)
 	})
+
+	if p.vadEnabled {
+		p.resetVADSegmentLocked()
+		p.segments = make(chan audioSegment, 8)
+		p.asrWG.Add(1)
+		go p.processASRSegments(p.ctx, p.segments)
+	} else {
+		if err := p.recognizer.Start(p.ctx); err != nil {
+			return logError("AudioInPipe: ASR start error: %v", err)
+		}
+	}
 
 	p.state = InPipeStateListening
 
 	if p.audioSource != nil {
 		logging.Infof("AudioInPipe: starting audio source...")
-		p.wg.Add(1)
+		p.readWG.Add(1)
 		go p.readAudioFromSource(p.ctx)
 	}
 
@@ -127,14 +150,10 @@ func (p *inPipeImpl) Stop() error {
 	recognizer := p.recognizer
 	vadDetector := p.vadDetector
 	ctx := p.ctx
+	vadEnabled := p.vadEnabled
 	p.mu.Unlock()
 
 	logging.Infof("AudioInPipe: stopping...")
-
-	if cancel != nil {
-		logging.Infof("AudioInPipe: canceling context...")
-		cancel()
-	}
 
 	if audioSource != nil {
 		logging.Infof("AudioInPipe: closing audio source (should unblock read)...")
@@ -144,14 +163,37 @@ func (p *inPipeImpl) Stop() error {
 		logging.Infof("AudioInPipe: audio source closed")
 	}
 
-	if recognizer != nil {
-		if ctx == nil {
-			ctx = context.Background()
+	if vadEnabled {
+		logging.Infof("AudioInPipe: waiting for audio reader to finish...")
+		p.readWG.Wait()
+		p.flushPendingVADSegment(ctx)
+		p.closeASRSegments()
+		logging.Infof("AudioInPipe: waiting for ASR segment worker to finish...")
+		p.waitForASRWorker(cancel, recognizer)
+		if cancel != nil {
+			logging.Infof("AudioInPipe: canceling context...")
+			cancel()
 		}
-		logging.Infof("AudioInPipe: finishing ASR...")
-		_ = recognizer.Finish(ctx)
-		_ = recognizer.Close()
-		logging.Infof("AudioInPipe: ASR finished")
+		if recognizer != nil {
+			_ = recognizer.Close()
+			logging.Infof("AudioInPipe: ASR closed")
+		}
+	} else {
+		if cancel != nil {
+			logging.Infof("AudioInPipe: canceling context...")
+			cancel()
+		}
+		if recognizer != nil {
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			logging.Infof("AudioInPipe: finishing ASR...")
+			_ = recognizer.Finish(ctx)
+			_ = recognizer.Close()
+			logging.Infof("AudioInPipe: ASR finished")
+		}
+		logging.Infof("AudioInPipe: waiting for audio reader to finish...")
+		p.readWG.Wait()
 	}
 	if vadDetector != nil {
 		if err := vadDetector.Close(); err != nil {
@@ -159,8 +201,6 @@ func (p *inPipeImpl) Stop() error {
 		}
 	}
 
-	logging.Infof("AudioInPipe: waiting for goroutines to finish...")
-	p.wg.Wait()
 	logging.Infof("AudioInPipe: all goroutines finished")
 
 	p.mu.Lock()
@@ -168,6 +208,28 @@ func (p *inPipeImpl) Stop() error {
 	logging.Infof("AudioInPipe: stopped, state: %s", p.state)
 	p.mu.Unlock()
 	return nil
+}
+
+func (p *inPipeImpl) waitForASRWorker(cancel context.CancelFunc, recognizer asr.Recognizer) {
+	done := make(chan struct{})
+	go func() {
+		p.asrWG.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return
+	case <-time.After(5 * time.Second):
+		logging.Warnf("AudioInPipe: ASR segment worker did not stop in time, canceling context")
+		if cancel != nil {
+			cancel()
+		}
+		if recognizer != nil {
+			_ = recognizer.Close()
+		}
+		<-done
+	}
 }
 
 func (p *inPipeImpl) SendAudio(audio []byte) error {
@@ -184,6 +246,7 @@ func (p *inPipeImpl) SendAudio(audio []byte) error {
 
 	recognizer := p.recognizer
 	ctx := p.ctx
+	vadEnabled := p.vadEnabled
 	p.mu.Unlock()
 
 	if recognizer == nil {
@@ -192,6 +255,13 @@ func (p *inPipeImpl) SendAudio(audio []byte) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	if vadEnabled {
+		p.handleVADAudio(ctx, audio)
+		return nil
+	}
+
+	p.observeAudioLevel(audio)
 
 	if err := recognizer.SendAudio(ctx, audio); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
@@ -216,10 +286,15 @@ func (p *inPipeImpl) OnUserSpeakingDetected(handler func()) {
 }
 
 func (p *inPipeImpl) readAudioFromSource(ctx context.Context) {
-	defer p.wg.Done()
+	defer p.readWG.Done()
 
 	logging.Infof("AudioInPipe: audio reader goroutine started")
 	defer logging.Infof("AudioInPipe: audio reader goroutine stopped")
+	defer func() {
+		if p.vadEnabled {
+			p.flushPendingVADSegment(ctx)
+		}
+	}()
 
 	consecutiveErrors := 0
 	const maxConsecutiveErrors = 5
@@ -260,14 +335,6 @@ func (p *inPipeImpl) readAudioFromSource(ctx context.Context) {
 		// Reset error counter on successful read
 		consecutiveErrors = 0
 
-		p.handleVAD(audio)
-
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
 		if err := p.SendAudio(audio); err != nil {
 			if err == context.Canceled {
 				return
@@ -275,6 +342,63 @@ func (p *inPipeImpl) readAudioFromSource(ctx context.Context) {
 			logging.Errorf("AudioInPipe: error sending audio to ASR: %v", err)
 		}
 	}
+}
+
+func (p *inPipeImpl) processASRSegments(ctx context.Context, segments <-chan audioSegment) {
+	defer p.asrWG.Done()
+
+	logging.Infof("AudioInPipe: ASR segment worker started")
+	defer logging.Infof("AudioInPipe: ASR segment worker stopped")
+
+	for segment := range segments {
+		if segment.bytes == 0 || len(segment.frames) == 0 {
+			continue
+		}
+		if err := p.recognizeSegment(ctx, segment); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+				return
+			}
+			logging.Errorf("AudioInPipe: ASR segment failed: %v", err)
+		}
+	}
+}
+
+func (p *inPipeImpl) recognizeSegment(ctx context.Context, segment audioSegment) error {
+	p.mu.Lock()
+	recognizer := p.recognizer
+	p.mu.Unlock()
+
+	if recognizer == nil {
+		return logError("AudioInPipe: recognizer not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	logging.Infof("AudioInPipe: recognizing VAD segment frames=%d bytes=%d", len(segment.frames), segment.bytes)
+	if err := recognizer.Start(ctx); err != nil {
+		return fmt.Errorf("start ASR segment: %w", err)
+	}
+
+	for _, frame := range segment.frames {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if len(frame) == 0 {
+			continue
+		}
+		if err := recognizer.SendAudio(ctx, frame); err != nil {
+			return fmt.Errorf("send ASR segment audio: %w", err)
+		}
+	}
+
+	if err := recognizer.Finish(ctx); err != nil {
+		return fmt.Errorf("finish ASR segment: %w", err)
+	}
+
+	return nil
 }
 
 func (p *inPipeImpl) handleASRResult(result asr.Result) {
@@ -287,20 +411,32 @@ func (p *inPipeImpl) handleASRResult(result asr.Result) {
 	}
 }
 
-func (p *inPipeImpl) handleVAD(audio []byte) {
+func (p *inPipeImpl) handleVADAudio(ctx context.Context, audio []byte) {
 	level := p.observeAudioLevel(audio)
 	if !p.vadEnabled {
 		return
 	}
-	if level.Silent {
+
+	p.segmentMu.Lock()
+	active := p.segmentActive
+	p.segmentMu.Unlock()
+
+	if level.Silent && !active {
+		p.rememberPreSpeech(audio)
 		return
 	}
 
 	isSpeech := p.detectSpeech(audio)
-	if !isSpeech {
-		return
+	started, segment := p.updateVADSegment(audio, isSpeech)
+	if started {
+		p.triggerVADHandler()
 	}
+	if segment.bytes > 0 {
+		p.enqueueASRSegment(ctx, segment)
+	}
+}
 
+func (p *inPipeImpl) triggerVADHandler() {
 	logging.Infof("AudioInPipe: VAD detected speech")
 
 	now := time.Now()
@@ -324,6 +460,150 @@ func (p *inPipeImpl) handleVAD(audio []byte) {
 
 	logging.Infof("AudioInPipe: VAD triggering user speaking detected")
 	handler()
+}
+
+func (p *inPipeImpl) updateVADSegment(audio []byte, isSpeech bool) (bool, audioSegment) {
+	p.segmentMu.Lock()
+	defer p.segmentMu.Unlock()
+
+	if isSpeech {
+		if !p.segmentActive {
+			p.segmentActive = true
+			if p.preSpeechBytes > 0 {
+				p.segmentFrames = append(p.segmentFrames, p.preSpeechFrames...)
+				p.segmentBytes += p.preSpeechBytes
+			}
+			p.preSpeechFrames = nil
+			p.preSpeechBytes = 0
+			p.appendSegmentFrameLocked(audio)
+			return true, audioSegment{}
+		}
+		p.appendSegmentFrameLocked(audio)
+		return false, audioSegment{}
+	}
+
+	if p.segmentActive {
+		segment := p.takeSegmentLocked()
+		return false, segment
+	}
+
+	p.rememberPreSpeechLocked(audio)
+	return false, audioSegment{}
+}
+
+func (p *inPipeImpl) appendSegmentFrameLocked(audio []byte) {
+	if len(audio) == 0 {
+		return
+	}
+	frame := cloneBytes(audio)
+	p.segmentFrames = append(p.segmentFrames, frame)
+	p.segmentBytes += len(frame)
+}
+
+func (p *inPipeImpl) rememberPreSpeech(audio []byte) {
+	p.segmentMu.Lock()
+	defer p.segmentMu.Unlock()
+	p.rememberPreSpeechLocked(audio)
+}
+
+func (p *inPipeImpl) rememberPreSpeechLocked(audio []byte) {
+	if len(audio) == 0 || p.preSpeechMax <= 0 {
+		return
+	}
+
+	frame := cloneBytes(audio)
+	p.preSpeechFrames = append(p.preSpeechFrames, frame)
+	p.preSpeechBytes += len(frame)
+	for p.preSpeechBytes > p.preSpeechMax && len(p.preSpeechFrames) > 0 {
+		p.preSpeechBytes -= len(p.preSpeechFrames[0])
+		p.preSpeechFrames[0] = nil
+		p.preSpeechFrames = p.preSpeechFrames[1:]
+	}
+}
+
+func (p *inPipeImpl) takeSegmentLocked() audioSegment {
+	segment := audioSegment{
+		frames: p.segmentFrames,
+		bytes:  p.segmentBytes,
+	}
+	p.segmentActive = false
+	p.segmentFrames = nil
+	p.segmentBytes = 0
+	return segment
+}
+
+func (p *inPipeImpl) flushPendingVADSegment(ctx context.Context) {
+	p.segmentMu.Lock()
+	if !p.segmentActive {
+		p.segmentMu.Unlock()
+		return
+	}
+	segment := p.takeSegmentLocked()
+	p.segmentMu.Unlock()
+
+	if segment.bytes > 0 {
+		logging.Infof("AudioInPipe: flushing pending VAD segment frames=%d bytes=%d", len(segment.frames), segment.bytes)
+		p.enqueueASRSegment(ctx, segment)
+	}
+}
+
+func (p *inPipeImpl) enqueueASRSegment(ctx context.Context, segment audioSegment) {
+	if segment.bytes == 0 || len(segment.frames) == 0 {
+		return
+	}
+
+	p.mu.Lock()
+	segments := p.segments
+	p.mu.Unlock()
+	if segments == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	select {
+	case segments <- segment:
+		logging.Infof("AudioInPipe: queued VAD segment frames=%d bytes=%d", len(segment.frames), segment.bytes)
+	case <-ctx.Done():
+	}
+}
+
+func (p *inPipeImpl) closeASRSegments() {
+	p.mu.Lock()
+	segments := p.segments
+	p.segments = nil
+	p.mu.Unlock()
+	if segments != nil {
+		close(segments)
+	}
+}
+
+func (p *inPipeImpl) resetVADSegmentLocked() {
+	p.segmentMu.Lock()
+	defer p.segmentMu.Unlock()
+
+	p.segmentActive = false
+	p.segmentFrames = nil
+	p.segmentBytes = 0
+	p.preSpeechFrames = nil
+	p.preSpeechBytes = 0
+	p.preSpeechMax = p.preSpeechMaxBytes()
+}
+
+func (p *inPipeImpl) preSpeechMaxBytes() int {
+	if p.config == nil || p.config.VADSpeechPadMs <= 0 {
+		return 0
+	}
+	sampleRate := p.config.SampleRate
+	if sampleRate <= 0 {
+		sampleRate = 16000
+	}
+	channels := p.config.Channels
+	if channels <= 0 {
+		channels = 1
+	}
+	return sampleRate * channels * 2 * p.config.VADSpeechPadMs / 1000
 }
 
 func (p *inPipeImpl) observeAudioLevel(audio []byte) AudioLevelSnapshot {
@@ -399,4 +679,18 @@ func logError(format string, args ...interface{}) error {
 	msg := fmt.Sprintf(format, args...)
 	logging.Errorf("%s", msg)
 	return fmt.Errorf("%s", msg)
+}
+
+func cloneBytes(data []byte) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	copied := make([]byte, len(data))
+	copy(copied, data)
+	return copied
+}
+
+func isNoopVAD(detector VADDetector) bool {
+	_, ok := detector.(*noopVAD)
+	return ok
 }

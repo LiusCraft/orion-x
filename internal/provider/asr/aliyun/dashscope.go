@@ -23,17 +23,18 @@ func init() {
 }
 
 type DashScopeRecognizer struct {
-	cfg       asr.Config
-	conn      *websocket.Conn
-	onResult  func(asr.Result)
-	writeMu   sync.Mutex
-	startedCh chan struct{}
-	doneCh    chan struct{}
-	errCh     chan error
-	taskID    string
+	cfg        asr.Config
+	conn       *websocket.Conn
+	onResult   func(asr.Result)
+	writeMu    sync.Mutex
+	startedCh  chan struct{}
+	doneCh     chan struct{}
+	errCh      chan error
+	taskID     string
+	failed     bool
+	taskActive bool
 
-	startedOnce sync.Once
-	doneOnce    sync.Once
+	mu sync.Mutex
 }
 
 func NewDashScopeRecognizer(cfg asr.Config) (*DashScopeRecognizer, error) {
@@ -53,12 +54,7 @@ func NewDashScopeRecognizer(cfg asr.Config) (*DashScopeRecognizer, error) {
 		cfg.SampleRate = 16000
 	}
 
-	return &DashScopeRecognizer{
-		cfg:       cfg,
-		startedCh: make(chan struct{}),
-		doneCh:    make(chan struct{}),
-		errCh:     make(chan error, 1),
-	}, nil
+	return &DashScopeRecognizer{cfg: cfg}, nil
 }
 
 func (r *DashScopeRecognizer) OnResult(handler func(asr.Result)) {
@@ -66,35 +62,58 @@ func (r *DashScopeRecognizer) OnResult(handler func(asr.Result)) {
 }
 
 func (r *DashScopeRecognizer) Start(ctx context.Context) error {
-	if r.conn != nil {
-		return errors.New("recognizer already started")
+	r.mu.Lock()
+	if r.taskActive {
+		r.mu.Unlock()
+		return errors.New("recognizer task already started")
 	}
-
-	conn, err := r.connect(ctx)
-	if err != nil {
-		return err
+	if r.failed && r.conn != nil {
+		r.mu.Unlock()
+		_ = r.Close()
+		r.mu.Lock()
 	}
-	r.conn = conn
-
+	if r.conn == nil {
+		conn, err := r.connect(ctx)
+		if err != nil {
+			r.mu.Unlock()
+			return err
+		}
+		r.conn = conn
+		r.failed = false
+		r.startReceiver(conn)
+	}
 	r.taskID = newTaskID()
+	r.startedCh = make(chan struct{})
+	r.doneCh = make(chan struct{})
+	r.errCh = make(chan error, 1)
+	r.taskActive = true
+	startedCh := r.startedCh
+	errCh := r.errCh
+	r.mu.Unlock()
+
 	if err := r.sendRunTask(ctx); err != nil {
+		_ = r.Close()
 		return err
 	}
-
-	r.startReceiver()
 
 	select {
-	case <-r.startedCh:
+	case <-startedCh:
 		return nil
-	case err := <-r.errCh:
+	case err := <-errCh:
+		_ = r.Close()
 		return err
 	case <-ctx.Done():
+		_ = r.Close()
 		return ctx.Err()
 	}
 }
 
 func (r *DashScopeRecognizer) SendAudio(ctx context.Context, data []byte) error {
-	if r.conn == nil {
+	r.mu.Lock()
+	conn := r.conn
+	taskActive := r.taskActive
+	r.mu.Unlock()
+	if conn == nil || !taskActive {
 		return errors.New("recognizer not started")
 	}
 	if ctx == nil {
@@ -109,7 +128,7 @@ func (r *DashScopeRecognizer) SendAudio(ctx context.Context, data []byte) error 
 	result := make(chan error, 1)
 	r.writeMu.Lock()
 	go func() {
-		err := r.conn.WriteMessage(websocket.BinaryMessage, data)
+		err := conn.WriteMessage(websocket.BinaryMessage, data)
 		r.writeMu.Unlock()
 		result <- err
 	}()
@@ -118,22 +137,35 @@ func (r *DashScopeRecognizer) SendAudio(ctx context.Context, data []byte) error 
 	case err := <-result:
 		return err
 	case <-ctx.Done():
-		_ = r.conn.Close()
+		_ = conn.Close()
 		return ctx.Err()
 	}
 }
 
 func (r *DashScopeRecognizer) Finish(ctx context.Context) error {
-	if r.conn == nil {
+	r.mu.Lock()
+	doneCh := r.doneCh
+	errCh := r.errCh
+	taskActive := r.taskActive
+	r.mu.Unlock()
+	if r.conn == nil || doneCh == nil || !taskActive {
 		return errors.New("recognizer not started")
 	}
 	if err := r.sendFinishTask(ctx); err != nil {
 		return err
 	}
 	select {
-	case <-r.doneCh:
+	case <-doneCh:
+		select {
+		case err := <-errCh:
+			r.clearCurrentTask()
+			return err
+		default:
+		}
+		r.clearCurrentTask()
 		return nil
-	case err := <-r.errCh:
+	case err := <-errCh:
+		r.clearCurrentTask()
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
@@ -141,10 +173,20 @@ func (r *DashScopeRecognizer) Finish(ctx context.Context) error {
 }
 
 func (r *DashScopeRecognizer) Close() error {
-	if r.conn == nil {
+	r.mu.Lock()
+	conn := r.conn
+	r.conn = nil
+	r.startedCh = nil
+	r.doneCh = nil
+	r.errCh = nil
+	r.taskID = ""
+	r.failed = false
+	r.taskActive = false
+	r.mu.Unlock()
+	if conn == nil {
 		return nil
 	}
-	return r.conn.Close()
+	return conn.Close()
 }
 
 func (r *DashScopeRecognizer) connect(ctx context.Context) (*websocket.Conn, error) {
@@ -156,6 +198,14 @@ func (r *DashScopeRecognizer) connect(ctx context.Context) (*websocket.Conn, err
 }
 
 func (r *DashScopeRecognizer) sendRunTask(ctx context.Context) error {
+	r.mu.Lock()
+	conn := r.conn
+	taskID := r.taskID
+	r.mu.Unlock()
+	if conn == nil {
+		return errors.New("recognizer not started")
+	}
+
 	params := map[string]any{
 		"format":      r.cfg.Format,
 		"sample_rate": r.cfg.SampleRate,
@@ -182,7 +232,7 @@ func (r *DashScopeRecognizer) sendRunTask(ctx context.Context) error {
 	msg := runTaskMessage{
 		Header: taskHeader{
 			Action:    "run-task",
-			TaskID:    r.taskID,
+			TaskID:    taskID,
 			Streaming: "duplex",
 		},
 		Payload: taskPayload{
@@ -200,16 +250,24 @@ func (r *DashScopeRecognizer) sendRunTask(ctx context.Context) error {
 		return err
 	}
 	r.writeMu.Lock()
-	err = r.conn.WriteMessage(websocket.TextMessage, payload)
+	err = conn.WriteMessage(websocket.TextMessage, payload)
 	r.writeMu.Unlock()
 	return err
 }
 
 func (r *DashScopeRecognizer) sendFinishTask(ctx context.Context) error {
+	r.mu.Lock()
+	conn := r.conn
+	taskID := r.taskID
+	r.mu.Unlock()
+	if conn == nil {
+		return errors.New("recognizer not started")
+	}
+
 	msg := finishTaskMessage{
 		Header: taskHeader{
 			Action:    "finish-task",
-			TaskID:    r.taskID,
+			TaskID:    taskID,
 			Streaming: "duplex",
 		},
 		Payload: taskPayload{
@@ -221,15 +279,15 @@ func (r *DashScopeRecognizer) sendFinishTask(ctx context.Context) error {
 		return err
 	}
 	r.writeMu.Lock()
-	err = r.conn.WriteMessage(websocket.TextMessage, payload)
+	err = conn.WriteMessage(websocket.TextMessage, payload)
 	r.writeMu.Unlock()
 	return err
 }
 
-func (r *DashScopeRecognizer) startReceiver() {
+func (r *DashScopeRecognizer) startReceiver(conn *websocket.Conn) {
 	go func() {
 		for {
-			_, data, err := r.conn.ReadMessage()
+			_, data, err := conn.ReadMessage()
 			if err != nil {
 				r.setErr(err)
 				r.markDone()
@@ -241,28 +299,25 @@ func (r *DashScopeRecognizer) startReceiver() {
 				r.markDone()
 				return
 			}
-			if r.handleEvent(event) {
-				r.markDone()
-				return
-			}
+			r.handleEvent(event)
 		}
 	}()
 }
 
-func (r *DashScopeRecognizer) handleEvent(event eventMessage) bool {
+func (r *DashScopeRecognizer) handleEvent(event eventMessage) {
 	switch event.Header.Event {
 	case "task-started":
-		r.startedOnce.Do(func() { close(r.startedCh) })
+		r.markStarted()
 	case "result-generated":
 		if event.Payload.Output == nil || event.Payload.Output.Sentence == nil {
-			return false
+			return
 		}
 		sentence := event.Payload.Output.Sentence
 		if sentence.Heartbeat {
-			return false
+			return
 		}
 		if sentence.Text == "" {
-			return false
+			return
 		}
 		if r.onResult != nil {
 			result := asr.Result{
@@ -277,27 +332,69 @@ func (r *DashScopeRecognizer) handleEvent(event eventMessage) bool {
 			r.onResult(result)
 		}
 	case "task-finished":
-		return true
+		r.markDone()
 	case "task-failed":
+		r.markFailed()
 		if event.Header.ErrorMessage != "" {
 			r.setErr(fmt.Errorf("task failed: %s", event.Header.ErrorMessage))
 		} else {
 			r.setErr(errors.New("task failed"))
 		}
-		return true
+		r.markDone()
 	}
-	return false
 }
 
 func (r *DashScopeRecognizer) setErr(err error) {
+	r.mu.Lock()
+	errCh := r.errCh
+	r.mu.Unlock()
+	if errCh == nil {
+		return
+	}
 	select {
-	case r.errCh <- err:
+	case errCh <- err:
 	default:
 	}
 }
 
 func (r *DashScopeRecognizer) markDone() {
-	r.doneOnce.Do(func() { close(r.doneCh) })
+	r.mu.Lock()
+	doneCh := r.doneCh
+	if doneCh != nil {
+		r.doneCh = nil
+	}
+	r.mu.Unlock()
+	if doneCh != nil {
+		close(doneCh)
+	}
+}
+
+func (r *DashScopeRecognizer) markStarted() {
+	r.mu.Lock()
+	startedCh := r.startedCh
+	if startedCh != nil {
+		r.startedCh = nil
+	}
+	r.mu.Unlock()
+	if startedCh != nil {
+		close(startedCh)
+	}
+}
+
+func (r *DashScopeRecognizer) markFailed() {
+	r.mu.Lock()
+	r.failed = true
+	r.mu.Unlock()
+}
+
+func (r *DashScopeRecognizer) clearCurrentTask() {
+	r.mu.Lock()
+	r.startedCh = nil
+	r.doneCh = nil
+	r.errCh = nil
+	r.taskID = ""
+	r.taskActive = false
+	r.mu.Unlock()
 }
 
 type runTaskMessage struct {
