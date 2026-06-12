@@ -255,3 +255,30 @@ func TestPopUpdatesUpdatedAt(t *testing.T) {
 		t.Error("UpdatedAt should be updated after Pop")
 	}
 }
+
+func TestPopNUpdatesUpdatedAt(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "a"})
+	sess.Add(Message{Role: RoleUser, Content: "b"})
+
+	before := sess.UpdatedAt
+	time.Sleep(time.Millisecond)
+	sess.PopN(1)
+
+	if !sess.UpdatedAt.After(before) {
+		t.Error("UpdatedAt should be updated after PopN")
+	}
+}
+
+func TestPopNNegative(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "a"})
+
+	removed := sess.PopN(-1)
+	if len(removed) != 0 {
+		t.Errorf("PopN(-1) should return nil, got %v", removed)
+	}
+	if len(sess.Messages) != 1 {
+		t.Errorf("PopN(-1) should not modify messages")
+	}
+}

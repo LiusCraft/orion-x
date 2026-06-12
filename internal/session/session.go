@@ -86,16 +86,14 @@ func (s *Session) Pop() (Message, bool) {
 	return last, true
 }
 
-// PopN removes the last n messages and returns them in original order.
+// PopN removes up to n messages from the tail and returns them in original order.
+// Returns nil if the session has no messages or n <= 0.
 func (s *Session) PopN(n int) []Message {
-	if n <= 0 {
+	if n <= 0 || len(s.Messages) == 0 {
 		return nil
 	}
 	if n > len(s.Messages) {
 		n = len(s.Messages)
-	}
-	if n == 0 {
-		return nil
 	}
 	idx := len(s.Messages) - n
 	removed := make([]Message, n)
