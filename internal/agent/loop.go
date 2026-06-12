@@ -9,9 +9,10 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/llm"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/session"
 )
 
-func (a *Agent) Process(ctx context.Context, input string) (<-chan AgentEvent, error) {
+func (a *Agent) Run(ctx context.Context, sess *session.Session) (<-chan AgentEvent, error) {
 	maxSteps := a.maxSteps
 
 	eventChan := make(chan AgentEvent)
@@ -20,10 +21,10 @@ func (a *Agent) Process(ctx context.Context, input string) (<-chan AgentEvent, e
 		defer close(eventChan)
 		processStart := time.Now()
 
-		messages := a.buildMessages(ctx, input)
-
 		for step := 0; step < maxSteps; step++ {
 			logging.Infof("Agent: step %d/%d", step+1, maxSteps)
+
+			messages := a.buildSessionMessages(ctx, sess)
 
 			streamStart := time.Now()
 			stream, err := a.client.Chat(ctx, llm.Request{
@@ -76,13 +77,21 @@ func (a *Agent) Process(ctx context.Context, input string) (<-chan AgentEvent, e
 			stream.Close()
 
 			if len(toolCalls) == 0 {
-				messages = append(messages, llm.Message{Role: "assistant", Content: fullText})
+				sess.Add(session.Message{Role: session.RoleAssistant, Content: fullText})
 				logging.Infof("Agent: done (no tool calls), total time=%v", time.Since(processStart))
 				eventChan <- &FinishedEvent{Error: nil}
 				return
 			}
 
-			messages = append(messages, llm.Message{Role: "assistant", Content: fullText, ToolCalls: toolCalls})
+			sessionToolCalls := make([]session.ToolCall, len(toolCalls))
+			for i, tc := range toolCalls {
+				sessionToolCalls[i] = session.ToolCall{
+					ID:        tc.ID,
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+				}
+			}
+			sess.Add(session.Message{Role: session.RoleAssistant, Content: fullText, ToolCalls: sessionToolCalls})
 
 			for _, call := range toolCalls {
 				if !a.registry.CanExecute(call.Name) {
@@ -105,8 +114,8 @@ func (a *Agent) Process(ctx context.Context, input string) (<-chan AgentEvent, e
 					logging.Errorf("Agent: tool error: %v", result.Error)
 				}
 
-				messages = append(messages, llm.Message{
-					Role:       "tool",
+				sess.Add(session.Message{
+					Role:       session.RoleTool,
 					ToolCallID: call.ID,
 					Content:    result.Output,
 				})
@@ -163,33 +172,27 @@ func (a *Agent) summarizeToolResult(ctx context.Context, eventChan chan<- AgentE
 	return nil
 }
 
-func (a *Agent) buildMessages(ctx context.Context, input string) []llm.Message {
+func (a *Agent) buildSessionMessages(ctx context.Context, sess *session.Session) []llm.Message {
+	msgs := sess.ToLLMMessages()
+
 	if a.memorySvc != nil {
-		msgs, err := a.memorySvc.BuildContextMessages(ctx, input)
+		memMsgs, err := a.memorySvc.BuildContextMessages(ctx, "")
 		if err != nil {
 			logging.Warnf("Agent: build memory context failed: %v", err)
-		}
-		if len(msgs) > 0 {
-			result := make([]llm.Message, len(msgs))
-			for i, m := range msgs {
-				result[i] = llm.Message{
-					Role:       string(m.Role),
-					Content:    m.Content,
-					ToolCallID: m.ToolCallID,
-				}
-				for _, tc := range m.ToolCalls {
-					result[i].ToolCalls = append(result[i].ToolCalls, llm.ToolCall{
-						ID:        tc.ID,
-						Name:      tc.Name,
-						Arguments: tc.Arguments,
-					})
+		} else {
+			result := make([]llm.Message, 0, len(memMsgs)+len(msgs))
+			for _, m := range memMsgs {
+				if m.Role == "system" {
+					result = append(result, llm.Message{Role: string(m.Role), Content: m.Content})
 				}
 			}
+			result = append(result, msgs...)
 			return result
 		}
 	}
-	return []llm.Message{
-		{Role: "system", Content: defaultSystemPrompt},
-		{Role: "user", Content: input},
-	}
+
+	result := make([]llm.Message, 0, len(msgs)+1)
+	result = append(result, llm.Message{Role: "system", Content: defaultSystemPrompt})
+	result = append(result, msgs...)
+	return result
 }

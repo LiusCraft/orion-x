@@ -7,16 +7,17 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/pipeline"
+	"github.com/liuscraft/orion-x/internal/session"
 )
 
 // mockAgentRunner 测试用 Mock Agent
 type mockAgentRunner struct {
-	processFunc func(ctx context.Context, text string) (<-chan agent.AgentEvent, error)
+	processFunc func(ctx context.Context, sess *session.Session) (<-chan agent.AgentEvent, error)
 }
 
-func (m *mockAgentRunner) Process(ctx context.Context, text string) (<-chan agent.AgentEvent, error) {
+func (m *mockAgentRunner) Run(ctx context.Context, sess *session.Session) (<-chan agent.AgentEvent, error) {
 	if m.processFunc != nil {
-		return m.processFunc(ctx, text)
+		return m.processFunc(ctx, sess)
 	}
 	ch := make(chan agent.AgentEvent)
 	close(ch)
@@ -25,7 +26,11 @@ func (m *mockAgentRunner) Process(ctx context.Context, text string) (<-chan agen
 
 func TestAgentStage_TextChunk(t *testing.T) {
 	mockAgent := &mockAgentRunner{
-		processFunc: func(ctx context.Context, text string) (<-chan agent.AgentEvent, error) {
+		processFunc: func(ctx context.Context, sess *session.Session) (<-chan agent.AgentEvent, error) {
+			text := ""
+			if len(sess.Messages) > 0 {
+				text = sess.Messages[len(sess.Messages)-1].Content
+			}
 			ch := make(chan agent.AgentEvent, 2)
 			ch <- &agent.TextChunkEvent{Chunk: "Response: " + text}
 			ch <- &agent.FinishedEvent{}
@@ -70,7 +75,7 @@ func TestAgentStage_TextChunk(t *testing.T) {
 
 func TestAgentStage_Error(t *testing.T) {
 	mockAgent := &mockAgentRunner{
-		processFunc: func(ctx context.Context, text string) (<-chan agent.AgentEvent, error) {
+		processFunc: func(ctx context.Context, sess *session.Session) (<-chan agent.AgentEvent, error) {
 			return nil, fmt.Errorf("agent error")
 		},
 	}

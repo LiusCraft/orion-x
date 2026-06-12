@@ -8,6 +8,7 @@ import (
 	"time"
 
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
+	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 
@@ -80,7 +81,9 @@ func TestAgentProcess(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			eventChan, err := agent.Process(ctx, tt.input)
+			sess := session.New(session.SessionMeta{Model: "test"})
+			sess.Add(session.Message{Role: session.RoleUser, Content: tt.input})
+			eventChan, err := agent.Run(ctx, sess)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Process() error = %v, wantErr %v", err, tt.wantErr)
 				return

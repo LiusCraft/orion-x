@@ -7,11 +7,12 @@ import (
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/pipeline"
+	"github.com/liuscraft/orion-x/internal/session"
 )
 
 // AgentRunner Agent 运行接口
 type AgentRunner interface {
-	Process(ctx context.Context, text string) (<-chan agent.AgentEvent, error)
+	Run(ctx context.Context, sess *session.Session) (<-chan agent.AgentEvent, error)
 }
 
 // AgentStage Agent 处理 Stage
@@ -66,8 +67,12 @@ func (s *AgentStage) Process(ctx context.Context, input <-chan pipeline.Message)
 					continue
 				}
 
-				// 调用 Agent（Agent 内部处理工具调用）
-				eventChan, err := s.agent.Process(ctx, text)
+				// 创建 session 并添加用户消息
+				sess := session.New(session.SessionMeta{Model: "default"})
+				sess.Add(session.Message{Role: session.RoleUser, Content: text})
+
+				// 调用 Agent
+				eventChan, err := s.agent.Run(ctx, sess)
 				if err != nil {
 					logging.Errorf("AgentStage: agent process error: %v", err)
 					select {
