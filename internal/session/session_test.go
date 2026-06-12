@@ -436,3 +436,30 @@ func TestCloneNilMessages(t *testing.T) {
 		t.Errorf("expected nil Messages")
 	}
 }
+
+func TestCloneOriginalModificationIsolation(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "hello"})
+	cloned := sess.Clone()
+
+	sess.Messages[0].Content = "changed"
+	if cloned.Messages[0].Content == "changed" {
+		t.Error("modifying original should not affect clone")
+	}
+}
+
+func TestCloneNilToolCalls(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "hello"}) // ToolCalls: nil
+	sess.Add(Message{Role: RoleAssistant, Content: "ok", ToolCalls: []ToolCall{
+		{ID: "c1", Name: "f", Arguments: "{}"},
+	}})
+
+	cloned := sess.Clone()
+	if cloned.Messages[0].ToolCalls != nil {
+		t.Error("nil ToolCalls should remain nil in clone")
+	}
+	if cloned.Messages[1].ToolCalls == nil {
+		t.Error("non-nil ToolCalls should be deep-copied in clone")
+	}
+}
