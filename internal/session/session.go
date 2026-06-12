@@ -75,6 +75,33 @@ func (s *Session) Add(msg Message) {
 	s.UpdatedAt = time.Now().UTC()
 }
 
+// Pop removes and returns the last message. Returns false if the session is empty.
+func (s *Session) Pop() (Message, bool) {
+	if len(s.Messages) == 0 {
+		return Message{}, false
+	}
+	last := s.Messages[len(s.Messages)-1]
+	s.Messages = s.Messages[:len(s.Messages)-1]
+	s.UpdatedAt = time.Now().UTC()
+	return last, true
+}
+
+// PopN removes the last n messages and returns them in original order.
+func (s *Session) PopN(n int) []Message {
+	if n <= 0 {
+		return nil
+	}
+	if n > len(s.Messages) {
+		n = len(s.Messages)
+	}
+	idx := len(s.Messages) - n
+	removed := make([]Message, n)
+	copy(removed, s.Messages[idx:])
+	s.Messages = s.Messages[:idx]
+	s.UpdatedAt = time.Now().UTC()
+	return removed
+}
+
 func newID(prefix string) string {
 	buf := make([]byte, 6)
 	if _, err := rand.Read(buf); err != nil {

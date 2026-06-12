@@ -152,3 +152,106 @@ func TestSessionJSONRoundTrip(t *testing.T) {
 		t.Errorf("Status mismatch")
 	}
 }
+
+func TestPop(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+
+	_, ok := sess.Pop()
+	if ok {
+		t.Fatal("expected false for empty session")
+	}
+
+	sess.Add(Message{Role: RoleUser, Content: "first"})
+	sess.Add(Message{Role: RoleUser, Content: "second"})
+
+	msg, ok := sess.Pop()
+	if !ok {
+		t.Fatal("expected true for non-empty session")
+	}
+	if msg.Content != "second" {
+		t.Errorf("Content: got %q, want 'second'", msg.Content)
+	}
+	if len(sess.Messages) != 1 {
+		t.Fatalf("expected 1 remaining message, got %d", len(sess.Messages))
+	}
+	if sess.Messages[0].Content != "first" {
+		t.Errorf("remaining message: got %q, want 'first'", sess.Messages[0].Content)
+	}
+}
+
+func TestPopN(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+
+	// PopN on empty
+	removed := sess.PopN(2)
+	if len(removed) != 0 {
+		t.Fatalf("expected 0 removed, got %d", len(removed))
+	}
+
+	sess.Add(Message{Role: RoleUser, Content: "a"})
+	sess.Add(Message{Role: RoleAssistant, Content: "b"})
+	sess.Add(Message{Role: RoleTool, Content: "c"})
+	sess.Add(Message{Role: RoleAssistant, Content: "d"})
+
+	// PopN more than length
+	removed = sess.PopN(10)
+	if len(removed) != 4 {
+		t.Fatalf("expected 4 removed, got %d", len(removed))
+	}
+	if len(sess.Messages) != 0 {
+		t.Fatalf("expected 0 remaining, got %d", len(sess.Messages))
+	}
+	if removed[0].Content != "a" {
+		t.Errorf("removed[0]: got %q, want 'a'", removed[0].Content)
+	}
+	if removed[3].Content != "d" {
+		t.Errorf("removed[3]: got %q, want 'd'", removed[3].Content)
+	}
+}
+
+func TestPopNPartial(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "a"})
+	sess.Add(Message{Role: RoleAssistant, Content: "b"})
+	sess.Add(Message{Role: RoleTool, Content: "c"})
+
+	removed := sess.PopN(2)
+	if len(removed) != 2 {
+		t.Fatalf("expected 2 removed, got %d", len(removed))
+	}
+	if removed[0].Content != "b" || removed[1].Content != "c" {
+		t.Errorf("wrong removed: %v %v", removed[0].Content, removed[1].Content)
+	}
+	if len(sess.Messages) != 1 {
+		t.Fatalf("expected 1 remaining, got %d", len(sess.Messages))
+	}
+	if sess.Messages[0].Content != "a" {
+		t.Errorf("remaining: got %q, want 'a'", sess.Messages[0].Content)
+	}
+}
+
+func TestPopNZero(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "a"})
+
+	removed := sess.PopN(0)
+	if len(removed) != 0 {
+		t.Errorf("PopN(0) should return nil, got %v", removed)
+	}
+	if len(sess.Messages) != 1 {
+		t.Errorf("PopN(0) should not modify messages")
+	}
+}
+
+func TestPopUpdatesUpdatedAt(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "hi"})
+
+	before := sess.UpdatedAt
+	time.Sleep(time.Millisecond)
+	sess.Pop()
+
+	if !sess.UpdatedAt.After(before) {
+		t.Error("UpdatedAt should be updated after Pop")
+	}
+}
