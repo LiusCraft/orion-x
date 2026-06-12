@@ -94,6 +94,9 @@ func (s *Session) PopN(n int) []Message {
 	if n > len(s.Messages) {
 		n = len(s.Messages)
 	}
+	if n == 0 {
+		return nil
+	}
 	idx := len(s.Messages) - n
 	removed := make([]Message, n)
 	copy(removed, s.Messages[idx:])
