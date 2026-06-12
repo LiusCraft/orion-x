@@ -7,6 +7,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/llm/provider"
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 )
 
 type Config struct {
@@ -126,9 +127,29 @@ func convertMessages(messages []llm.Message) []openai.ChatCompletionMessageParam
 		case "user":
 			result[i] = openai.UserMessage(msg.Content)
 		case "assistant":
-			result[i] = openai.AssistantMessage(msg.Content)
+			if len(msg.ToolCalls) > 0 {
+				assistant := openai.ChatCompletionAssistantMessageParam{}
+				if msg.Content != "" {
+					assistant.Content.OfString = param.NewOpt(msg.Content)
+				}
+				assistant.ToolCalls = make([]openai.ChatCompletionMessageToolCallUnionParam, len(msg.ToolCalls))
+				for j, tc := range msg.ToolCalls {
+					assistant.ToolCalls[j] = openai.ChatCompletionMessageToolCallUnionParam{
+						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+							ID: tc.ID,
+							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+								Name:      tc.Name,
+								Arguments: tc.Arguments,
+							},
+						},
+					}
+				}
+				result[i] = openai.ChatCompletionMessageParamUnion{OfAssistant: &assistant}
+			} else {
+				result[i] = openai.AssistantMessage(msg.Content)
+			}
 		case "tool":
-			result[i] = openai.ToolMessage(msg.ToolCallID, msg.Content)
+			result[i] = openai.ToolMessage(msg.Content, msg.ToolCallID)
 		}
 	}
 	return result

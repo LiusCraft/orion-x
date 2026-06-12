@@ -43,7 +43,7 @@ func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc memory.S
 		registry:  mgr.Registry(),
 		model:     normalized.Model,
 		memorySvc: memorySvc,
-		maxSteps:  5,
+		maxSteps:  2,
 	}, nil
 }
 
