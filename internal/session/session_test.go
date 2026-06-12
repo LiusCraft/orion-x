@@ -282,3 +282,110 @@ func TestPopNNegative(t *testing.T) {
 		t.Errorf("PopN(-1) should not modify messages")
 	}
 }
+
+func TestToLLMMessages(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "hello"})
+	sess.Add(Message{Role: RoleAssistant, Content: "hi", ToolCalls: []ToolCall{
+		{ID: "call_1", Name: "grep", Arguments: `{"a":"b"}`},
+	}})
+	sess.Add(Message{Role: RoleTool, Content: "result", ToolCallID: "call_1", Status: "completed"})
+
+	result := sess.ToLLMMessages()
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+	}
+
+	// user message
+	if result[0].Role != "user" {
+		t.Errorf("Role[0]: got %q, want 'user'", result[0].Role)
+	}
+	if result[0].Content != "hello" {
+		t.Errorf("Content[0]: got %q", result[0].Content)
+	}
+
+	// assistant with tool calls
+	if result[1].Role != "assistant" {
+		t.Errorf("Role[1]: got %q", result[1].Role)
+	}
+	if len(result[1].ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result[1].ToolCalls))
+	}
+	if result[1].ToolCalls[0].Name != "grep" {
+		t.Errorf("ToolCalls[0].Name: got %q", result[1].ToolCalls[0].Name)
+	}
+
+	// tool message
+	if result[2].Role != "tool" {
+		t.Errorf("Role[2]: got %q, want 'tool'", result[2].Role)
+	}
+	if result[2].ToolCallID != "call_1" {
+		t.Errorf("ToolCallID: got %q", result[2].ToolCallID)
+	}
+	if result[2].Content != "result" {
+		t.Errorf("Content[2]: got %q", result[2].Content)
+	}
+}
+
+func TestToLLMMessagesEmpty(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	result := sess.ToLLMMessages()
+	if len(result) != 0 {
+		t.Fatalf("expected empty, got %d", len(result))
+	}
+}
+
+func TestToLLMMessagesNoToolCalls(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleAssistant, Content: "plain response"})
+
+	result := sess.ToLLMMessages()
+	if result[0].ToolCalls != nil {
+		t.Errorf("expected nil ToolCalls, got %v", result[0].ToolCalls)
+	}
+}
+
+func TestLastN(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "a"})
+	sess.Add(Message{Role: RoleAssistant, Content: "b"})
+	sess.Add(Message{Role: RoleUser, Content: "c"})
+	sess.Add(Message{Role: RoleAssistant, Content: "d"})
+
+	got := sess.LastN(2)
+	if len(got) != 2 {
+		t.Fatalf("expected 2, got %d", len(got))
+	}
+	if got[0].Content != "c" || got[1].Content != "d" {
+		t.Errorf("got %q %q, want 'c' 'd'", got[0].Content, got[1].Content)
+	}
+}
+
+func TestLastNMoreThanLength(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "a"})
+	sess.Add(Message{Role: RoleAssistant, Content: "b"})
+
+	got := sess.LastN(10)
+	if len(got) != 2 {
+		t.Fatalf("expected 2, got %d", len(got))
+	}
+}
+
+func TestLastNZero(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "a"})
+
+	got := sess.LastN(0)
+	if got != nil {
+		t.Errorf("LastN(0) should return nil, got %v", got)
+	}
+}
+
+func TestLastNEmpty(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	got := sess.LastN(3)
+	if got != nil {
+		t.Errorf("LastN on empty should return nil, got %v", got)
+	}
+}

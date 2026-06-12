@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"github.com/liuscraft/orion-x/internal/llm"
 )
 
 // Role represents the role of a chat message.
@@ -101,6 +103,42 @@ func (s *Session) PopN(n int) []Message {
 	s.Messages = s.Messages[:idx]
 	s.UpdatedAt = time.Now().UTC()
 	return removed
+}
+
+// ToLLMMessages converts session messages to LLM request format.
+func (s *Session) ToLLMMessages() []llm.Message {
+	result := make([]llm.Message, len(s.Messages))
+	for i, msg := range s.Messages {
+		result[i] = llm.Message{
+			Role:       string(msg.Role),
+			Content:    msg.Content,
+			ToolCallID: msg.ToolCallID,
+		}
+		if len(msg.ToolCalls) > 0 {
+			result[i].ToolCalls = make([]llm.ToolCall, len(msg.ToolCalls))
+			for j, tc := range msg.ToolCalls {
+				result[i].ToolCalls[j] = llm.ToolCall{
+					ID:        tc.ID,
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+				}
+			}
+		}
+	}
+	return result
+}
+
+// LastN returns the last n messages without modifying the session.
+// Returns nil if n <= 0 or the session is empty.
+func (s *Session) LastN(n int) []Message {
+	if n <= 0 || len(s.Messages) == 0 {
+		return nil
+	}
+	if n > len(s.Messages) {
+		n = len(s.Messages)
+	}
+	start := len(s.Messages) - n
+	return s.Messages[start:]
 }
 
 func newID(prefix string) string {
