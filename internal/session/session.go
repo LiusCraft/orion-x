@@ -138,7 +138,9 @@ func (s *Session) LastN(n int) []Message {
 		n = len(s.Messages)
 	}
 	start := len(s.Messages) - n
-	return s.Messages[start:]
+	result := make([]Message, n)
+	copy(result, s.Messages[start:])
+	return result
 }
 
 func newID(prefix string) string {
