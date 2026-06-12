@@ -38,66 +38,122 @@ func (s *AgentStage) Process(ctx context.Context, input <-chan pipeline.Message)
 	go func() {
 		defer close(output)
 
+		var pending *pipeline.Message
+
 		for {
-			select {
-			case <-ctx.Done():
+			msg, ok := s.nextMessage(ctx, input, pending)
+			if !ok {
 				return
-			case msg, ok := <-input:
-				if !ok {
+			}
+			pending = nil
+
+			if msg.Type == pipeline.MessageTypeInterrupt {
+				select {
+				case output <- msg:
+				case <-ctx.Done():
 					return
 				}
-
-				// 只处理文本输入（用户输入）
-				if msg.Type != pipeline.MessageTypeTextChunk {
-					select {
-					case output <- msg:
-					case <-ctx.Done():
-						return
-					}
-					continue
-				}
-
-				// 提取文本
-				text, ok := msg.Payload.(string)
-				if !ok {
-					logging.Errorf("AgentStage: invalid payload type, expected string")
-					select {
-					case output <- msg.WithError(fmt.Errorf("invalid payload type")):
-					case <-ctx.Done():
-						return
-					}
-					continue
-				}
-
-				// 添加用户消息到会话
-				s.session.Add(session.Message{Role: session.RoleUser, Content: text})
-
-				// 调用 Agent
-				eventChan, err := s.agent.Run(ctx, s.session)
-				if err != nil {
-					logging.Errorf("AgentStage: agent process error: %v", err)
-					select {
-					case output <- msg.WithError(err):
-					case <-ctx.Done():
-						return
-					}
-					continue
-				}
-
-				// 转换 AgentEvent -> Pipeline Message
-				for agentEvent := range eventChan {
-					pipelineMsg := s.convertAgentEvent(agentEvent, msg.Metadata)
-					select {
-					case output <- pipelineMsg:
-					case <-ctx.Done():
-						return
-					}
-				}
+				continue
 			}
+
+			if msg.Type != pipeline.MessageTypeTextChunk {
+				select {
+				case output <- msg:
+				case <-ctx.Done():
+					return
+				}
+				continue
+			}
+
+			text, ok := msg.Payload.(string)
+			if !ok {
+				logging.Errorf("AgentStage: invalid payload type, expected string")
+				select {
+				case output <- msg.WithError(fmt.Errorf("invalid payload type")):
+				case <-ctx.Done():
+					return
+				}
+				continue
+			}
+
+			s.session.Add(session.Message{Role: session.RoleUser, Content: text})
+
+			pending = s.runAgentWithInterrupt(ctx, input, output, msg)
 		}
 	}()
 
 	return output
+}
+
+// nextMessage 获取下一条消息：优先返回 pending 消息，否则从 input 读取
+func (s *AgentStage) nextMessage(ctx context.Context, input <-chan pipeline.Message, pending *pipeline.Message) (pipeline.Message, bool) {
+	if pending != nil {
+		return *pending, true
+	}
+	select {
+	case <-ctx.Done():
+		return pipeline.Message{}, false
+	case msg, ok := <-input:
+		return msg, ok
+	}
+}
+
+// runAgentWithInterrupt 运行 Agent，同时监听 input 中的中断消息。
+// 返回在 Agent 运行期间从 input 消费的消息（如有），由主循环处理。
+func (s *AgentStage) runAgentWithInterrupt(
+	ctx context.Context,
+	input <-chan pipeline.Message,
+	output chan<- pipeline.Message,
+	textMsg pipeline.Message,
+) *pipeline.Message {
+	agentCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	eventChan, err := s.agent.Run(agentCtx, s.session)
+	if err != nil {
+		logging.Errorf("AgentStage: agent process error: %v", err)
+		select {
+		case output <- textMsg.WithError(err):
+		case <-ctx.Done():
+		}
+		return nil
+	}
+
+	for {
+		select {
+		case agentEvent, ok := <-eventChan:
+			if !ok {
+				return nil
+			}
+			pipelineMsg := s.convertAgentEvent(agentEvent, textMsg.Metadata)
+			select {
+			case output <- pipelineMsg:
+			case msg, ok := <-input:
+				cancel()
+				for range eventChan {
+				}
+				if !ok {
+					return nil
+				}
+				return &msg
+			case <-agentCtx.Done():
+				return nil
+			case <-ctx.Done():
+				return nil
+			}
+		case msg, ok := <-input:
+			cancel()
+			for range eventChan {
+			}
+			if !ok {
+				return nil
+			}
+			return &msg
+		case <-ctx.Done():
+			cancel()
+			return nil
+		}
+	}
 }
 
 // convertAgentEvent 转换 AgentEvent 到 Pipeline Message

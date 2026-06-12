@@ -22,6 +22,12 @@ func (a *Agent) Run(ctx context.Context, sess *session.Session) (<-chan AgentEve
 		processStart := time.Now()
 
 		for step := 0; step < maxSteps; step++ {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			logging.Infof("Agent: step %d/%d", step+1, maxSteps)
 
 			messages := a.buildSessionMessages(ctx, sess)
@@ -33,7 +39,10 @@ func (a *Agent) Run(ctx context.Context, sess *session.Session) (<-chan AgentEve
 			})
 			if err != nil {
 				logging.Errorf("Agent: LLM stream error: %v", err)
-				eventChan <- &FinishedEvent{Error: err}
+				select {
+				case eventChan <- &FinishedEvent{Error: err}:
+				case <-ctx.Done():
+				}
 				return
 			}
 			logging.Infof("Agent: LLM stream established in %v", time.Since(streamStart))
@@ -51,7 +60,10 @@ func (a *Agent) Run(ctx context.Context, sess *session.Session) (<-chan AgentEve
 				}
 				if err != nil {
 					logging.Errorf("Agent: stream receive error: %v", err)
-					eventChan <- &FinishedEvent{Error: err}
+					select {
+					case eventChan <- &FinishedEvent{Error: err}:
+					case <-ctx.Done():
+					}
 					stream.Close()
 					return
 				}
@@ -64,7 +76,11 @@ func (a *Agent) Run(ctx context.Context, sess *session.Session) (<-chan AgentEve
 							firstChunkLogged = true
 							logging.Infof("Agent: first chunk in %v", time.Since(streamStart))
 						}
-						eventChan <- &TextChunkEvent{Chunk: newContent}
+						select {
+						case eventChan <- &TextChunkEvent{Chunk: newContent}:
+						case <-ctx.Done():
+							return
+						}
 						fullText += newContent
 					}
 					lastFilteredLength = nextLength
@@ -79,7 +95,10 @@ func (a *Agent) Run(ctx context.Context, sess *session.Session) (<-chan AgentEve
 			if len(toolCalls) == 0 {
 				sess.Add(session.Message{Role: session.RoleAssistant, Content: fullText})
 				logging.Infof("Agent: done (no tool calls), total time=%v", time.Since(processStart))
-				eventChan <- &FinishedEvent{Error: nil}
+				select {
+				case eventChan <- &FinishedEvent{Error: nil}:
+				case <-ctx.Done():
+				}
 				return
 			}
 
@@ -94,10 +113,19 @@ func (a *Agent) Run(ctx context.Context, sess *session.Session) (<-chan AgentEve
 			sess.Add(session.Message{Role: session.RoleAssistant, Content: fullText, ToolCalls: sessionToolCalls})
 
 			for _, call := range toolCalls {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
 				if !a.registry.CanExecute(call.Name) {
 					err := fmt.Errorf("unknown tool: %s", call.Name)
 					logging.Errorf("Agent: %v", err)
-					eventChan <- &FinishedEvent{Error: err}
+					select {
+					case eventChan <- &FinishedEvent{Error: err}:
+					case <-ctx.Done():
+					}
 					return
 				}
 
@@ -106,7 +134,10 @@ func (a *Agent) Run(ctx context.Context, sess *session.Session) (<-chan AgentEve
 				result, err := a.registry.Execute(ctx, call.Name, rawArgs)
 				if err != nil {
 					logging.Errorf("Agent: tool exec error: %v", err)
-					eventChan <- &FinishedEvent{Error: err}
+					select {
+					case eventChan <- &FinishedEvent{Error: err}:
+					case <-ctx.Done():
+					}
 					return
 				}
 
@@ -119,57 +150,17 @@ func (a *Agent) Run(ctx context.Context, sess *session.Session) (<-chan AgentEve
 					ToolCallID: call.ID,
 					Content:    result.Output,
 				})
-
-				if err := a.summarizeToolResult(ctx, eventChan, call.Name, call.Arguments, result.Output); err != nil {
-					logging.Errorf("Agent: tool summary error: %v", err)
-					eventChan <- &FinishedEvent{Error: err}
-					return
-				}
 			}
 		}
 
 		logging.Infof("Agent: reached max steps (%d)", maxSteps)
-		eventChan <- &FinishedEvent{Error: fmt.Errorf("reached max steps (%d)", maxSteps)}
+		select {
+		case eventChan <- &FinishedEvent{Error: fmt.Errorf("reached max steps (%d)", maxSteps)}:
+		case <-ctx.Done():
+		}
 	}()
 
 	return eventChan, nil
-}
-
-func (a *Agent) summarizeToolResult(ctx context.Context, eventChan chan<- AgentEvent, tool string, args string, result string) error {
-	prompt := fmt.Sprintf("工具: %s\n参数: %s\n结果: %s\n请用简洁中文向用户总结结果，必要时分点说明，不要调用工具。", tool, args, result)
-
-	messages := []llm.Message{
-		{Role: "system", Content: "你是一个通用 AI 助手，请根据工具结果生成简洁回复。不要调用任何工具。"},
-		{Role: "user", Content: prompt},
-	}
-
-	stream, err := a.client.Chat(ctx, llm.Request{Messages: messages})
-	if err != nil {
-		return err
-	}
-	defer stream.Close()
-
-	bufferedContent := ""
-	lastFilteredLength := 0
-
-	for {
-		msg, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if msg.Content != "" {
-			bufferedContent += msg.Content
-			newContent, nextLength := deltaFromBufferedContent(bufferedContent, lastFilteredLength)
-			if newContent != "" {
-				eventChan <- &TextChunkEvent{Chunk: newContent}
-			}
-			lastFilteredLength = nextLength
-		}
-	}
-	return nil
 }
 
 func (a *Agent) buildSessionMessages(ctx context.Context, sess *session.Session) []llm.Message {

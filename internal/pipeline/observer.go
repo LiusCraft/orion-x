@@ -19,7 +19,7 @@ func (o *loggingObserver) OnMessage(stageName string, msg Message) {
 	if msg.IsError() {
 		return // 错误单独在 OnError 中记录
 	}
-	logging.Infof("Pipeline [%s]: message type=%s", stageName, msg.Type)
+	logging.Infof("Pipeline [%s]: message type=%s", stageName, msg.Payload)
 }
 
 func (o *loggingObserver) OnError(stageName string, err error) {

@@ -252,7 +252,7 @@ func main() {
 		AddStage(pstages.NewASRStage(audioInPipe)).
 		AddStage(pstages.NewAgentStage(agentInst, sess)).
 		AddStage(pstages.NewTTSStage(audioOutPipe)).
-		SetObserver(pipeline.NewLoggingObserver(false)).
+		SetObserver(pipeline.NewLoggingObserver(true)).
 		Build()
 
 	logging.Infof("Starting pipeline...")

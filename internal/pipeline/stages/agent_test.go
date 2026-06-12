@@ -45,12 +45,17 @@ func TestAgentStage_TextChunk(t *testing.T) {
 
 	output := stage.Process(ctx, input)
 
-	// 发送文本消息
 	input <- pipeline.NewMessage(pipeline.MessageTypeTextChunk, "hello")
-	close(input)
 
-	// 验证输出
 	var messages []pipeline.Message
+	for i := 0; i < 2; i++ {
+		msg, ok := <-output
+		if !ok {
+			break
+		}
+		messages = append(messages, msg)
+	}
+	close(input)
 	for msg := range output {
 		messages = append(messages, msg)
 	}
@@ -59,7 +64,6 @@ func TestAgentStage_TextChunk(t *testing.T) {
 		t.Fatalf("Expected 2 messages, got %d", len(messages))
 	}
 
-	// 第一个消息是文本响应
 	if messages[0].Type != pipeline.MessageTypeTextChunk {
 		t.Errorf("Expected MessageTypeTextChunk, got %s", messages[0].Type)
 	}
@@ -67,7 +71,6 @@ func TestAgentStage_TextChunk(t *testing.T) {
 		t.Errorf("Expected 'Response: hello', got '%s'", messages[0].Payload)
 	}
 
-	// 第二个消息是 Finished
 	if messages[1].Type != pipeline.MessageTypeFinished {
 		t.Errorf("Expected MessageTypeFinished, got %s", messages[1].Type)
 	}
