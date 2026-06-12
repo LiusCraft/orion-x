@@ -7,11 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudwego/eino/schema"
-	llmfactory "github.com/liuscraft/orion-x/internal/provider/llm"
+	"github.com/liuscraft/orion-x/internal/llm"
+	llmprovider "github.com/liuscraft/orion-x/internal/llm/provider"
 )
 
-// LLMConfig 提供 LLM 连接信息。
 type LLMConfig struct {
 	Provider string
 	APIKey   string
@@ -20,7 +19,7 @@ type LLMConfig struct {
 }
 
 type llmSummarizer struct {
-	model llmfactory.ChatModel
+	model llm.Client
 }
 
 func (s *llmSummarizer) Summarize(ctx context.Context, turns []Turn) (string, error) {
@@ -34,11 +33,13 @@ func (s *llmSummarizer) Summarize(ctx context.Context, turns []Turn) (string, er
 		}
 		b.WriteString(fmt.Sprintf("用户: %s\n助手: %s", strings.TrimSpace(turn.UserText), strings.TrimSpace(turn.AssistantText)))
 	}
-	messages := []*schema.Message{
-		schema.SystemMessage("你是对话摘要助手，请用简洁中文总结最近的对话要点，控制在100字以内。"),
-		schema.UserMessage(b.String()),
+	req := llm.Request{
+		Messages: []llm.Message{
+			{Role: "system", Content: "你是对话摘要助手，请用简洁中文总结最近的对话要点，控制在100字以内。"},
+			{Role: "user", Content: b.String()},
+		},
 	}
-	resp, err := s.model.Generate(ctx, messages)
+	resp, err := s.model.ChatSync(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -46,7 +47,7 @@ func (s *llmSummarizer) Summarize(ctx context.Context, turns []Turn) (string, er
 }
 
 type llmExtractor struct {
-	model             llmfactory.ChatModel
+	model             llm.Client
 	now               func() time.Time
 	retentionDays     int
 	defaultType       string
@@ -58,12 +59,14 @@ func (e *llmExtractor) Extract(ctx context.Context, turn Turn) ([]MemoryItem, er
 	if content == "" {
 		return nil, nil
 	}
-	prompt := "请从以下对话中提取‘长期稳定’的用户事实/偏好（不要提取临时上下文、一次性任务或隐私敏感信息）。\n输出 JSON 数组，每项包含：content, type(\"preference\"|\"fact\"|\"profile\"), importance(1-5)。如果没有可提取内容，输出空数组 []。"
-	messages := []*schema.Message{
-		schema.SystemMessage(prompt),
-		schema.UserMessage(content),
+	prompt := "请从以下对话中提取'长期稳定'的用户事实/偏好（不要提取临时上下文、一次性任务或隐私敏感信息）。\n输出 JSON 数组，每项包含：content, type(\"preference\"|\"fact\"|\"profile\"), importance(1-5)。如果没有可提取内容，输出空数组 []。"
+	req := llm.Request{
+		Messages: []llm.Message{
+			{Role: "system", Content: prompt},
+			{Role: "user", Content: content},
+		},
 	}
-	resp, err := e.model.Generate(ctx, messages)
+	resp, err := e.model.ChatSync(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +109,6 @@ func parseMemoryItems(raw string) ([]MemoryItem, error) {
 	if trimmed == "" {
 		return nil, nil
 	}
-	// 尝试解析 JSON
 	var payload []memoryItemPayload
 	if err := json.Unmarshal([]byte(trimmed), &payload); err == nil {
 		items := make([]MemoryItem, 0, len(payload))
@@ -124,7 +126,6 @@ func parseMemoryItems(raw string) ([]MemoryItem, error) {
 		return items, nil
 	}
 
-	// 退化：按行解析
 	lines := strings.Split(trimmed, "\n")
 	items := make([]MemoryItem, 0, len(lines))
 	for _, line := range lines {
@@ -160,18 +161,14 @@ func looksLikeQuestion(text string) bool {
 	return strings.ContainsAny(text, "?？")
 }
 
-func newLLMModel(ctx context.Context, cfg LLMConfig) (llmfactory.ChatModel, error) {
+func newLLMModel(ctx context.Context, cfg LLMConfig) (llm.Client, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, nil
 	}
-	model, err := llmfactory.NewChatModel(ctx, llmfactory.Config{
+	return llmprovider.NewClientWithDefault(ctx, llmprovider.Config{
 		Type:    cfg.Provider,
 		APIKey:  cfg.APIKey,
 		BaseURL: cfg.BaseURL,
 		Model:   cfg.Model,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return model, nil
 }

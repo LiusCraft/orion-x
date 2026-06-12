@@ -7,11 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudwego/eino/schema"
+	"github.com/liuscraft/orion-x/internal/llm"
 	"github.com/liuscraft/orion-x/internal/logging"
 )
 
-// Options 用于创建记忆服务。
 type Options struct {
 	SystemPrompt string
 	LLM          LLMConfig
@@ -28,7 +27,6 @@ type serviceImpl struct {
 	now          func() time.Time
 }
 
-// NewService 创建记忆服务。
 func NewService(cfg Config, opts Options) (Service, error) {
 	cfg = normalizeConfig(cfg)
 	if opts.Now == nil {
@@ -85,10 +83,10 @@ func NewService(cfg Config, opts Options) (Service, error) {
 	return svc, nil
 }
 
-func (s *serviceImpl) BuildContextMessages(ctx context.Context, userText string) ([]*schema.Message, error) {
-	messages := make([]*schema.Message, 0, 8)
+func (s *serviceImpl) BuildContextMessages(ctx context.Context, userText string) ([]*llm.Message, error) {
+	messages := make([]*llm.Message, 0, 8)
 	if s.systemPrompt != "" {
-		messages = append(messages, schema.SystemMessage(s.systemPrompt))
+		messages = append(messages, &llm.Message{Role: "system", Content: s.systemPrompt})
 	}
 
 	var queryErr error
@@ -99,7 +97,7 @@ func (s *serviceImpl) BuildContextMessages(ctx context.Context, userText string)
 			if err != nil {
 				queryErr = err
 			} else if len(items) > 0 {
-				messages = append(messages, schema.SystemMessage(formatLongTermMemory(items)))
+				messages = append(messages, &llm.Message{Role: "system", Content: formatLongTermMemory(items)})
 			}
 		}
 	}
@@ -108,7 +106,7 @@ func (s *serviceImpl) BuildContextMessages(ctx context.Context, userText string)
 		messages = append(messages, s.session.Messages()...)
 	}
 
-	messages = append(messages, schema.UserMessage(userText))
+	messages = append(messages, &llm.Message{Role: "user", Content: userText})
 	return messages, queryErr
 }
 

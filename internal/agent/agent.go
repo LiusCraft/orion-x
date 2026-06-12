@@ -4,28 +4,30 @@ import (
 	"context"
 	"errors"
 
+	"github.com/liuscraft/orion-x/internal/llm"
+	llmprovider "github.com/liuscraft/orion-x/internal/llm/provider"
 	"github.com/liuscraft/orion-x/internal/memory"
-	llmfactory "github.com/liuscraft/orion-x/internal/provider/llm"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 
-// Agent 负责 LLM 流式调用、工具调用和输出事件生成。
 type Agent struct {
-	chatModel   llmfactory.ChatModel
-	toolManager tools.ToolManager
-	memorySvc   memory.Service
+	client    llm.Client
+	registry  *tools.Registry
+	model     string
+	memorySvc memory.Service
+	maxSteps  int
 }
 
-func NewAgent(ctx context.Context, cfg Config, toolManager tools.ToolManager, memorySvc memory.Service) (*Agent, error) {
+func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc memory.Service) (*Agent, error) {
 	normalized, err := normalizeConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	if toolManager == nil {
+	if mgr == nil {
 		return nil, errors.New("tool manager is required")
 	}
 
-	chatModel, err := llmfactory.NewChatModel(ctx, llmfactory.Config{
+	client, err := llmprovider.NewClientWithDefault(ctx, llmprovider.Config{
 		Type:        normalized.Provider,
 		BaseURL:     normalized.BaseURL,
 		Model:       normalized.Model,
@@ -36,19 +38,17 @@ func NewAgent(ctx context.Context, cfg Config, toolManager tools.ToolManager, me
 		return nil, err
 	}
 
-	if err := chatModel.BindTools(toolManager.ToolInfos()); err != nil {
-		return nil, err
-	}
-
 	return &Agent{
-		chatModel:   chatModel,
-		toolManager: toolManager,
-		memorySvc:   memorySvc,
+		client:    client,
+		registry:  mgr.Registry(),
+		model:     normalized.Model,
+		memorySvc: memorySvc,
+		maxSteps:  5,
 	}, nil
 }
 
-// ToolInfo 工具信息
-type ToolInfo struct {
-	Name        string
-	Description string
+func (a *Agent) SetMaxSteps(n int) {
+	if n > 0 {
+		a.maxSteps = n
+	}
 }

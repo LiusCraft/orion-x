@@ -5,16 +5,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cloudwego/eino/schema"
+	"github.com/liuscraft/orion-x/internal/llm"
 	"github.com/liuscraft/orion-x/internal/logging"
 )
 
-// Summarizer 用于生成会话摘要。
 type Summarizer interface {
 	Summarize(ctx context.Context, turns []Turn) (string, error)
 }
 
-// SessionBuffer 保存当前 session 的对话历史。
 type SessionBuffer struct {
 	maxTurns      int
 	summaryEveryN int
@@ -68,23 +66,23 @@ func (b *SessionBuffer) Add(ctx context.Context, turn Turn) {
 	}
 }
 
-func (b *SessionBuffer) Messages() []*schema.Message {
+func (b *SessionBuffer) Messages() []*llm.Message {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	messages := make([]*schema.Message, 0, len(b.turns)*2+1)
+	messages := make([]*llm.Message, 0, len(b.turns)*2+1)
 	if strings.TrimSpace(b.summary) != "" {
-		messages = append(messages, schema.SystemMessage("近期对话摘要: "+b.summary))
+		messages = append(messages, &llm.Message{Role: "system", Content: "近期对话摘要: " + b.summary})
 	}
 
 	for _, turn := range b.turns {
 		userText := strings.TrimSpace(turn.UserText)
 		if userText != "" {
-			messages = append(messages, schema.UserMessage(userText))
+			messages = append(messages, &llm.Message{Role: "user", Content: userText})
 		}
 		assistantText := strings.TrimSpace(turn.AssistantText)
 		if assistantText != "" {
-			messages = append(messages, schema.AssistantMessage(assistantText, nil))
+			messages = append(messages, &llm.Message{Role: "assistant", Content: assistantText})
 		}
 	}
 	return messages

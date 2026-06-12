@@ -3,8 +3,6 @@ package agent
 import (
 	"errors"
 	"strings"
-
-	llmfactory "github.com/liuscraft/orion-x/internal/provider/llm"
 )
 
 var (
@@ -26,7 +24,7 @@ func normalizeConfig(cfg Config) (Config, error) {
 		return Config{}, errLLMAPIKeyRequired
 	}
 	if strings.TrimSpace(cfg.Provider) == "" {
-		cfg.Provider = llmfactory.TypeOpenAI
+		cfg.Provider = "openai"
 	}
 	if strings.TrimSpace(cfg.BaseURL) == "" {
 		return Config{}, errLLMBaseURLRequired

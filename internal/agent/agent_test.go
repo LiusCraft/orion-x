@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 
@@ -32,23 +33,23 @@ func testAgentConfig() Config {
 func newTestAgent(t *testing.T, ctx context.Context) *Agent {
 	t.Helper()
 	cfg := testAgentConfig()
-	toolManager, err := tools.NewToolManager(ctx, tools.ManagerConfig{})
+	toolManager, err := tools.NewManager(ctx, tools.ManagerConfig{})
 	if err != nil {
-		t.Fatalf("NewToolManager() error = %v", err)
+		t.Fatalf("NewManager() error = %v", err)
 	}
-	
+
 	t.Cleanup(func() {
 		if err := toolManager.Close(); err != nil {
-			t.Fatalf("Close ToolManager error = %v", err)
+			t.Fatalf("Close Manager error = %v", err)
 		}
 	})
 
-	agent, err := NewAgent(ctx, cfg, toolManager, nil)
+	agent, err := New(ctx, cfg, toolManager, nil)
 	if err != nil {
-		t.Fatalf("NewAgent() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 	if agent == nil {
-		t.Fatal("NewAgent() returned nil")
+		t.Fatal("New() returned nil")
 	}
 	return agent
 }

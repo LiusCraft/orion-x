@@ -15,11 +15,11 @@ import (
 	audiosink "github.com/liuscraft/orion-x/internal/audio/sink"
 	"github.com/liuscraft/orion-x/internal/audio/source"
 	"github.com/liuscraft/orion-x/internal/config"
+	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/pipeline"
 	pstages "github.com/liuscraft/orion-x/internal/pipeline/stages"
-	_ "github.com/liuscraft/orion-x/internal/provider/llm/register"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
@@ -100,19 +100,19 @@ func main() {
 	}
 
 	logging.Infof("Creating ToolManager...")
-	toolManager, err := tools.NewToolManager(baseCtx, toolCfg)
+	toolMgr, err := tools.NewManager(baseCtx, toolCfg)
 	if err != nil {
 		logging.Fatalf("Failed to create ToolManager: %v", err)
 	}
 	defer func() {
-		if err := toolManager.Close(); err != nil {
+		if err := toolMgr.Close(); err != nil {
 			logging.Warnf("Close ToolManager failed: %v", err)
 		}
 	}()
 	logging.Infof("ToolManager created successfully")
 
 	logging.Infof("Creating Agent...")
-	agentInst, err := agent.NewAgent(baseCtx, agentCfg, toolManager, memorySvc)
+	agentInst, err := agent.New(baseCtx, agentCfg, toolMgr, memorySvc)
 	if err != nil {
 		logging.Fatalf("Failed to create Agent: %v", err)
 	}
