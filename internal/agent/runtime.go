@@ -78,6 +78,7 @@ func (v *Agent) Process(ctx context.Context, input string) (<-chan AgentEvent, e
 				lastFilteredLength = nextLength
 			}
 
+			// 处理工具调用（内部执行）
 			for _, toolCall := range msg.ToolCalls {
 				if v.toolManager != nil && !v.toolManager.Has(toolCall.Function.Name) {
 					err := fmt.Errorf("unknown tool: %s", toolCall.Function.Name)
@@ -92,10 +93,22 @@ func (v *Agent) Process(ctx context.Context, input string) (<-chan AgentEvent, e
 					return
 				}
 
-				logging.Infof("Agent: tool call requested: %s, args: %v", toolCall.Function.Name, args)
-				eventChan <- &ToolCallRequestedEvent{
-					Tool: toolCall.Function.Name,
-					Args: args,
+				logging.Infof("Agent: executing tool: %s, args: %v", toolCall.Function.Name, args)
+				
+				// 执行工具（内部方法）
+				result, err := v.executeTool(ctx, toolCall.Function.Name, args)
+				if err != nil {
+					logging.Errorf("Agent: tool execution error: %v", err)
+					eventChan <- &FinishedEvent{Error: err}
+					return
+				}
+				
+				// 调用 LLM 总结工具结果
+				logging.Infof("Agent: summarizing tool result")
+				if err := v.summarizeToolResult(ctx, eventChan, toolCall.Function.Name, args, result); err != nil {
+					logging.Errorf("Agent: tool summary error: %v", err)
+					eventChan <- &FinishedEvent{Error: err}
+					return
 				}
 			}
 		}
@@ -119,4 +132,49 @@ func parseToolArgs(argsJSON string) (map[string]interface{}, error) {
 	}
 
 	return args, nil
+}
+
+// executeTool 执行工具调用（内部方法）
+func (v *Agent) executeTool(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
+	// 1. 获取工具
+	loadedTool, ok := v.toolManager.GetTool(toolName)
+	if !ok {
+		return nil, fmt.Errorf("tool not found: %s", toolName)
+	}
+
+	// 2. 类型断言为 InvokableTool
+	invokableTool, ok := loadedTool.(interface {
+		InvokableRun(ctx context.Context, argumentsInJSON string) (string, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("tool is not invokable: %s", toolName)
+	}
+
+	// 3. 序列化参数
+	if args == nil {
+		args = map[string]interface{}{}
+	}
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tool args: %w", err)
+	}
+
+	// 4. 执行工具
+	result, err := invokableTool.InvokableRun(ctx, string(argsJSON))
+	if err != nil {
+		return nil, fmt.Errorf("invoke tool %s: %w", toolName, err)
+	}
+
+	// 5. 解析结果
+	return parseToolOutput(result), nil
+}
+
+// parseToolOutput 解析工具输出
+func parseToolOutput(raw string) interface{} {
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		// 如果解析失败，返回原始字符串
+		return raw
+	}
+	return parsed
 }

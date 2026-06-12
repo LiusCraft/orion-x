@@ -208,9 +208,6 @@ internal/audio/
 ├── outpipe.go                # AudioOutPipe 接口（已更新）
 ├── outpipe_impl.go           # AudioOutPipe 实现（集成 TTSPipeline）
 └── mocks_test.go             # 测试用 mock
-
-internal/voicebot/
-└── orchestrator.go           # 已更新，支持 Agent context 取消
 ```
 
 ## 5. 关键改动
@@ -268,6 +265,4 @@ type AudioOutPipe interface {
 - `internal/audio/tts_pipeline.go` - TTSPipeline 接口
 - `internal/audio/tts_pipeline_impl.go` - TTSPipeline 实现
 - `internal/audio/outpipe_impl.go` - AudioOutPipe 集成
-- `internal/voicebot/orchestrator.go` - Orchestrator 更新
 - `internal/config/config.go` - 配置结构
-- `voicebot.example.json` - 配置示例

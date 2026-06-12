@@ -10,19 +10,13 @@ body:
       value: |
         请先完整填写以下信息。新需求会进入 GitHub Project 管理，默认不自动分配负责人。
 
-        设计文档参考：
-        - `docs/manager-mvp-design.md`
-        - `docs/manager-api-types.md`
-
   - type: dropdown
     id: service
     attributes:
       label: Service
       description: 请选择需求主要归属服务
       options:
-        - manager
         - voicebot-server
-        - web-ui
     validations:
       required: true
 

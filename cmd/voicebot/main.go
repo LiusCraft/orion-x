@@ -17,10 +17,11 @@ import (
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
+	"github.com/liuscraft/orion-x/internal/pipeline"
+	pstages "github.com/liuscraft/orion-x/internal/pipeline/stages"
 	_ "github.com/liuscraft/orion-x/internal/provider/llm/register"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/tools"
-	"github.com/liuscraft/orion-x/internal/voicebot"
 )
 
 func main() {
@@ -111,7 +112,7 @@ func main() {
 	logging.Infof("ToolManager created successfully")
 
 	logging.Infof("Creating Agent...")
-	agentRuntime, err := agent.NewAgent(baseCtx, agentCfg, toolManager, memorySvc)
+	agentInst, err := agent.NewAgent(baseCtx, agentCfg, toolManager, memorySvc)
 	if err != nil {
 		logging.Fatalf("Failed to create Agent: %v", err)
 	}
@@ -234,21 +235,38 @@ func main() {
 	}
 	logging.Infof("AudioInPipe created successfully")
 
-	// 创建工具执行器适配器
-	toolExecutor := tools.NewExecutorAdapter(baseCtx, toolManager)
-
-	logging.Infof("Creating Orchestrator...")
-	orchestrator := voicebot.NewOrchestratorWithOptions(
-		agentRuntime,
-		audioOutPipe,
-		audioInPipe,
-		toolExecutor,
-		&voicebot.OrchestratorOptions{Memory: memorySvc},
-	)
-	logging.Infof("Orchestrator created successfully")
-
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
+
+	// Start AudioOutPipe (initializes internal TTSPipeline)
+	logging.Infof("Starting AudioOutPipe...")
+	if err := audioOutPipe.Start(ctx); err != nil {
+		logging.Fatalf("Failed to start AudioOutPipe: %v", err)
+	}
+
+	// Build pipeline: ASR → Agent → TTS
+	logging.Infof("Building pipeline: ASR → Agent → TTS...")
+	pl := pipeline.NewBuilder().
+		AddStage(pstages.NewASRStage(audioInPipe)).
+		AddStage(pstages.NewAgentStage(agentInst)).
+		AddStage(pstages.NewTTSStage(audioOutPipe)).
+		SetObserver(pipeline.NewLoggingObserver(false)).
+		Build()
+
+	logging.Infof("Starting pipeline...")
+	if err := pl.Start(ctx); err != nil {
+		logging.Fatalf("Failed to start pipeline: %v", err)
+	}
+
+	// Drain pipeline output for logging
+	go func() {
+		for msg := range pl.Output() {
+			if msg.IsError() {
+				logging.Warnf("Pipeline error [type=%s]: %v", msg.Type, msg.Metadata.Error)
+			}
+		}
+		logging.Debugf("Pipeline output closed")
+	}()
 
 	logging.Infof("Setting up signal handler...")
 	sigCh := make(chan os.Signal, 1)
@@ -260,11 +278,14 @@ func main() {
 		logging.Infof("     Received interrupt signal...       ")
 		logging.Infof("========================================")
 
-		// 关闭顺序：从外到内，先停止依赖方，再停止被依赖方
-		// Orchestrator 依赖 Mixer，所以先停 Orchestrator
-		logging.Infof("Stopping Orchestrator...")
-		if err := orchestrator.Stop(); err != nil {
-			logging.Errorf("Error stopping orchestrator: %v", err)
+		logging.Infof("Stopping pipeline...")
+		if err := pl.Stop(); err != nil {
+			logging.Errorf("Error stopping pipeline: %v", err)
+		}
+
+		logging.Infof("Stopping AudioOutPipe...")
+		if err := audioOutPipe.Stop(); err != nil {
+			logging.Errorf("Error stopping AudioOutPipe: %v", err)
 		}
 
 		logging.Infof("Stopping Mixer...")
@@ -272,15 +293,8 @@ func main() {
 			logging.Errorf("Error stopping mixer: %v", err)
 		}
 
-		// 取消 context，让 main 函数自然退出
-		// 不使用 os.Exit(0)，这样 defer 语句（如 portaudio.Terminate()）才会被执行
 		cancel()
 	}()
-
-	logging.Infof("Starting Orchestrator...")
-	if err := orchestrator.Start(ctx); err != nil {
-		logging.Fatalf("Failed to start orchestrator: %v", err)
-	}
 
 	logging.Infof("========================================")
 	logging.Infof("     VoiceBot is Running! 🎤          ")

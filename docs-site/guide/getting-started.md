@@ -37,10 +37,10 @@ cd orion-x
 复制示例配置文件并填入你的 API 密钥：
 
 ```bash
-cp voicebot.example.json data/voicebot.json
+cp config.example.json data/config.json
 ```
 
-编辑 `data/voicebot.json`，填入：
+编辑 `data/config.json`，填入：
 - 阿里云 Dashscope API Key (ASR/TTS)
 - 智谱 AI API Key (LLM)
 
@@ -56,17 +56,17 @@ export ZHIPU_API_KEY=your_zhipu_api_key
 ## 运行
 
 ```bash
-go run cmd/voicebot/main.go
+go run main.go
 ```
 
 ### 运行参数
 
 ```bash
 # 指定配置文件
-go run cmd/voicebot/main.go -config /path/to/config.json
+go run main.go -config /path/to/config.json
 
 # 设置日志级别
-LOG_LEVEL=debug go run cmd/voicebot/main.go
+LOG_LEVEL=debug go run main.go
 ```
 
 ## 测试
@@ -76,7 +76,7 @@ LOG_LEVEL=debug go run cmd/voicebot/main.go
 go test ./...
 
 # 运行特定模块测试
-go test ./internal/voicebot/
+go test ./internal/agent/
 
 # 查看测试覆盖率
 go test -cover ./...

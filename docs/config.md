@@ -9,11 +9,8 @@
 ## 配置文件格式与位置
 
 - 格式: JSON（不引入额外依赖）
-- 默认路径: `data/voicebot.json`
+- 默认路径通过 `-config` 参数指定
 - 通过 `-config` 参数覆盖默认路径
-- 示例配置: `voicebot.example.json`
-
-> `cmd/ws-server` 使用独立配置：默认路径 `data/ws-server.json`，示例 `ws-server.example.json`。
 
 ## 加载顺序
 
@@ -29,8 +26,7 @@
 
 ## 配置结构
 
-本节描述本地 `cmd/voicebot` 使用的 `data/voicebot.json`。它不需要配置 `server` / `metrics`；
-这两个顶层字段属于 `cmd/ws-server` 的运行配置，见 `ws-server.example.json`。
+本节描述本地会话使用的配置结构。
 
 ```json
 {
@@ -141,28 +137,4 @@
 - ASR / TTS / LLM 只通过 `provider` 结构配置。
 - `tools.mcp` 支持 `stdio` / `sse` / `streamable` 三种连接方式，工具会以 `mcp.<id>.<tool>` 作为统一名称前缀。
 - 未配置的工具类型默认为 `query`。
-- `cmd/voicebot` 本地启动不会监听 `server.address`，也不会暴露 metrics；服务端监听与 metrics 配置在 `ws-server.example.json`。
 
-## ws-server 独立配置
-
-`cmd/ws-server` 不再直接复用 `voicebot.json`，而是使用独立配置模型：
-
-- `logging` / `server` / `metrics`：服务端运行级配置
-- `voicebot`：会话级配置池（ASR/TTS/LLM/Audio/Tools/Memory）
-
-核心字段：
-
-- `voicebot.default`：默认会话配置（可选）
-- `voicebot.profiles`：按 profile id 管理多个 voicebot 配置
-- `voicebot.local_bindings`：`device-id -> profile-id` 本地绑定
-
-解析规则（当前实现）：
-
-1. 命中 `voicebot.local_bindings[device-id]`，使用对应 profile
-2. 未命中时，若 `voicebot.default` 存在则使用 default
-3. 若 `voicebot.default` 为 `null`（关闭默认配置），则该设备视为未开通，需要绑定后才能接入
-
-说明：
-
-- `voicebot.default` 设置为 `null` 时，服务端不会兜底，未绑定设备会被拒绝。
-- manager 服务（设备与 voicebot 关联管理）尚未实现，当前以本地绑定为准。

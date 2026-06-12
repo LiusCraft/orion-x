@@ -36,6 +36,7 @@ func newTestAgent(t *testing.T, ctx context.Context) *Agent {
 	if err != nil {
 		t.Fatalf("NewToolManager() error = %v", err)
 	}
+	
 	t.Cleanup(func() {
 		if err := toolManager.Close(); err != nil {
 			t.Fatalf("Close ToolManager error = %v", err)
@@ -101,8 +102,6 @@ func TestAgentProcess(t *testing.T) {
 							t.Error("TextChunkEvent has empty chunk")
 						}
 						t.Logf("TextChunk: %s", e.Chunk)
-					case *ToolCallRequestedEvent:
-						t.Logf("ToolCallRequested: %s, Args: %v", e.Tool, e.Args)
 					case *FinishedEvent:
 						hasFinished = true
 						finished = true

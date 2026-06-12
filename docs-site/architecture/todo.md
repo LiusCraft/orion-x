@@ -3,7 +3,7 @@
 ## 阶段一：核心功能实现
 
 ### 0. 模块串联 (优先级: 高) ⭐️ 已完成
-- [x] 创建主程序 `cmd/voicebot/main.go`
+- [x] 创建主程序入口
 - [x] 集成 Orchestrator、Agent、AudioOutPipe、AudioInPipe
 - [x] 集成 ToolExecutor 和工具
 - [x] 验证各模块能够正确协作

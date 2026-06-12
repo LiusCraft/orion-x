@@ -100,38 +100,6 @@ func TestVoicebotExampleConfigLoadsForLocalVoicebot(t *testing.T) {
 	}
 }
 
-func TestValidateOriginCheck(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Server.OriginCheck.Enabled = true
-	cfg.Server.OriginCheck.AllowedOrigins = []string{"https://example.com"}
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("unexpected origin validation error: %v", err)
-	}
-
-	cfg = DefaultConfig()
-	cfg.Server.OriginCheck.Enabled = true
-	cfg.Server.OriginCheck.AllowedOrigins = []string{"example.com"}
-	if err := cfg.Validate(); err == nil {
-		t.Fatalf("expected invalid origin error")
-	}
-}
-
-func TestValidateMetrics(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Metrics.Enabled = true
-	cfg.Metrics.Path = ""
-	if err := cfg.Validate(); err == nil {
-		t.Fatalf("expected invalid metrics path error")
-	}
-
-	cfg = DefaultConfig()
-	cfg.Metrics.Enabled = true
-	cfg.Metrics.Address = "not-a-host-port"
-	if err := cfg.Validate(); err == nil {
-		t.Fatalf("expected invalid metrics address error")
-	}
-}
-
 func TestValidateMCPConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Tools.MCP = []MCPServerConfig{

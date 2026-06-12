@@ -240,7 +240,7 @@ if isTTSPlaying {
 ### 0. 配置管理
 
 - 配置文件统一管理日志、ASR、TTS、LLM、音频与工具参数。
-- 默认路径 `data/voicebot.json`，支持命令行 `-config` 覆盖。
+- 默认路径可通过命令行 `-config` 覆盖。
 - 加载顺序：默认值 → 配置文件 → 环境变量（`LOG_LEVEL`/`LOG_FORMAT`/`DASHSCOPE_API_KEY`/`ZHIPU_API_KEY`）。
 
 ### 1. 工具加载
@@ -300,11 +300,6 @@ emotionToVoice = map[string]string{
 
 ```
 internal/
-├── voicebot/
-│   ├── orchestrator.go      # ConversationOrchestrator
-│   ├── state.go             # 状态机定义
-│   ├── events.go            # 事件定义
-│   └── eventbus.go          # 事件总线
 ├── agent/
 │   ├── agent.go       # Agent
 │   ├── runtime.go           # Agent运行主流程
@@ -329,9 +324,6 @@ internal/
     ├── executor.go          # ToolExecutor
     ├── music.go             # 音乐播放工具示例
     └── weather.go           # 天气查询工具示例
-
-cmd/voicebot/
-└── main.go                  # 主程序入口
 ```
 
 ## 扩展点
@@ -352,7 +344,7 @@ cmd/voicebot/
 
 ## 实现步骤
 
-1. 创建核心包结构（voicebot、agent、audio、tools）
+1. 创建核心包结构（agent、audio、tools）
 2. 实现 ConversationOrchestrator 和状态机
 3. 实现 Agent（集成现有工具调用逻辑）
 4. 实现 AudioMixer（双通道混音）

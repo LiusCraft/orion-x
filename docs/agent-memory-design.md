@@ -8,7 +8,7 @@
 
 ## 2. 设计原则
 - 自顶向下，优先保证流程可用
-- 与现有 `voicebot/orchestrator` 事件流最小耦合
+- 与现有 orchestrator 事件流最小耦合
 - 记忆能力可按配置开关
 - 避免“记忆错误”扩散，注入内容需标注“仅供参考”
 
@@ -107,9 +107,7 @@ ASRFinal → Orchestrator
 
 ## 7. 模块依赖
 ```
-voicebot/orchestrator ──> memory.Service
 agent/runtime ──> memory.Service
-wsserver/session ──> memory.Context + memory.Service
 ```
 
 ## 8. 风险与后续迭代

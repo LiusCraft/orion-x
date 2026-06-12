@@ -41,7 +41,7 @@ func MyToolFunc(ctx context.Context, args map[string]interface{}) (interface{}, 
 
 ### 2. 注册工具
 
-在 `cmd/voicebot/main.go` 或工具初始化代码中注册：
+在工具初始化代码中注册：
 
 ```go
 executor := tools.NewExecutor()
@@ -52,7 +52,7 @@ executor.RegisterTool("playMusic", playMusicFunc)
 
 ### 3. 配置文件注册
 
-在 `data/voicebot.json` 中添加 MCP 工具配置：
+在配置文件中添加 MCP 工具配置：
 
 ```json
 {

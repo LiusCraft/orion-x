@@ -90,24 +90,6 @@ cp voicebot.example.json data/voicebot.json
 go run cmd/voicebot/main.go
 ```
 
-### 运行 ws-server（独立配置）
-
-```bash
-cp ws-server.example.json data/ws-server.json
-go run cmd/ws-server/main.go -config data/ws-server.json
-```
-
-`ws-server` 配置与本地 `voicebot` 配置分离：
-
-- `data/voicebot.json`：`cmd/voicebot`
-- `data/ws-server.json`：`cmd/ws-server`
-
-`ws-server` 会按 `device-id` 解析会话级 `voicebot` 配置：
-
-- 先查 `voicebot.local_bindings`
-- 未命中则用 `voicebot.default`
-- 若 `voicebot.default` 设为 `null`，未绑定设备会被拒绝（需先绑定）
-
 ## 配置说明
 
 ```json
@@ -167,9 +149,6 @@ func NewMyTool() Tool {
 # 运行所有测试
 go test ./...
 
-# 运行特定模块测试
-go test ./internal/voicebot/
-
 # 查看测试覆盖率
 go test -cover ./...
 ```
@@ -189,19 +168,19 @@ go test -cover ./...
 ```
 orion-x/
 ├── cmd/                    # 命令行入口
-│   ├── voicebot/          # 主程序
-│   └── ws-server/         # WebSocket 服务
+│   └── voicebot/          # 主程序
 ├── internal/              # 内部包
-│   ├── voicebot/          # Orchestrator 核心
 │   ├── agent/             # Agent 实现
 │   ├── audio/             # 音频处理管道
+│   ├── pipeline/          # Pipeline 流式处理框架
 │   ├── provider/          # ASR/TTS/LLM provider 实现
 │   ├── tools/             # 工具执行
 │   ├── text/              # 文本处理
+│   ├── memory/            # 记忆管理
+│   ├── config/            # 配置管理
 │   └── logging/           # 日志工具
-├── pkg/                   # 公共包
-├── config/                # 配置文件
-└── docs/                  # 设计文档
+├── docs/                  # 设计文档
+└── docs-site/             # 文档站点
 ```
 
 ## 技术栈
@@ -219,9 +198,6 @@ orion-x/
 ## 文档
 
 - [AGENTS.md](./AGENTS.md) - AI 开发规范
-- [docs/voicebot-architecture.md](./docs/voicebot-architecture.md) - 系统架构设计
-- [docs/voicebot-modules.md](./docs/voicebot-modules.md) - 模块详细设计
-- [docs/voicebot-todo.md](./docs/voicebot-todo.md) - 开发任务列表
 
 ## 许可证
 

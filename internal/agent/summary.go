@@ -6,74 +6,60 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/liuscraft/orion-x/internal/logging"
 )
 
-func (v *Agent) SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan AgentEvent, error) {
+// summarizeToolResult 内部方法：调用 LLM 总结工具结果，直接写入 eventChan
+func (v *Agent) summarizeToolResult(ctx context.Context, eventChan chan<- AgentEvent, tool string, args map[string]interface{}, result interface{}) error {
 	if v.chatModel == nil {
-		return nil, errors.New("llm chat model is not initialized")
+		return errors.New("llm chat model is not initialized")
 	}
 
-	eventChan := make(chan AgentEvent)
-	var wg sync.WaitGroup
+	messages := buildToolSummaryMessages(tool, args, result)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer close(eventChan)
+	logging.Infof("Agent: starting tool summary stream (tool=%s)...", tool)
+	stream, err := v.chatModel.Stream(ctx, messages)
+	if err != nil {
+		logging.Errorf("Agent: tool summary stream error: %v", err)
+		return err
+	}
+	defer stream.Close()
 
-		messages := buildToolSummaryMessages(tool, args, result)
+	fullText := ""
+	bufferedContent := ""
+	lastFilteredLength := 0
 
-		logging.Infof("Agent: starting tool summary stream (tool=%s)...", tool)
-		stream, err := v.chatModel.Stream(ctx, messages)
+	for {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			logging.Infof("Agent: tool summary completed, total text length: %d", len(fullText))
+			break
+		}
 		if err != nil {
-			logging.Errorf("Agent: tool summary stream error: %v", err)
-			eventChan <- &FinishedEvent{Error: err}
-			return
-		}
-		defer stream.Close()
-
-		fullText := ""
-		bufferedContent := ""
-		lastFilteredLength := 0
-
-		for {
-			msg, err := stream.Recv()
-			if err == io.EOF {
-				logging.Infof("Agent: tool summary completed, total text length: %d", len(fullText))
-				break
-			}
-			if err != nil {
-				logging.Errorf("Agent: tool summary receive error: %v", err)
-				eventChan <- &FinishedEvent{Error: err}
-				return
-			}
-
-			if len(msg.ToolCalls) > 0 {
-				err := fmt.Errorf("tool summary should not call tools: %s", msg.ToolCalls[0].Function.Name)
-				logging.Errorf("Agent: %v", err)
-				eventChan <- &FinishedEvent{Error: err}
-				return
-			}
-
-			if msg.Content != "" {
-				bufferedContent += msg.Content
-				newContent, nextLength := deltaFromBufferedContent(bufferedContent, lastFilteredLength)
-				if newContent != "" {
-					eventChan <- &TextChunkEvent{Chunk: newContent}
-					fullText += newContent
-				}
-				lastFilteredLength = nextLength
-			}
+			logging.Errorf("Agent: tool summary receive error: %v", err)
+			return err
 		}
 
-		eventChan <- &FinishedEvent{Error: nil}
-	}()
+		if len(msg.ToolCalls) > 0 {
+			err := fmt.Errorf("tool summary should not call tools: %s", msg.ToolCalls[0].Function.Name)
+			logging.Errorf("Agent: %v", err)
+			return err
+		}
 
-	return eventChan, nil
+		if msg.Content != "" {
+			bufferedContent += msg.Content
+			newContent, nextLength := deltaFromBufferedContent(bufferedContent, lastFilteredLength)
+			if newContent != "" {
+				eventChan <- &TextChunkEvent{Chunk: newContent}
+				fullText += newContent
+			}
+			lastFilteredLength = nextLength
+		}
+	}
+
+	return nil
 }
 
 func buildToolSummaryMessages(tool string, args map[string]interface{}, result interface{}) []*schema.Message {

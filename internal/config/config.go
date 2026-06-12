@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"strings"
 )
@@ -17,8 +15,6 @@ type AppConfig struct {
 	Provider ProviderConfig `json:"provider"`
 	Audio    AudioConfig    `json:"audio"`
 	Tools    ToolsConfig    `json:"tools"`
-	Server   ServerConfig   `json:"server"`
-	Metrics  MetricsConfig  `json:"metrics"`
 	Memory   MemoryConfig   `json:"memory"`
 }
 
@@ -142,44 +138,7 @@ type MCPServerConfig struct {
 	TimeoutMs    int      `json:"timeout_ms"`
 }
 
-type ServerConfig struct {
-	Address        string            `json:"address"`
-	Path           string            `json:"path"`
-	ReadTimeoutMs  int               `json:"read_timeout_ms"`
-	WriteTimeoutMs int               `json:"write_timeout_ms"`
-	Auth           AuthConfig        `json:"auth"`
-	OriginCheck    OriginCheckConfig `json:"origin_check"`
-	AudioParams    AudioParamsConfig `json:"audio_params"`
-}
-
-type MetricsConfig struct {
-	Enabled             bool   `json:"enabled"`
-	Address             string `json:"address"`
-	Path                string `json:"path"`
-	EnableOpenMetrics   bool   `json:"enable_open_metrics"`
-	MaxRequestsInFlight int    `json:"max_requests_in_flight"`
-	BearerToken         string `json:"bearer_token"`
-}
-
-type AuthConfig struct {
-	Enabled        bool     `json:"enabled"`
-	Token          string   `json:"token"`
-	AllowedDevices []string `json:"allowed_devices"`
-}
-
-type OriginCheckConfig struct {
-	Enabled        bool     `json:"enabled"`
-	AllowedOrigins []string `json:"allowed_origins"`
-}
-
-type AudioParamsConfig struct {
-	Format               string `json:"format"`
-	SampleRate           int    `json:"sample_rate"`
-	Channels             int    `json:"channels"`
-	FrameDurationMs      int    `json:"frame_duration_ms"`
-	BitsPerSample        int    `json:"bits_per_sample"`
-	PlayBufferDurationMs int    `json:"play_buffer_duration_ms"`
-}
+// ---------- Provider config ----------
 
 func DefaultConfig() *AppConfig {
 	enableDataInspection := true
@@ -253,37 +212,6 @@ func DefaultConfig() *AppConfig {
 			},
 		},
 		Tools: ToolsConfig{MCP: nil},
-		Server: ServerConfig{
-			Address:        ":8000",
-			Path:           "/xiaozhi/v1/",
-			ReadTimeoutMs:  10000,
-			WriteTimeoutMs: 10000,
-			Auth: AuthConfig{
-				Enabled:        false,
-				Token:          "",
-				AllowedDevices: nil,
-			},
-			OriginCheck: OriginCheckConfig{
-				Enabled:        false,
-				AllowedOrigins: nil,
-			},
-			AudioParams: AudioParamsConfig{
-				Format:               "opus",
-				SampleRate:           16000,
-				Channels:             1,
-				FrameDurationMs:      60,
-				BitsPerSample:        16,
-				PlayBufferDurationMs: 300,
-			},
-		},
-		Metrics: MetricsConfig{
-			Enabled:             true,
-			Address:             "127.0.0.1:9100",
-			Path:                "/metrics",
-			EnableOpenMetrics:   true,
-			MaxRequestsInFlight: 5,
-			BearerToken:         "",
-		},
 		Memory: MemoryConfig{
 			Mode:                 "session",
 			SessionMaxTurns:      10,
@@ -389,69 +317,11 @@ func (c *AppConfig) Validate() error {
 	if c.Audio.Mixer.FramesPerBuffer < 0 {
 		return errors.New("audio.mixer.frames_per_buffer must be non-negative")
 	}
-	if strings.TrimSpace(c.Server.Address) == "" {
-		return errors.New("server.address must not be empty")
-	}
-	if strings.TrimSpace(c.Server.Path) == "" {
-		return errors.New("server.path must not be empty")
-	}
-
-	if c.Metrics.Enabled {
-		if strings.TrimSpace(c.Metrics.Path) == "" {
-			return errors.New("metrics.path must not be empty")
-		}
-		if strings.TrimSpace(c.Metrics.Address) == "" {
-			return errors.New("metrics.address must not be empty")
-		}
-		if _, _, err := net.SplitHostPort(strings.TrimSpace(c.Metrics.Address)); err != nil {
-			return fmt.Errorf("metrics.address must be host:port")
-		}
-	}
-
-	ap := c.Server.AudioParams
-	if ap.Format != "opus" && ap.Format != "pcm" {
-		return fmt.Errorf("server.audio_params.format must be opus or pcm")
-	}
-	if ap.SampleRate != 16000 {
-		return fmt.Errorf("server.audio_params.sample_rate must be 16000")
-	}
-	if ap.Channels != 1 && ap.Channels != 2 {
-		return fmt.Errorf("server.audio_params.channels must be 1 or 2")
-	}
-	switch ap.FrameDurationMs {
-	case 20, 40, 60, 100:
-	default:
-		return fmt.Errorf("server.audio_params.frame_duration_ms must be 20, 40, 60, or 100")
-	}
-	switch ap.BitsPerSample {
-	case 16, 24, 32:
-	default:
-		return fmt.Errorf("server.audio_params.bits_per_sample must be 16, 24, or 32")
-	}
-	if ap.Format == "pcm" && ap.BitsPerSample != 16 {
-		return fmt.Errorf("server.audio_params.bits_per_sample must be 16 when format is pcm")
-	}
-	if ap.PlayBufferDurationMs < 100 {
-		return fmt.Errorf("server.audio_params.play_buffer_duration_ms must be >= 100")
-	}
 	if c.Audio.TTSScheduler.MaxInFlightSentences <= 0 {
 		return errors.New("audio.tts_scheduler.max_in_flight_sentences must be positive")
 	}
 	if c.Audio.TTSScheduler.MaxCacheSentences < 0 {
 		return errors.New("audio.tts_scheduler.max_cache_sentences must be >= 0")
-	}
-
-	if c.Server.OriginCheck.Enabled && len(c.Server.OriginCheck.AllowedOrigins) > 0 {
-		for _, raw := range c.Server.OriginCheck.AllowedOrigins {
-			origin := strings.TrimSpace(raw)
-			if origin == "" {
-				return errors.New("server.origin_check.allowed_origins must not contain empty values")
-			}
-			parsed, err := url.Parse(origin)
-			if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-				return fmt.Errorf("invalid origin in server.origin_check.allowed_origins: %s", raw)
-			}
-		}
 	}
 
 	mcpIDs := make(map[string]struct{})
@@ -525,77 +395,4 @@ func (c *AppConfig) ValidateKeys(requireASR, requireTTS, requireLLM bool) error 
 		return errors.New("provider.llm.openai.api_key is required")
 	}
 	return nil
-}
-
-func mergeASRConfig(base, override ASRConfig) ASRConfig {
-	out := base
-	if strings.TrimSpace(override.APIKey) != "" {
-		out.APIKey = override.APIKey
-	}
-	if strings.TrimSpace(override.Model) != "" {
-		out.Model = override.Model
-	}
-	if strings.TrimSpace(override.Endpoint) != "" {
-		out.Endpoint = override.Endpoint
-	}
-	return out
-}
-
-func mergeTTSConfig(base, override TTSConfig) TTSConfig {
-	out := base
-	if strings.TrimSpace(override.APIKey) != "" {
-		out.APIKey = override.APIKey
-	}
-	if strings.TrimSpace(override.Endpoint) != "" {
-		out.Endpoint = override.Endpoint
-	}
-	if strings.TrimSpace(override.Workspace) != "" {
-		out.Workspace = override.Workspace
-	}
-	if strings.TrimSpace(override.Model) != "" {
-		out.Model = override.Model
-	}
-	if strings.TrimSpace(override.Voice) != "" {
-		out.Voice = override.Voice
-	}
-	if strings.TrimSpace(override.Format) != "" {
-		out.Format = override.Format
-	}
-	if override.SampleRate > 0 {
-		out.SampleRate = override.SampleRate
-	}
-	if override.Volume != 0 {
-		out.Volume = override.Volume
-	}
-	if override.Rate != 0 {
-		out.Rate = override.Rate
-	}
-	if override.Pitch != 0 {
-		out.Pitch = override.Pitch
-	}
-	out.EnableSSML = override.EnableSSML
-	if strings.TrimSpace(override.TextType) != "" {
-		out.TextType = override.TextType
-	}
-	if override.EnableDataInspection != nil {
-		out.EnableDataInspection = override.EnableDataInspection
-	}
-	if len(override.VoiceMap) > 0 {
-		out.VoiceMap = cloneStringMap(override.VoiceMap)
-	}
-	return out
-}
-
-func mergeLLMConfig(base, override LLMConfig) LLMConfig {
-	out := base
-	if strings.TrimSpace(override.APIKey) != "" {
-		out.APIKey = override.APIKey
-	}
-	if strings.TrimSpace(override.BaseURL) != "" {
-		out.BaseURL = override.BaseURL
-	}
-	if strings.TrimSpace(override.Model) != "" {
-		out.Model = override.Model
-	}
-	return out
 }

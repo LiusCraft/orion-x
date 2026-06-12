@@ -4,11 +4,6 @@
 
 ```
 internal/
-├── voicebot/          # 对话编排模块
-│   ├── orchestrator.go # 对话编排器接口和状态定义
-│   ├── state.go       # 状态机实现
-│   ├── events.go      # 事件定义和实现
-│   └── eventbus.go    # 事件总线实现
 ├── agent/             # 通用 Agent 模块
 │   ├── agent.go # Agent接口
 │   ├── runtime.go     # Agent运行主流程
@@ -37,44 +32,7 @@ internal/
 
 ## 各模块接口概览
 
-### 1. voicebot 包
-
-#### Orchestrator (接口)
-- `Start(ctx context.Context) error`
-- `Stop() error`
-- `GetState() State`
-- `OnASRFinal(text string)`
-- `OnUserSpeakingDetected()`
-- `OnToolCall(tool string, args map[string]interface{})`
-- `OnToolAudioReady(audio io.Reader)`
-- `OnLLMTextChunk(chunk string)`
-- `OnLLMFinished()`
-
-**实现细节**：
-- 集成 `text.Segmenter` 进行流式文本分句
-- 接收 `Agent` 的 `TextChunkEvent` 进行分句处理
-- 对每个完整句子调用 `AudioOutPipe.PlayTTS()` 生成和播放音频
-- 在 `FinishedEvent` 时调用 `Segmenter.Flush()` 处理剩余文本
-- 状态转换：`Processing` → `Speaking`（开始播放时）→ `Idle`（完成时）
-
-#### EventBus (接口)
-- `Publish(event Event)`
-- `Subscribe(eventType EventType, handler EventHandler)`
-
-#### 状态机
-- State: `Idle`, `Listening`, `Processing`, `Speaking`
-- 支持状态转换检查和自动转换
-
-#### 事件类型
-- `UserSpeakingDetected` - 用户说话事件
-- `ASRFinal` - ASR识别完成事件
-- `ToolCallRequested` - 工具调用请求事件
-- `ToolAudioReady` - 工具返回音频事件
-- `OutputEmotionChanged` - 输出情绪变化事件
-- `TTSInterrupt` - TTS播放中断事件
-- `StateChanged` - 状态变化事件
-
-### 2. agent 包
+### 1. agent 包
 
 #### Agent（具体类型）
 - `Process(ctx context.Context, text string) (<-chan AgentEvent, error)`
@@ -89,7 +47,7 @@ internal/
 
 #### 文本清洗
 - `text.FilterMarkdown(text string) string`
-- `voicebot.TextFilterNode.Process(text string) string`
+- `agent.TextFilterNode.Process(text string) string`
 - `TextFilterNode` 在 Orchestrator 进入 TTS 前编排 Markdown 清洗与语音情绪标签移除
 
 ### 3. audio 包
@@ -225,12 +183,7 @@ Idle ─────→ Processing ───→ Speaking
 
 ### 已完成功能
 
-1. **voicebot 包**
-    - [x] `Orchestrator` 完整实现
-    - [x] 事件总线和状态机集成
-    - [x] 集成 `text.Segmenter` 分句器和 TTS 生成
-
-2. **agent 包**
+1. **agent 包**
     - [x] `Agent` 完整实现
     - [x] 集成 `internal/agent`、`internal/tools` 与 `internal/provider/llm` 的工具调用逻辑
     - [x] 启用流式LLM输出

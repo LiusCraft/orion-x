@@ -9,9 +9,8 @@
 ## 配置文件格式与位置
 
 - 格式: JSON（不引入额外依赖）
-- 默认路径: `data/voicebot.json`
+- 默认路径通过 `-config` 参数指定
 - 通过 `-config` 参数覆盖默认路径
-- 示例配置: `voicebot.example.json`
 
 ## 加载顺序
 
@@ -30,8 +29,7 @@
 
 ## 配置结构
 
-本节描述本地 `cmd/voicebot` 使用的 `data/voicebot.json`。它不需要配置 `server` / `metrics`；
-这两个顶层字段属于 `cmd/ws-server` 的运行配置，见 `ws-server.example.json`。
+本节描述本地会话使用的配置结构。
 
 ```json
 {
@@ -191,7 +189,6 @@
 - `provider.asr.aliyun.api_key` / `provider.tts.aliyun.api_key` 不能为空（或由 `DASHSCOPE_API_KEY` 覆盖）
 - `audio.in_pipe.sample_rate` 与 `provider.tts.aliyun.sample_rate` 必须是正数
 - `audio.tts_scheduler.max_in_flight_sentences` 必须是正数
-- `cmd/voicebot` 本地启动不会监听 `server.address`，也不会暴露 metrics；服务端监听与 metrics 配置在 `ws-server.example.json`
 
 ## 相关文档
 

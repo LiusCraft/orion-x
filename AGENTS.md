@@ -90,7 +90,7 @@ func TestOrchestrator(t *testing.T) {
 - ✅ 合适：重构整个音频处理模块，写详细的设计文档
 
 ### 6. TODO 同步更新
-- 完成 TODO 任务后，必须同步更新 `docs/voicebot-todo.md` 文档
+- 完成 TODO 任务后，必须同步更新项目 TODO 文档
 - 将已完成的任务标记为 `[x]`
 - 更新进度状态，确保文档与实际开发进度一致
 - 遇到 TODO 中未记录的新任务时，先补充到文档再实现
@@ -135,7 +135,7 @@ func TestOrchestrator(t *testing.T) {
 
 ### 文件结构
 ```go
-package voicebot
+package pipeline
 
 // 1. 常量定义
 const (
@@ -243,14 +243,11 @@ UserSpeakingDetected → Orchestrator → AudioOutPipe.Interrupt()
 # 运行所有测试
 go test ./...
 
-# 运行特定包
-go test ./internal/voicebot/
-
 # 测试覆盖率
 go test -cover ./...
 
 # 详细输出
-go test -v ./internal/voicebot/
+go test -v ./...
 ```
 
 ### 构建

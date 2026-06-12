@@ -9,9 +9,8 @@ type AgentEvent interface {
 type AgentEventType int
 
 const (
-	AgentEventTypeTextChunk         AgentEventType = iota // 文本块
-	AgentEventTypeToolCallRequested                       // 工具调用请求
-	AgentEventTypeFinished                                // 完成
+	AgentEventTypeTextChunk AgentEventType = iota // 文本块
+	AgentEventTypeFinished                        // 完成
 )
 
 // TextChunkEvent 文本块事件
@@ -21,16 +20,6 @@ type TextChunkEvent struct {
 
 func (e *TextChunkEvent) Type() AgentEventType {
 	return AgentEventTypeTextChunk
-}
-
-// ToolCallRequestedEvent 工具调用请求事件
-type ToolCallRequestedEvent struct {
-	Tool string
-	Args map[string]interface{}
-}
-
-func (e *ToolCallRequestedEvent) Type() AgentEventType {
-	return AgentEventTypeToolCallRequested
 }
 
 // FinishedEvent 完成事件
