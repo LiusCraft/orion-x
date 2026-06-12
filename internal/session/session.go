@@ -3,9 +3,11 @@ package session
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"time"
 )
 
+// Role represents the role of a chat message.
 type Role string
 
 const (
@@ -14,12 +16,14 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// ToolCall represents a tool call request from the assistant.
 type ToolCall struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
 
+// Message represents a single chat message in a session.
 type Message struct {
 	ID         string     `json:"id"`
 	Role       Role       `json:"role"`
@@ -30,12 +34,14 @@ type Message struct {
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
+// SessionMeta holds metadata about a session.
 type SessionMeta struct {
 	UserID    string    `json:"user_id"`
 	Model     string    `json:"model"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Session represents a complete chat conversation history.
 type Session struct {
 	ID        string      `json:"id"`
 	Meta      SessionMeta `json:"meta"`
@@ -43,6 +49,7 @@ type Session struct {
 	UpdatedAt time.Time   `json:"updated_at"`
 }
 
+// New creates a new session with auto-generated ID and timestamp defaults.
 func New(meta SessionMeta) *Session {
 	if meta.CreatedAt.IsZero() {
 		meta.CreatedAt = time.Now().UTC()
@@ -56,6 +63,7 @@ func New(meta SessionMeta) *Session {
 	}
 }
 
+// Add appends a message to the session, auto-generating ID and timestamp if needed.
 func (s *Session) Add(msg Message) {
 	if msg.ID == "" {
 		msg.ID = newID("msg")
@@ -64,13 +72,13 @@ func (s *Session) Add(msg Message) {
 		msg.CreatedAt = time.Now().UTC()
 	}
 	s.Messages = append(s.Messages, msg)
-	s.UpdatedAt = msg.CreatedAt
+	s.UpdatedAt = time.Now().UTC()
 }
 
 func newID(prefix string) string {
 	buf := make([]byte, 6)
 	if _, err := rand.Read(buf); err != nil {
-		return prefix + "_fallback"
+		return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
 	}
 	return prefix + "_" + hex.EncodeToString(buf)
 }
