@@ -236,6 +236,12 @@ func main() {
 	}
 	logging.Infof("AudioInPipe created successfully")
 
+	// Wire AudioInPipe to receive TTS playback notifications from mixer,
+	// so noise floor estimation is paused during TTS playback.
+	if observer, ok := audioInPipe.(audio.TTSPlaybackObserver); ok {
+		mixer.SetTTSPlaybackObserver(observer)
+	}
+
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
 

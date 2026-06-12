@@ -2,6 +2,7 @@ package audio
 
 import (
 	"math"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,8 +31,10 @@ type AudioLevelSnapshot struct {
 type AudioLevelMonitor struct {
 	sampleRate int
 
-	noiseFloor     float64
-	silenceStarted time.Time
+	noiseFloor       float64
+	silenceStarted   time.Time
+	paused           int32 // atomic: 1 when TTS is playing, 0 otherwise
+	frozenNoiseFloor float64
 }
 
 func NewAudioLevelMonitor(sampleRate int) *AudioLevelMonitor {
@@ -45,10 +48,12 @@ func (m *AudioLevelMonitor) Observe(audio []byte) AudioLevelSnapshot {
 	rms, peak, clippingRatio := PCM16Level(audio)
 	now := time.Now()
 
-	if m.noiseFloor == 0 {
-		m.noiseFloor = rms
-	} else if rms <= m.noiseFloor*1.5 || rms <= defaultHighNoiseFloor {
-		m.noiseFloor = m.noiseFloor*(1-noiseFloorAlpha) + rms*noiseFloorAlpha
+	if atomic.LoadInt32(&m.paused) == 0 {
+		if m.noiseFloor == 0 {
+			m.noiseFloor = rms
+		} else if rms <= m.noiseFloor*1.5 || rms <= defaultHighNoiseFloor {
+			m.noiseFloor = m.noiseFloor*(1-noiseFloorAlpha) + rms*noiseFloorAlpha
+		}
 	}
 
 	silent := rms <= defaultSilenceRMS
@@ -116,4 +121,16 @@ func maxFloat(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+// PauseForTTS 冻结噪声基准，防止 TTS 播放时音频泄漏污染噪声估计
+func (m *AudioLevelMonitor) PauseForTTS() {
+	m.frozenNoiseFloor = m.noiseFloor
+	atomic.StoreInt32(&m.paused, 1)
+}
+
+// ResumeFromTTS 恢复噪声基准更新，沿用冻结前的值作为起点
+func (m *AudioLevelMonitor) ResumeFromTTS() {
+	m.noiseFloor = m.frozenNoiseFloor
+	atomic.StoreInt32(&m.paused, 0)
 }

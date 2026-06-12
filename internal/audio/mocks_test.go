@@ -266,6 +266,8 @@ func (m *mockMixer) OnTTSFinished() {
 
 func (m *mockMixer) SetSink(sink AudioSink) {}
 
+func (m *mockMixer) SetTTSPlaybackObserver(observer TTSPlaybackObserver) {}
+
 func (m *mockMixer) Start() error { return nil }
 
 func (m *mockMixer) Stop() error { return nil }

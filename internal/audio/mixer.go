@@ -2,6 +2,12 @@ package audio
 
 import "io"
 
+// TTSPlaybackObserver 接收 TTS 播放状态通知，供 AudioInPipe 等组件同步噪声基准等策略
+type TTSPlaybackObserver interface {
+	OnTTSPlaybackStarted()
+	OnTTSPlaybackStopped()
+}
+
 // AudioMixer 音频混音器，负责音频混合和音量控制
 type AudioMixer interface {
 	AddTTSStream(audio io.Reader)
@@ -12,6 +18,7 @@ type AudioMixer interface {
 	SetResourceVolume(volume float64)
 	OnTTSStarted()
 	OnTTSFinished()
+	SetTTSPlaybackObserver(observer TTSPlaybackObserver)
 	SetSink(sink AudioSink)
 	Start() error
 	Stop() error

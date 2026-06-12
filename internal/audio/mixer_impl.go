@@ -21,6 +21,7 @@ type mixerImpl struct {
 	cancel                context.CancelFunc
 	wg                    sync.WaitGroup
 	started               bool
+	ttsObserver           TTSPlaybackObserver
 }
 
 func NewMixer(config *MixerConfig) (AudioMixer, error) {
@@ -72,11 +73,20 @@ func (m *mixerImpl) SetResourceVolume(volume float64) {
 	m.currentResourceVolume = volume
 }
 
+func (m *mixerImpl) SetTTSPlaybackObserver(observer TTSPlaybackObserver) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ttsObserver = observer
+}
+
 func (m *mixerImpl) OnTTSStarted() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	logging.Infof("AudioMixer: TTS started, reducing resource volume to 50%%")
 	m.currentResourceVolume = m.config.ResourceVolume * 0.5
+	if m.ttsObserver != nil {
+		m.ttsObserver.OnTTSPlaybackStarted()
+	}
 }
 
 func (m *mixerImpl) OnTTSFinished() {
@@ -84,6 +94,9 @@ func (m *mixerImpl) OnTTSFinished() {
 	defer m.mu.Unlock()
 	logging.Infof("AudioMixer: TTS finished, restoring resource volume to 100%%")
 	m.currentResourceVolume = m.config.ResourceVolume
+	if m.ttsObserver != nil {
+		m.ttsObserver.OnTTSPlaybackStopped()
+	}
 }
 
 func (m *mixerImpl) SetSink(sink AudioSink) {

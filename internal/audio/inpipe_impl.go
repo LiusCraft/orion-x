@@ -95,6 +95,20 @@ func (p *inPipeImpl) SetAudioSource(source AudioSource) {
 	p.audioSource = source
 }
 
+// OnTTSPlaybackStarted 冻结噪声基准，防止 TTS 播放音频泄漏污染估计
+func (p *inPipeImpl) OnTTSPlaybackStarted() {
+	if p.levelMonitor != nil {
+		p.levelMonitor.PauseForTTS()
+	}
+}
+
+// OnTTSPlaybackStopped 恢复噪声基准更新
+func (p *inPipeImpl) OnTTSPlaybackStopped() {
+	if p.levelMonitor != nil {
+		p.levelMonitor.ResumeFromTTS()
+	}
+}
+
 func (p *inPipeImpl) Start(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
