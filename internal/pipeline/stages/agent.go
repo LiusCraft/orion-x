@@ -130,29 +130,36 @@ func (s *AgentStage) runAgentWithInterrupt(
 			case output <- pipelineMsg:
 			case msg, ok := <-input:
 				cancel()
-				for range eventChan {
-				}
+				s.drainEventChan(eventChan)
 				if !ok {
 					return nil
 				}
 				return &msg
 			case <-agentCtx.Done():
+				s.drainEventChan(eventChan)
 				return nil
 			case <-ctx.Done():
+				s.drainEventChan(eventChan)
 				return nil
 			}
 		case msg, ok := <-input:
 			cancel()
-			for range eventChan {
-			}
+			s.drainEventChan(eventChan)
 			if !ok {
 				return nil
 			}
 			return &msg
 		case <-ctx.Done():
 			cancel()
+			s.drainEventChan(eventChan)
 			return nil
 		}
+	}
+}
+
+// drainEventChan 排空 agent 事件通道
+func (s *AgentStage) drainEventChan(eventChan <-chan agent.AgentEvent) {
+	for range eventChan {
 	}
 }
 
