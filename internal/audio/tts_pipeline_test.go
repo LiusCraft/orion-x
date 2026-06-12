@@ -871,16 +871,17 @@ func (m *orderTrackingMixer) AddTTSStream(audio io.Reader) {
 	m.mu.Unlock()
 }
 
-func (m *orderTrackingMixer) AddResourceStream(audio io.Reader) {}
-func (m *orderTrackingMixer) RemoveTTSStream()                  {}
-func (m *orderTrackingMixer) RemoveResourceStream()             {}
-func (m *orderTrackingMixer) SetTTSVolume(volume float64)       {}
-func (m *orderTrackingMixer) SetResourceVolume(volume float64)  {}
-func (m *orderTrackingMixer) OnTTSStarted()                     {}
-func (m *orderTrackingMixer) OnTTSFinished()                    {}
-func (m *orderTrackingMixer) SetSink(sink AudioSink)            {}
-func (m *orderTrackingMixer) Start() error                      { return nil }
-func (m *orderTrackingMixer) Stop() error                       { return nil }
+func (m *orderTrackingMixer) AddResourceStream(audio io.Reader)                   {}
+func (m *orderTrackingMixer) RemoveTTSStream()                                    {}
+func (m *orderTrackingMixer) RemoveResourceStream()                               {}
+func (m *orderTrackingMixer) SetTTSVolume(volume float64)                         {}
+func (m *orderTrackingMixer) SetResourceVolume(volume float64)                    {}
+func (m *orderTrackingMixer) OnTTSStarted()                                       {}
+func (m *orderTrackingMixer) OnTTSFinished()                                      {}
+func (m *orderTrackingMixer) SetSink(sink AudioSink)                              {}
+func (m *orderTrackingMixer) SetTTSPlaybackObserver(observer TTSPlaybackObserver) {}
+func (m *orderTrackingMixer) Start() error                                        { return nil }
+func (m *orderTrackingMixer) Stop() error                                         { return nil }
 
 func (m *orderTrackingMixer) getPlayedOrder() []string {
 	m.mu.Lock()
