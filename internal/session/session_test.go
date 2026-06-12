@@ -389,3 +389,50 @@ func TestLastNEmpty(t *testing.T) {
 		t.Errorf("LastN on empty should return nil, got %v", got)
 	}
 }
+
+func TestClone(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleUser, Content: "hello"})
+	sess.Add(Message{Role: RoleAssistant, Content: "hi", ToolCalls: []ToolCall{
+		{ID: "c1", Name: "foo", Arguments: "{}"},
+	}})
+
+	cloned := sess.Clone()
+	if cloned.ID != sess.ID {
+		t.Errorf("ID mismatch: %q vs %q", cloned.ID, sess.ID)
+	}
+	if len(cloned.Messages) != len(sess.Messages) {
+		t.Fatalf("message count mismatch")
+	}
+
+	// modifying clone should not affect original
+	cloned.Messages[0].Content = "modified"
+	if sess.Messages[0].Content == "modified" {
+		t.Error("clone should not share message slice")
+	}
+}
+
+func TestCloneToolCallsDeepCopy(t *testing.T) {
+	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
+	sess.Add(Message{Role: RoleAssistant, Content: "hi", ToolCalls: []ToolCall{
+		{ID: "c1", Name: "foo", Arguments: "{}"},
+	}})
+
+	cloned := sess.Clone()
+	cloned.Messages[0].ToolCalls[0].Name = "modified"
+
+	if sess.Messages[0].ToolCalls[0].Name == "modified" {
+		t.Error("clone should deep copy ToolCalls")
+	}
+}
+
+func TestCloneNilMessages(t *testing.T) {
+	sess := &Session{ID: "test", Messages: nil}
+	cloned := sess.Clone()
+	if cloned.ID != "test" {
+		t.Errorf("ID mismatch")
+	}
+	if cloned.Messages != nil {
+		t.Errorf("expected nil Messages")
+	}
+}

@@ -143,6 +143,24 @@ func (s *Session) LastN(n int) []Message {
 	return result
 }
 
+// Clone returns a deep copy of the session. Modifying the clone does not
+// affect the original.
+func (s *Session) Clone() *Session {
+	cloned := *s
+
+	if s.Messages != nil {
+		cloned.Messages = make([]Message, len(s.Messages))
+		copy(cloned.Messages, s.Messages)
+		for i := range cloned.Messages {
+			if len(s.Messages[i].ToolCalls) > 0 {
+				cloned.Messages[i].ToolCalls = make([]ToolCall, len(s.Messages[i].ToolCalls))
+				copy(cloned.Messages[i].ToolCalls, s.Messages[i].ToolCalls)
+			}
+		}
+	}
+	return &cloned
+}
+
 func newID(prefix string) string {
 	buf := make([]byte, 6)
 	if _, err := rand.Read(buf); err != nil {
