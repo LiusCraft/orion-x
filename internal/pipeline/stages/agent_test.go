@@ -39,7 +39,7 @@ func TestAgentStage_TextChunk(t *testing.T) {
 		},
 	}
 
-	stage := NewAgentStage(mockAgent)
+	stage := NewAgentStage(mockAgent, session.New(session.SessionMeta{Model: "test"}))
 	input := make(chan pipeline.Message, 1)
 	ctx := context.Background()
 
@@ -80,7 +80,7 @@ func TestAgentStage_Error(t *testing.T) {
 		},
 	}
 
-	stage := NewAgentStage(mockAgent)
+	stage := NewAgentStage(mockAgent, session.New(session.SessionMeta{Model: "test"}))
 	input := make(chan pipeline.Message, 1)
 	ctx := context.Background()
 
@@ -101,7 +101,7 @@ func TestAgentStage_Error(t *testing.T) {
 
 func TestAgentStage_Passthrough(t *testing.T) {
 	mockAgent := &mockAgentRunner{}
-	stage := NewAgentStage(mockAgent)
+	stage := NewAgentStage(mockAgent, session.New(session.SessionMeta{Model: "test"}))
 	input := make(chan pipeline.Message, 1)
 	ctx := context.Background()
 

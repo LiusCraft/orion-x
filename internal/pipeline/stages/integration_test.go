@@ -8,6 +8,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/pipeline"
 	"github.com/liuscraft/orion-x/internal/pipeline/stages"
+	"github.com/liuscraft/orion-x/internal/session"
 )
 
 // 这是一个集成测试示例，展示如何组合多个 Stage
@@ -15,17 +16,13 @@ import (
 // mockAgent 简化的 Mock Agent
 type mockAgent struct{}
 
-func (m *mockAgent) Process(ctx context.Context, text string) (<-chan agent.AgentEvent, error) {
+func (m *mockAgent) Run(ctx context.Context, sess *session.Session) (<-chan agent.AgentEvent, error) {
+	text := ""
+	if len(sess.Messages) > 0 {
+		text = sess.Messages[len(sess.Messages)-1].Content
+	}
 	ch := make(chan agent.AgentEvent, 2)
 	ch <- &agent.TextChunkEvent{Chunk: "Response to: " + text}
-	ch <- &agent.FinishedEvent{}
-	close(ch)
-	return ch, nil
-}
-
-func (m *mockAgent) SummarizeToolResult(ctx context.Context, tool string, args map[string]interface{}, result interface{}) (<-chan agent.AgentEvent, error) {
-	ch := make(chan agent.AgentEvent, 2)
-	ch <- &agent.TextChunkEvent{Chunk: "Tool result summary"}
 	ch <- &agent.FinishedEvent{}
 	close(ch)
 	return ch, nil
@@ -36,7 +33,7 @@ func TestAgentStage_Integration(t *testing.T) {
 	agent := &mockAgent{}
 
 	p := pipeline.NewBuilder().
-		AddStage(stages.NewAgentStage(agent)).
+		AddStage(stages.NewAgentStage(agent, session.New(session.SessionMeta{Model: "test"}))).
 		AddStage(pipeline.NewTextFilterStage()).
 		Build()
 
@@ -105,7 +102,7 @@ func TestMultipleStages_MessageFlow(t *testing.T) {
 	agent := &mockAgent{}
 
 	p := pipeline.NewBuilder().
-		AddStage(stages.NewAgentStage(agent)).
+		AddStage(stages.NewAgentStage(agent, session.New(session.SessionMeta{Model: "test"}))).
 		AddStage(pipeline.NewEmotionExtractorStage()).
 		AddStage(pipeline.NewTextFilterStage()).
 		Build()

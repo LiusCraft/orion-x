@@ -21,6 +21,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/pipeline"
 	pstages "github.com/liuscraft/orion-x/internal/pipeline/stages"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
+	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 
@@ -246,9 +247,10 @@ func main() {
 
 	// Build pipeline: ASR → Agent → TTS
 	logging.Infof("Building pipeline: ASR → Agent → TTS...")
+	sess := session.New(session.SessionMeta{Model: agentCfg.Model})
 	pl := pipeline.NewBuilder().
 		AddStage(pstages.NewASRStage(audioInPipe)).
-		AddStage(pstages.NewAgentStage(agentInst)).
+		AddStage(pstages.NewAgentStage(agentInst, sess)).
 		AddStage(pstages.NewTTSStage(audioOutPipe)).
 		SetObserver(pipeline.NewLoggingObserver(false)).
 		Build()

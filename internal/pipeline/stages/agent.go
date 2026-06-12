@@ -18,14 +18,16 @@ type AgentRunner interface {
 // AgentStage Agent 处理 Stage
 type AgentStage struct {
 	*pipeline.BaseStage
-	agent AgentRunner
+	agent   AgentRunner
+	session *session.Session
 }
 
-// NewAgentStage 创建 AgentStage
-func NewAgentStage(agent AgentRunner) pipeline.Stage {
+// NewAgentStage 创建 AgentStage。会话由调用方管理，跨轮次复用。
+func NewAgentStage(agent AgentRunner, sess *session.Session) pipeline.Stage {
 	return &AgentStage{
 		BaseStage: pipeline.NewBaseStage("agent"),
 		agent:     agent,
+		session:   sess,
 	}
 }
 
@@ -67,12 +69,11 @@ func (s *AgentStage) Process(ctx context.Context, input <-chan pipeline.Message)
 					continue
 				}
 
-				// 创建 session 并添加用户消息
-				sess := session.New(session.SessionMeta{Model: "default"})
-				sess.Add(session.Message{Role: session.RoleUser, Content: text})
+				// 添加用户消息到会话
+				s.session.Add(session.Message{Role: session.RoleUser, Content: text})
 
 				// 调用 Agent
-				eventChan, err := s.agent.Run(ctx, sess)
+				eventChan, err := s.agent.Run(ctx, s.session)
 				if err != nil {
 					logging.Errorf("AgentStage: agent process error: %v", err)
 					select {
