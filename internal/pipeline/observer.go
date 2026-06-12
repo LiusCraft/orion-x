@@ -37,10 +37,10 @@ func (o *loggingObserver) OnStageStop(stageName string) {
 // noopObserver 空观察者（用于测试）
 type noopObserver struct{}
 
-func (o *noopObserver) OnMessage(stageName string, msg Message)     {}
-func (o *noopObserver) OnError(stageName string, err error)          {}
-func (o *noopObserver) OnStageStart(stageName string)                {}
-func (o *noopObserver) OnStageStop(stageName string)                 {}
+func (o *noopObserver) OnMessage(stageName string, msg Message) {}
+func (o *noopObserver) OnError(stageName string, err error)     {}
+func (o *noopObserver) OnStageStart(stageName string)           {}
+func (o *noopObserver) OnStageStop(stageName string)            {}
 
 // NewNoopObserver 创建空观察者
 func NewNoopObserver() PipelineObserver {

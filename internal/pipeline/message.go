@@ -14,9 +14,9 @@ const (
 	MessageTypeEmotion     MessageType = "emotion"
 	MessageTypeFinished    MessageType = "finished"
 	MessageTypeError       MessageType = "error"
-	MessageTypeInterrupt   MessageType = "interrupt"   // 用户打断
-	MessageTypeTTSStart    MessageType = "tts_start"   // TTS 开始
-	MessageTypeTTSStop     MessageType = "tts_stop"    // TTS 停止
+	MessageTypeInterrupt   MessageType = "interrupt" // 用户打断
+	MessageTypeTTSStart    MessageType = "tts_start" // TTS 开始
+	MessageTypeTTSStop     MessageType = "tts_stop"  // TTS 停止
 )
 
 // Message Pipeline 中流转的数据单元

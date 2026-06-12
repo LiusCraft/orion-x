@@ -15,7 +15,7 @@ func TestTextFilterStage(t *testing.T) {
 
 	// 发送带有 metadata 标签的文本
 	input <- NewMessage(MessageTypeTextChunk, "Hello <metadata>world</metadata>!")
-	
+
 	msg := <-output
 	if msg.Payload != "Hello !" {
 		t.Errorf("Expected 'Hello !', got '%s'", msg.Payload)
@@ -32,7 +32,7 @@ func TestTextFilterStage_NonTextMessage(t *testing.T) {
 
 	// 发送非文本消息，应该原样透传
 	input <- NewMessage(MessageTypeAudioData, []byte{1, 2, 3})
-	
+
 	msg := <-output
 	if msg.Type != MessageTypeAudioData {
 		t.Errorf("Expected MessageTypeAudioData, got %s", msg.Type)
@@ -49,7 +49,7 @@ func TestEmotionExtractorStage(t *testing.T) {
 
 	// 发送带有 emotion 标签的文本
 	input <- NewMessage(MessageTypeTextChunk, "I'm so <emotion>happy</emotion> today!")
-	
+
 	msg := <-output
 	if msg.Metadata.Emotion != "happy" {
 		t.Errorf("Expected emotion 'happy', got '%s'", msg.Metadata.Emotion)
@@ -66,7 +66,7 @@ func TestEmotionExtractorStage_NoEmotion(t *testing.T) {
 
 	// 发送不带 emotion 标签的文本
 	input <- NewMessage(MessageTypeTextChunk, "Just a normal message")
-	
+
 	msg := <-output
 	if msg.Metadata.Emotion != "" {
 		t.Errorf("Expected empty emotion, got '%s'", msg.Metadata.Emotion)
