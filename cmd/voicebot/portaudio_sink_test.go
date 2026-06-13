@@ -1,4 +1,4 @@
-package sink
+package main
 
 import (
 	"errors"

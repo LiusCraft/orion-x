@@ -7,7 +7,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/provider/tts"
 )
 
-// AudioOutPipe 音频输出管道，负责音频混合播放、队列管理、中断处理
+// AudioOutPipe 音频输出管道，负责音频队列管理、中断处理
 type AudioOutPipe interface {
 	Start(ctx context.Context) error
 	Stop() error
@@ -22,7 +22,7 @@ type AudioOutPipe interface {
 	EndTTSStream() error
 	// Interrupt 中断所有任务（清空队列、停止播放）
 	Interrupt() error
-	SetMixer(mixer AudioMixer)
+	SetSink(sink AudioSink)
 	// SetOnPlaybackFinished 设置播放完成回调（每个 TTS 播放完成时调用）
 	SetOnPlaybackFinished(callback PlaybackFinishedCallback)
 	// SetOnTTSItemStarted 设置单条 TTS 开始播放回调
@@ -33,7 +33,7 @@ type AudioOutPipe interface {
 
 // OutPipeConfig OutPipe配置
 type OutPipeConfig struct {
-	Mixer           *MixerConfig
+	SinkFormat      *AudioFormat
 	TTS             tts.Config
 	TTSProviderType string
 	TTSProvider     tts.Provider
@@ -44,7 +44,6 @@ type OutPipeConfig struct {
 // DefaultOutPipeConfig 默认配置
 func DefaultOutPipeConfig() *OutPipeConfig {
 	return &OutPipeConfig{
-		Mixer:       DefaultMixerConfig(),
 		TTSPipeline: DefaultTTSPipelineConfig(),
 		TTS: tts.Config{
 			Model:      "cosyvoice-v3-flash",

@@ -12,11 +12,11 @@ import (
 // ASRStage ASR 识别 Stage（Source Stage，无输入）
 type ASRStage struct {
 	*pipeline.BaseStage
-	audioInPipe audio.AudioInPipe
+	audioInPipe *audio.InPipe
 }
 
 // NewASRStage 创建 ASRStage
-func NewASRStage(audioInPipe audio.AudioInPipe) pipeline.Stage {
+func NewASRStage(audioInPipe *audio.InPipe) pipeline.Stage {
 	return &ASRStage{
 		BaseStage:   pipeline.NewBaseStage("asr"),
 		audioInPipe: audioInPipe,

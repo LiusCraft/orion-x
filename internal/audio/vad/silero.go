@@ -1,14 +1,14 @@
-package audio
+package vad
 
 import (
 	"github.com/streamer45/silero-vad-go/speech"
 )
 
 type sileroVAD struct {
-	inner      *speech.Detector
-	windowSize int
-	threshold  float32
-	hyp        float32 // threshold - hysteresis, the floor for ending speech
+	inner             *speech.Detector
+	windowSize        int
+	threshold         float32
+	hyp               float32 // threshold - hysteresis, the floor for ending speech
 	minSilenceSamples int
 
 	triggered  bool
@@ -16,8 +16,8 @@ type sileroVAD struct {
 	currSample int
 }
 
-func NewSileroVAD(modelPath string, sampleRate int, threshold float64, minSilenceMs int, speechPadMs int) (VADDetector, error) {
-	if err := ensureVADModel(modelPath); err != nil {
+func NewSilero(modelPath string, sampleRate int, threshold float64, minSilenceMs int, speechPadMs int) (Detector, error) {
+	if err := ensureModel(modelPath); err != nil {
 		return nil, err
 	}
 

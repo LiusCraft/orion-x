@@ -3,10 +3,8 @@ package audio
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,7 +17,7 @@ func TestTTSPipelineCreate(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
 
 	if pipeline == nil {
 		t.Fatal("Expected pipeline to be created")
@@ -32,7 +30,7 @@ func TestTTSPipelineStartStop(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
 
 	ctx := context.Background()
 
@@ -55,7 +53,7 @@ func TestTTSPipelineDoubleStart(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
 
 	ctx := context.Background()
 
@@ -78,9 +76,9 @@ func TestTTSPipelineEnqueueText(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
+
+	pipeline.SetSink(nil)
 
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
@@ -109,9 +107,9 @@ func TestTTSPipelineOnItemStarted(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
+
+	pipeline.SetSink(nil)
 
 	startedCh := make(chan string, 1)
 	pipeline.SetOnItemStarted(func(text string, emotion string) {
@@ -144,7 +142,7 @@ func TestTTSPipelineEnqueueEmpty(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
 
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
@@ -171,7 +169,7 @@ func TestTTSPipelineEnqueueBeforeStart(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
 
 	// 未启动时入队应该报错
 	err := pipeline.EnqueueText("Hello", "happy")
@@ -186,9 +184,9 @@ func TestTTSPipelineInterrupt(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
+
+	pipeline.SetSink(nil)
 
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
@@ -225,45 +223,6 @@ func TestTTSPipelineInterrupt(t *testing.T) {
 	}
 }
 
-func TestTTSPipelineInterruptMixerCallbacksOnlyOnce(t *testing.T) {
-	provider := &slowMockTTSProvider{readDelay: 80 * time.Millisecond}
-	config := DefaultTTSPipelineConfig()
-	ttsConfig := tts.Config{APIKey: "test"}
-
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
-
-	ctx := context.Background()
-	if err := pipeline.Start(ctx); err != nil {
-		t.Fatalf("Failed to start pipeline: %v", err)
-	}
-	defer pipeline.Stop()
-
-	if err := pipeline.EnqueueText("interrupt me", "neutral"); err != nil {
-		t.Fatalf("Failed to enqueue text: %v", err)
-	}
-
-	deadline := time.Now().Add(1 * time.Second)
-	for mixer.getTTSStartedCount() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if mixer.getTTSStartedCount() == 0 {
-		t.Fatal("timeout waiting for TTS playback to start")
-	}
-
-	if err := pipeline.Interrupt(); err != nil {
-		t.Fatalf("Failed to interrupt: %v", err)
-	}
-
-	if got := mixer.getTTSFinishedCount(); got != 1 {
-		t.Fatalf("expected OnTTSFinished to be called once, got %d", got)
-	}
-	if got := mixer.getRemoveTTSStreamCount(); got != 1 {
-		t.Fatalf("expected RemoveTTSStream to be called once, got %d", got)
-	}
-}
-
 // TestTTSPipelineConcurrentEnqueue 测试并发入队
 func TestTTSPipelineConcurrentEnqueue(t *testing.T) {
 	provider := newMockTTSProvider()
@@ -274,9 +233,9 @@ func TestTTSPipelineConcurrentEnqueue(t *testing.T) {
 	}
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
+
+	pipeline.SetSink(nil)
 
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
@@ -314,7 +273,7 @@ func TestTTSPipelineStats(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
 
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
@@ -350,9 +309,9 @@ func TestTTSPipelineVoiceMap(t *testing.T) {
 		"default": "voice_default",
 	}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, voiceMap, nil)
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, voiceMap)
+
+	pipeline.SetSink(nil)
 
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
@@ -383,7 +342,7 @@ func TestTTSPipelineContextCancellation(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	err := pipeline.Start(ctx)
@@ -419,7 +378,7 @@ func TestTTSPipelineTTSError(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
 
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
@@ -458,9 +417,9 @@ func TestTTSPipelineMaxConcurrentTTS(t *testing.T) {
 	}
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
+
+	pipeline.SetSink(nil)
 
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
@@ -491,9 +450,9 @@ func TestTTSPipelineResetAfterInterrupt(t *testing.T) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
+
+	pipeline.SetSink(nil)
 
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
@@ -526,47 +485,6 @@ func TestTTSPipelineResetAfterInterrupt(t *testing.T) {
 	err = pipeline.EnqueueText("Final text", "neutral")
 	if err != nil {
 		t.Fatalf("Failed to enqueue after multiple interrupts: %v", err)
-	}
-}
-
-// TestTTSPipelineSetMixerDynamic 测试动态设置 Mixer
-func TestTTSPipelineSetMixerDynamic(t *testing.T) {
-	provider := newMockTTSProvider()
-	config := DefaultTTSPipelineConfig()
-	ttsConfig := tts.Config{APIKey: "test"}
-
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-
-	ctx := context.Background()
-	err := pipeline.Start(ctx)
-	if err != nil {
-		t.Fatalf("Failed to start pipeline: %v", err)
-	}
-	defer pipeline.Stop()
-
-	// 先不设置 Mixer 入队
-	err = pipeline.EnqueueText("Text without mixer", "neutral")
-	if err != nil {
-		t.Fatalf("Failed to enqueue text: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	// 动态设置 Mixer
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
-
-	// 再次入队
-	err = pipeline.EnqueueText("Text with mixer", "neutral")
-	if err != nil {
-		t.Fatalf("Failed to enqueue text: %v", err)
-	}
-
-	time.Sleep(200 * time.Millisecond)
-
-	// Mixer 应该被调用
-	if mixer.getAddTTSStreamCount() == 0 {
-		t.Log("Mixer may not have been called if TTS completed before mixer was set")
 	}
 }
 
@@ -630,7 +548,7 @@ func BenchmarkTTSPipelineEnqueue(b *testing.B) {
 	}
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
 
 	ctx := context.Background()
 	_ = pipeline.Start(ctx)
@@ -648,7 +566,7 @@ func BenchmarkTTSPipelineInterrupt(b *testing.B) {
 	config := DefaultTTSPipelineConfig()
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
 
 	ctx := context.Background()
 	_ = pipeline.Start(ctx)
@@ -682,9 +600,18 @@ func TestTTSPipelinePlaybackOrder(t *testing.T) {
 	}
 	ttsConfig := tts.Config{APIKey: "test"}
 
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-	orderMixer := newOrderTrackingMixer()
-	pipeline.SetMixer(orderMixer)
+	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil)
+
+	pipeline.SetSink(nil)
+
+	// 通过 OnItemStarted 回调记录播放顺序
+	var playedOrder []string
+	var playedMu sync.Mutex
+	pipeline.SetOnItemStarted(func(text string, emotion string) {
+		playedMu.Lock()
+		playedOrder = append(playedOrder, text)
+		playedMu.Unlock()
+	})
 
 	ctx := context.Background()
 	err := pipeline.Start(ctx)
@@ -706,7 +633,6 @@ func TestTTSPipelinePlaybackOrder(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// 验证播放顺序
-	playedOrder := orderMixer.getPlayedOrder()
 	if len(playedOrder) != len(texts) {
 		t.Fatalf("Expected %d items played, got %d", len(texts), len(playedOrder))
 	}
@@ -849,237 +775,6 @@ func (r *delayMockAudioReader) getText() string {
 	return r.text
 }
 
-// orderTrackingMixer 记录播放顺序的 Mixer
-type orderTrackingMixer struct {
-	mu          sync.Mutex
-	playedOrder []string
-}
-
-func newOrderTrackingMixer() *orderTrackingMixer {
-	return &orderTrackingMixer{
-		playedOrder: make([]string, 0),
-	}
-}
-
-func (m *orderTrackingMixer) AddTTSStream(audio io.Reader) {
-	// 读取音频数据来获取文本（我们把文本编码在音频数据中）
-	data, _ := io.ReadAll(audio)
-	text := string(data)
-
-	m.mu.Lock()
-	m.playedOrder = append(m.playedOrder, text)
-	m.mu.Unlock()
-}
-
-func (m *orderTrackingMixer) AddResourceStream(audio io.Reader)                   {}
-func (m *orderTrackingMixer) RemoveTTSStream()                                    {}
-func (m *orderTrackingMixer) RemoveResourceStream()                               {}
-func (m *orderTrackingMixer) SetTTSVolume(volume float64)                         {}
-func (m *orderTrackingMixer) SetResourceVolume(volume float64)                    {}
-func (m *orderTrackingMixer) OnTTSStarted()                                       {}
-func (m *orderTrackingMixer) OnTTSFinished()                                      {}
-func (m *orderTrackingMixer) SetSink(sink AudioSink)                              {}
-func (m *orderTrackingMixer) SetTTSPlaybackObserver(observer TTSPlaybackObserver) {}
-func (m *orderTrackingMixer) Start() error                                        { return nil }
-func (m *orderTrackingMixer) Stop() error                                         { return nil }
-
-func (m *orderTrackingMixer) getPlayedOrder() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	result := make([]string, len(m.playedOrder))
-	copy(result, m.playedOrder)
-	return result
-}
-
 // TestTTSPipelineRaceCondition 测试竞态条件
 func TestTTSPipelineRaceCondition(t *testing.T) {
-	provider := newMockTTSProvider()
-	config := &TTSPipelineConfig{
-		MaxTTSBuffer:     5,
-		MaxConcurrentTTS: 3,
-		TextQueueSize:    20,
-	}
-	ttsConfig := tts.Config{APIKey: "test"}
-
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
-
-	ctx := context.Background()
-	err := pipeline.Start(ctx)
-	if err != nil {
-		t.Fatalf("Failed to start pipeline: %v", err)
-	}
-	defer pipeline.Stop()
-
-	var wg sync.WaitGroup
-	var interruptCount int64
-	var enqueueCount int64
-
-	// 并发入队和打断
-	for i := 0; i < 10; i++ {
-		wg.Add(2)
-
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 5; j++ {
-				pipeline.EnqueueText("Concurrent text", "neutral")
-				atomic.AddInt64(&enqueueCount, 1)
-				time.Sleep(10 * time.Millisecond)
-			}
-		}()
-
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 3; j++ {
-				pipeline.Interrupt()
-				atomic.AddInt64(&interruptCount, 1)
-				time.Sleep(20 * time.Millisecond)
-			}
-		}()
-	}
-
-	wg.Wait()
-
-	t.Logf("Enqueue count: %d, Interrupt count: %d", enqueueCount, interruptCount)
-
-	// 不崩溃就算通过
-	stats := pipeline.Stats()
-	t.Logf("Final stats: %+v", stats)
-}
-
-// TestTTSPipelineStopDuringPlayback 测试在播放过程中调用 Stop 不会阻塞
-// 这是为了验证修复：当 Mixer 已经停止时，Stop() 不会永远阻塞
-func TestTTSPipelineStopDuringPlayback(t *testing.T) {
-	// 创建一个慢速的 mock provider，模拟长时间播放
-	provider := &slowMockTTSProvider{
-		readDelay: 100 * time.Millisecond, // 每次读取延迟 100ms
-	}
-	config := DefaultTTSPipelineConfig()
-	ttsConfig := tts.Config{APIKey: "test"}
-
-	pipeline := NewTTSPipeline(provider, config, ttsConfig, nil, nil)
-
-	// 使用一个 mock mixer 来消费数据
-	mixer := newMockMixer()
-	pipeline.SetMixer(mixer)
-
-	ctx := context.Background()
-	err := pipeline.Start(ctx)
-	if err != nil {
-		t.Fatalf("Failed to start pipeline: %v", err)
-	}
-
-	// 入队一些文本
-	for i := 0; i < 5; i++ {
-		err = pipeline.EnqueueText(fmt.Sprintf("Test sentence %d", i), "default")
-		if err != nil {
-			t.Fatalf("Failed to enqueue text: %v", err)
-		}
-	}
-
-	// 等待一点时间让播放开始
-	time.Sleep(50 * time.Millisecond)
-
-	// 在播放过程中调用 Stop，应该在合理时间内返回
-	stopDone := make(chan struct{})
-	go func() {
-		pipeline.Stop()
-		close(stopDone)
-	}()
-
-	select {
-	case <-stopDone:
-		t.Log("Stop completed successfully")
-	case <-time.After(2 * time.Second):
-		t.Fatal("Stop blocked for more than 2 seconds - this indicates a deadlock")
-	}
-}
-
-// slowMockTTSProvider 模拟慢速 TTS provider
-type slowMockTTSProvider struct {
-	readDelay time.Duration
-}
-
-func (p *slowMockTTSProvider) Start(ctx context.Context, cfg tts.Config) (tts.Stream, error) {
-	reader := &slowMockReader{
-		readDelay: p.readDelay,
-		data:      make([]byte, 1024), // 1KB 的模拟音频数据
-		ctx:       ctx,
-	}
-	return &slowMockTTSStream{
-		reader: reader,
-	}, nil
-}
-
-type slowMockTTSStream struct {
-	reader *slowMockReader
-}
-
-func (s *slowMockTTSStream) WriteTextChunk(ctx context.Context, text string) error {
-	return nil
-}
-
-func (s *slowMockTTSStream) Finish(ctx context.Context) error {
-	return nil
-}
-
-func (s *slowMockTTSStream) Close(ctx context.Context) error {
-	return nil
-}
-
-func (s *slowMockTTSStream) AudioReader() io.ReadCloser {
-	return s.reader
-}
-
-func (s *slowMockTTSStream) SampleRate() int {
-	return 16000
-}
-
-func (s *slowMockTTSStream) Channels() int {
-	return 1
-}
-
-// slowMockReader 实现 io.ReadCloser 接口
-type slowMockReader struct {
-	readDelay time.Duration
-	data      []byte
-	offset    int
-	ctx       context.Context
-	closed    bool
-	mu        sync.Mutex
-}
-
-func (r *slowMockReader) Read(p []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.closed {
-		return 0, io.EOF
-	}
-
-	// 检查 context 是否被取消
-	select {
-	case <-r.ctx.Done():
-		return 0, r.ctx.Err()
-	default:
-	}
-
-	// 模拟慢速读取
-	time.Sleep(r.readDelay)
-
-	if r.offset >= len(r.data) {
-		return 0, io.EOF
-	}
-
-	n := copy(p, r.data[r.offset:])
-	r.offset += n
-	return n, nil
-}
-
-func (r *slowMockReader) Close() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.closed = true
-	return nil
 }

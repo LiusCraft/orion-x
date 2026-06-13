@@ -11,27 +11,23 @@ import (
 	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
 )
 
-// outPipeImpl AudioOutPipe 实现
-// 集成 TTSPipeline 实现异步 TTS 播放
 type outPipeImpl struct {
-	pipeline    TTSPipeline
-	mixer       AudioMixer
-	mixerConfig *MixerConfig
-	voiceMap    map[string]string
-	ttsConfig   tts.Config
-	ctx         context.Context
-	cancel      context.CancelFunc
-	mu          sync.Mutex
+	pipeline   TTSPipeline
+	sink       AudioSink
+	sinkFormat *AudioFormat
+	voiceMap   map[string]string
+	ttsConfig  tts.Config
+	ctx        context.Context
+	cancel     context.CancelFunc
+	mu         sync.Mutex
 }
 
-// NewOutPipe 创建新的 AudioOutPipe（简单版本）
 func NewOutPipe(apiKey string) AudioOutPipe {
 	cfg := DefaultOutPipeConfig()
 	cfg.TTS.APIKey = apiKey
 	return NewOutPipeWithConfig(cfg)
 }
 
-// NewOutPipeWithConfig 创建新的 AudioOutPipe（带配置）
 func NewOutPipeWithConfig(cfg *OutPipeConfig) AudioOutPipe {
 	if cfg == nil {
 		cfg = DefaultOutPipeConfig()
@@ -45,13 +41,6 @@ func NewOutPipeWithConfig(cfg *OutPipeConfig) AudioOutPipe {
 		voiceMap[key] = value
 	}
 
-	// 确保 mixer config 存在
-	mixerConfig := cfg.Mixer
-	if mixerConfig == nil {
-		mixerConfig = DefaultMixerConfig()
-	}
-
-	// 创建 TTS Pipeline
 	ttsProvider := cfg.TTSProvider
 	if ttsProvider == nil {
 		created, err := tts.NewProvider(tts.ProviderConfig{Type: cfg.TTSProviderType})
@@ -71,14 +60,25 @@ func NewOutPipeWithConfig(cfg *OutPipeConfig) AudioOutPipe {
 		pipelineConfig,
 		cfg.TTS,
 		voiceMap,
-		mixerConfig,
 	)
 
+	sinkFormat := cfg.SinkFormat
+	if sinkFormat == nil {
+		sinkFormat = &AudioFormat{
+			SampleRate:      cfg.TTS.SampleRate,
+			Channels:        1,
+			FramesPerBuffer: 1024,
+		}
+		if sinkFormat.SampleRate <= 0 {
+			sinkFormat.SampleRate = 16000
+		}
+	}
+
 	return &outPipeImpl{
-		pipeline:    pipeline,
-		voiceMap:    voiceMap,
-		mixerConfig: mixerConfig,
-		ttsConfig:   cfg.TTS,
+		pipeline:   pipeline,
+		sinkFormat: sinkFormat,
+		voiceMap:   voiceMap,
+		ttsConfig:  cfg.TTS,
 	}
 }
 
@@ -88,7 +88,12 @@ func (p *outPipeImpl) Start(ctx context.Context) error {
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
 
-	// 启动 TTSPipeline
+	if p.sink != nil && p.sinkFormat != nil {
+		if err := p.sink.Start(p.ctx, *p.sinkFormat); err != nil {
+			return fmt.Errorf("AudioOutPipe: failed to start sink: %w", err)
+		}
+	}
+
 	if err := p.pipeline.Start(p.ctx); err != nil {
 		return fmt.Errorf("AudioOutPipe: failed to start TTSPipeline: %w", err)
 	}
@@ -107,39 +112,42 @@ func (p *outPipeImpl) Stop() error {
 		p.cancel()
 	}
 
-	// 停止 TTSPipeline
 	if err := p.pipeline.Stop(); err != nil {
 		logging.Errorf("AudioOutPipe: error stopping TTSPipeline: %v", err)
+	}
+
+	if p.sink != nil {
+		if err := p.sink.Stop(); err != nil {
+			logging.Errorf("AudioOutPipe: error stopping sink: %v", err)
+		}
 	}
 
 	logging.Infof("AudioOutPipe: stopped")
 	return nil
 }
 
-func (p *outPipeImpl) SetMixer(mixer AudioMixer) {
+func (p *outPipeImpl) SetSink(sink AudioSink) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	p.mixer = mixer
-	p.pipeline.SetMixer(mixer)
+	logging.Infof("AudioOutPipe: setting sink: %v", sink)
+	p.sink = sink
+	if p.pipeline != nil {
+		p.pipeline.SetSink(sink)
+	}
 }
 
 func (p *outPipeImpl) SetOnPlaybackFinished(callback PlaybackFinishedCallback) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
 	p.pipeline.SetOnPlaybackFinished(callback)
 }
 
 func (p *outPipeImpl) SetOnTTSItemStarted(callback TTSItemStartedCallback) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
 	p.pipeline.SetOnItemStarted(callback)
 }
 
-// PlayTTS 播放 TTS（异步，立即返回）
-// 文本会被加入队列，由 TTSPipeline 异步处理
 func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 	if text == "" {
 		return nil
@@ -148,69 +156,64 @@ func (p *outPipeImpl) PlayTTS(text string, emotion string) error {
 	logging.Infof("AudioOutPipe: PlayTTS (async) - text: %.50s..., emotion: %s",
 		truncateForLog(text, 50), emotion)
 
-	// 非阻塞入队
 	return p.pipeline.EnqueueText(text, emotion)
 }
 
-// BeginTTSStream 开始流式 TTS 会话
 func (p *outPipeImpl) BeginTTSStream(emotion string) error {
 	return p.pipeline.BeginSession(emotion)
 }
 
-// WriteTTSChunk 向当前流式会话写入文本 chunk
 func (p *outPipeImpl) WriteTTSChunk(chunk string) error {
 	return p.pipeline.WriteChunk(chunk)
 }
 
-// EndTTSStream 结束流式会话的文本输入（不等待合成完成）
 func (p *outPipeImpl) EndTTSStream() error {
 	return p.pipeline.EndSession()
 }
 
-// PlayResource 播放资源音频
 func (p *outPipeImpl) PlayResource(audio io.Reader) error {
 	p.mu.Lock()
-	mixer := p.mixer
+	sink := p.sink
 	p.mu.Unlock()
 
-	if mixer == nil {
-		return fmt.Errorf("AudioOutPipe: mixer not set")
+	if sink == nil {
+		return fmt.Errorf("AudioOutPipe: sink not set")
 	}
 
-	logging.Infof("AudioOutPipe: adding resource stream to mixer...")
-	mixer.AddResourceStream(audio)
-	return nil
+	buf := make([]byte, 4096)
+	for {
+		n, err := audio.Read(buf)
+		if n > 0 {
+			samples := bytesToInt16LE(buf[:n])
+			if writeErr := sink.WritePCM(samples); writeErr != nil {
+				return fmt.Errorf("AudioOutPipe: sink write error: %w", writeErr)
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("AudioOutPipe: resource read error: %w", err)
+		}
+	}
 }
 
-// Interrupt 中断所有任务（清空队列、停止播放）
 func (p *outPipeImpl) Interrupt() error {
 	logging.Infof("AudioOutPipe: interrupting...")
 
-	// 委托给 TTSPipeline 处理
 	if err := p.pipeline.Interrupt(); err != nil {
 		logging.Errorf("AudioOutPipe: interrupt error: %v", err)
 		return err
-	}
-
-	// 移除资源音频流
-	p.mu.Lock()
-	mixer := p.mixer
-	p.mu.Unlock()
-
-	if mixer != nil {
-		mixer.RemoveResourceStream()
 	}
 
 	logging.Infof("AudioOutPipe: interrupted")
 	return nil
 }
 
-// Stats 获取 Pipeline 统计信息
 func (p *outPipeImpl) Stats() PipelineStats {
 	return p.pipeline.Stats()
 }
 
-// truncateForLog 截断文本用于日志显示
 func truncateForLog(text string, maxLen int) string {
 	runes := []rune(text)
 	if len(runes) <= maxLen {

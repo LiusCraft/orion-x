@@ -1,4 +1,4 @@
-package audio
+package resampler
 
 import (
 	"fmt"

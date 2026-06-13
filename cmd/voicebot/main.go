@@ -12,8 +12,6 @@ import (
 	"github.com/gordonklaus/portaudio"
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
-	audiosink "github.com/liuscraft/orion-x/internal/audio/sink"
-	"github.com/liuscraft/orion-x/internal/audio/source"
 	"github.com/liuscraft/orion-x/internal/config"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
@@ -119,40 +117,17 @@ func main() {
 	}
 	logging.Infof("Agent created successfully")
 
-	logging.Infof("Creating AudioMixer...")
-	mixerCfg := &audio.MixerConfig{
-		TTSVolume:       appConfig.Audio.Mixer.TTSVolume,
-		ResourceVolume:  appConfig.Audio.Mixer.ResourceVolume,
-		SampleRate:      appConfig.Audio.Mixer.SampleRate,
-		Channels:        appConfig.Audio.Mixer.Channels,
-		FramesPerBuffer: appConfig.Audio.Mixer.FramesPerBuffer,
-	}
-	// Initialize PortAudio once for all audio components
 	logging.Infof("Initializing PortAudio...")
 	if err := portaudio.Initialize(); err != nil {
 		logging.Fatalf("Failed to initialize PortAudio: %v", err)
 	}
-	defer portaudio.Terminate()
+	// portaudio.Terminate() crashes on macOS due to C++ static destructor
+	// ordering issues (mutex lock failed: Invalid argument).
+	// All streams are properly closed, OS will clean up remaining resources.
 	logging.Infof("PortAudio initialized successfully")
-
-	logging.Infof("Creating AudioMixer...")
-	mixer, err := audio.NewMixer(mixerCfg)
-	if err != nil {
-		logging.Fatalf("Failed to create AudioMixer: %v", err)
-	}
-	logging.Infof("AudioMixer created successfully")
-
-	logging.Infof("Starting AudioMixer...")
-	mixerSink := audiosink.NewPortAudioSink()
-	mixer.SetSink(mixerSink)
-	if err := mixer.Start(); err != nil {
-		logging.Fatalf("Failed to start AudioMixer: %v", err)
-	}
-	logging.Infof("AudioMixer started")
 
 	logging.Infof("Creating AudioOutPipe...")
 	outPipeCfg := audio.DefaultOutPipeConfig()
-	outPipeCfg.Mixer = mixerCfg
 	outPipeCfg.TTSProviderType = appConfig.Provider.TTS.Type
 	// 配置 TTS Pipeline
 	outPipeCfg.TTSPipeline = &audio.TTSPipelineConfig{
@@ -189,7 +164,8 @@ func main() {
 		outPipeCfg.VoiceMap = ttsCfg.VoiceMap
 	}
 	audioOutPipe := audio.NewOutPipeWithConfig(outPipeCfg)
-	audioOutPipe.SetMixer(mixer)
+	sink := NewPortAudioSink()
+	audioOutPipe.SetSink(sink)
 	logging.Infof("AudioOutPipe created successfully (async TTS pipeline: maxBuffer=%d, maxConcurrent=%d)",
 		outPipeCfg.TTSPipeline.MaxTTSBuffer, outPipeCfg.TTSPipeline.MaxConcurrentTTS)
 
@@ -203,6 +179,7 @@ func main() {
 		VADModelPath:    appConfig.Audio.InPipe.VADModelPath,
 		VADMinSilenceMs: appConfig.Audio.InPipe.VADMinSilenceMs,
 		VADSpeechPadMs:  appConfig.Audio.InPipe.VADSpeechPadMs,
+		ASRAPIKey:       asrCfg.APIKey,
 		ASRProviderType: appConfig.Provider.ASR.Type,
 		ASRModel:        asrCfg.Model,
 		ASREndpoint:     asrCfg.Endpoint,
@@ -216,12 +193,23 @@ func main() {
 
 	logging.Infof("Creating Microphone source (bufferSize=%d, highLatency=%v, inputDevice=%q)...",
 		bufferSize, appConfig.Audio.InPipe.HighLatency, appConfig.Audio.InPipe.InputDevice)
-	micSource, err := source.NewMicrophoneSourceWithDevice(
+
+	inputDevice := appConfig.Audio.InPipe.InputDevice
+	if inputDevice == "" {
+		selected, err := SelectInputDevice()
+		if err != nil {
+			logging.Warnf("Failed to select input device: %v, using default", err)
+		} else {
+			inputDevice = selected
+		}
+	}
+
+	micSource, err := NewMicrophoneSourceWithDevice(
 		inPipeCfg.SampleRate,
 		inPipeCfg.Channels,
 		bufferSize,
 		appConfig.Audio.InPipe.HighLatency,
-		appConfig.Audio.InPipe.InputDevice,
+		inputDevice,
 	)
 	if err != nil {
 		logging.Fatalf("Failed to create Microphone source: %v", err)
@@ -230,17 +218,11 @@ func main() {
 
 	audioSource := audio.AudioSource(micSource)
 
-	audioInPipe, err := audio.NewInPipeWithAudioSource(asrCfg.APIKey, inPipeCfg, audioSource)
+	audioInPipe, err := audio.NewInPipe(inPipeCfg, audioSource)
 	if err != nil {
 		logging.Fatalf("Failed to create AudioInPipe: %v", err)
 	}
 	logging.Infof("AudioInPipe created successfully")
-
-	// Wire AudioInPipe to receive TTS playback notifications from mixer,
-	// so noise floor estimation is paused during TTS playback.
-	if observer, ok := audioInPipe.(audio.TTSPlaybackObserver); ok {
-		mixer.SetTTSPlaybackObserver(observer)
-	}
 
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
@@ -296,11 +278,6 @@ func main() {
 			logging.Errorf("Error stopping AudioOutPipe: %v", err)
 		}
 
-		logging.Infof("Stopping Mixer...")
-		if err := mixer.Stop(); err != nil {
-			logging.Errorf("Error stopping mixer: %v", err)
-		}
-
 		cancel()
 	}()
 
@@ -316,8 +293,13 @@ func main() {
 	logging.Infof("     VoiceBot Shutting Down...          ")
 	logging.Infof("========================================")
 
-	// PortAudio 会在 defer portaudio.Terminate() 中被清理
 	logging.Infof("VoiceBot stopped.")
+
+	logging.Sync()
+	// Raw _exit syscall bypasses C/C++ library cleanup to avoid
+	// PortAudio CoreAudio thread destructor crash on macOS.
+	// os.Exit() goes through C exit() which triggers C++ atexit handlers.
+	syscall.Syscall(syscall.SYS_EXIT, 0, 0, 0)
 }
 
 func toToolsMCPServers(cfgs []config.MCPServerConfig) []tools.MCPServerConfig {

@@ -1,4 +1,4 @@
-package audio
+package vad
 
 import (
 	"fmt"
@@ -12,14 +12,14 @@ import (
 )
 
 const (
-	// DefaultVADModelURL is the official Silero VAD model download URL
-	DefaultVADModelURL = "https://github.com/snakers4/silero-vad/raw/master/files/silero_vad.onnx"
+	// DefaultModelURL is the official Silero VAD model download URL
+	DefaultModelURL = "https://github.com/snakers4/silero-vad/raw/master/files/silero_vad.onnx"
 )
 
 // ensureVADModel ensures the VAD model file exists, downloading it if necessary
-func ensureVADModel(modelPath string) error {
+func ensureModel(modelPath string) error {
 	if modelPath == "" {
-		modelPath = DefaultVADModelPath
+		modelPath = DefaultModelPath
 	}
 
 	// Expand ~ to home directory
@@ -44,8 +44,8 @@ func ensureVADModel(modelPath string) error {
 	}
 
 	// Download the model
-	logging.Infof("Downloading Silero VAD model from %s to %s", DefaultVADModelURL, modelPath)
-	if err := downloadFile(DefaultVADModelURL, modelPath); err != nil {
+	logging.Infof("Downloading Silero VAD model from %s to %s", DefaultModelURL, modelPath)
+	if err := downloadFile(DefaultModelURL, modelPath); err != nil {
 		return fmt.Errorf("download model: %w", err)
 	}
 

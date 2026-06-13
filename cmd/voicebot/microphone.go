@@ -1,4 +1,4 @@
-package source
+package main
 
 import (
 	"context"
@@ -22,6 +22,7 @@ type MicrophoneSource struct {
 	buffer     []int16
 	closeCh    chan struct{}
 	closeOnce  sync.Once
+	readWG     sync.WaitGroup
 
 	// 启动状态
 	started   bool
@@ -175,6 +176,59 @@ func findInputDeviceByName(name string) (*portaudio.DeviceInfo, error) {
 	return nil, fmt.Errorf("no input device found matching %q", name)
 }
 
+// SelectInputDevice 交互式选择输入设备
+// 列出所有可用的输入设备，让用户通过序号选择，按回车使用默认设备
+func SelectInputDevice() (string, error) {
+	devices, err := portaudio.Devices()
+	if err != nil {
+		return "", fmt.Errorf("无法获取设备列表: %w", err)
+	}
+
+	var inputDevices []*portaudio.DeviceInfo
+	defaultDev, _ := portaudio.DefaultInputDevice()
+	for _, dev := range devices {
+		if dev.MaxInputChannels > 0 {
+			inputDevices = append(inputDevices, dev)
+		}
+	}
+
+	if len(inputDevices) == 0 {
+		return "", fmt.Errorf("没有找到可用的输入设备")
+	}
+
+	fmt.Println("\n🎤 可用的麦克风设备:")
+	for i, dev := range inputDevices {
+		marker := " "
+		if defaultDev != nil && dev.Index == defaultDev.Index {
+			marker = "*"
+		}
+		fmt.Printf("  %s [%d] %s (采样率: %.0fHz, 低延迟: %.1fms, 高延迟: %.1fms)\n",
+			marker, i+1, dev.Name,
+			dev.DefaultSampleRate,
+			dev.DefaultLowInputLatency.Seconds()*1000,
+			dev.DefaultHighInputLatency.Seconds()*1000)
+	}
+	fmt.Println("  * 标记为系统默认设备")
+
+	fmt.Print("\n请选择设备序号 (直接回车使用默认设备): ")
+	var input string
+	fmt.Scanln(&input)
+
+	if input == "" {
+		return "", nil // 使用默认设备
+	}
+
+	var idx int
+	if _, err := fmt.Sscanf(input, "%d", &idx); err != nil || idx < 1 || idx > len(inputDevices) {
+		fmt.Printf("无效选择，将使用默认设备\n")
+		return "", nil
+	}
+
+	selected := inputDevices[idx-1]
+	fmt.Printf("已选择: %s\n\n", selected.Name)
+	return selected.Name, nil
+}
+
 // Start starts the audio stream. This is called automatically on first Read(),
 // but can be called explicitly if you want to control when the stream starts.
 func (m *MicrophoneSource) Start() error {
@@ -216,16 +270,18 @@ func (m *MicrophoneSource) Read(ctx context.Context) ([]byte, error) {
 
 	readStart := time.Now()
 	readErr := make(chan error, 1)
+	m.readWG.Add(1)
 	go func() {
+		defer m.readWG.Done()
 		readErr <- m.stream.Read()
 	}()
 
 	select {
 	case <-ctx.Done():
-		m.abortStream("context canceled")
+		<-readErr // 等待内部 goroutine 完成（由 Close() 负责 abort 流），确保 Pa_ReadStream 已退出
 		return nil, ctx.Err()
 	case <-m.closeCh:
-		m.abortStream("source closed")
+		<-readErr // 等待内部 goroutine 完成（由 Close() 负责 abort 流），确保 Pa_ReadStream 已退出
 		return nil, io.EOF
 	case err := <-readErr:
 		// 记录读取延迟
@@ -269,12 +325,19 @@ func (m *MicrophoneSource) Read(ctx context.Context) ([]byte, error) {
 }
 
 // Close 关闭音频源
+// 由不同 goroutine 调用（非 Read goroutine），避免 PortAudio 线程安全问题
 func (m *MicrophoneSource) Close() error {
 	logging.Infof("MicrophoneSource: closing...")
 
 	m.closeOnce.Do(func() {
 		close(m.closeCh)
 	})
+
+	// 由 Close 所在 goroutine 调用 Abort，而非 Read goroutine
+	// PortAudio 要求 Abort 不能从调用 Pa_StartStream 的线程调用
+	m.abortStream("source closed")
+
+	m.readWG.Wait()
 
 	if err := m.stream.Stop(); err != nil {
 		logging.Errorf("MicrophoneSource: error stopping stream: %v", err)

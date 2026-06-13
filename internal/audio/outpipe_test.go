@@ -28,8 +28,8 @@ func TestNewOutPipeWithConfig(t *testing.T) {
 
 func TestOutPipe_SetMixer(t *testing.T) {
 	pipe := NewOutPipe("test-api-key")
-	mixer := newMockMixer()
-	pipe.SetMixer(mixer)
+
+	pipe.SetSink(nil)
 }
 
 func TestOutPipe_StartStop(t *testing.T) {
@@ -69,8 +69,8 @@ func TestOutPipe_PlayTTS_EmptyText(t *testing.T) {
 
 func TestOutPipe_PlayTTS_Async(t *testing.T) {
 	pipe := NewOutPipe("test-api-key")
-	mixer := newMockMixer()
-	pipe.SetMixer(mixer)
+
+	pipe.SetSink(nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -98,8 +98,8 @@ func TestOutPipe_PlayTTS_Async(t *testing.T) {
 
 func TestOutPipe_Interrupt(t *testing.T) {
 	pipe := NewOutPipe("test-api-key")
-	mixer := newMockMixer()
-	pipe.SetMixer(mixer)
+
+	pipe.SetSink(nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -181,8 +181,8 @@ func TestOutPipe_PlayResource(t *testing.T) {
 	}
 
 	// 设置 mixer
-	mixer := newMockMixer()
-	pipe.SetMixer(mixer)
+
+	pipe.SetSink(nil)
 
 	// 现在应该成功
 	reader := newMockAudioReader()
@@ -222,8 +222,8 @@ func TestOutPipe_InterruptBeforeStart(t *testing.T) {
 
 func TestOutPipe_MultipleInterrupts(t *testing.T) {
 	pipe := NewOutPipe("test-api-key")
-	mixer := newMockMixer()
-	pipe.SetMixer(mixer)
+
+	pipe.SetSink(nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

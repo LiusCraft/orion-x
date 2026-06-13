@@ -1,4 +1,4 @@
-package audio
+package vad
 
 import (
 	"encoding/binary"
@@ -56,7 +56,7 @@ func TestInt16PCMToFloat32(t *testing.T) {
 }
 
 func TestSileroVADWithWAVFixtures(t *testing.T) {
-	modelPath := filepath.Clean("../../models/silero_vad.onnx")
+	modelPath := filepath.Clean("../../../models/silero_vad.onnx")
 	if _, err := os.Stat(modelPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			t.Skipf("Silero model not found at %s", modelPath)
@@ -64,13 +64,13 @@ func TestSileroVADWithWAVFixtures(t *testing.T) {
 		t.Fatalf("stat Silero model: %v", err)
 	}
 
-	vad, err := NewSileroVAD(modelPath, 16000, 0.5, 200, 100)
+	vad, err := NewSilero(modelPath, 16000, 0.5, 200, 100)
 	if err != nil {
 		t.Fatalf("new Silero VAD: %v", err)
 	}
 	defer vad.Close()
 
-	voice := readPCM16MonoWAV(t, "../../testdata/human_voice.wav", 16000)
+	voice := readPCM16MonoWAV(t, "../../../testdata/human_voice.wav", 16000)
 	detected, err := vad.Detect(voice)
 	if err != nil {
 		t.Fatalf("detect voice: %v", err)
@@ -79,7 +79,7 @@ func TestSileroVADWithWAVFixtures(t *testing.T) {
 		t.Fatal("expected human voice fixture to trigger Silero VAD")
 	}
 
-	noise := readPCM16MonoWAV(t, "../../testdata/noise_3s_16k.wav", 16000)
+	noise := readPCM16MonoWAV(t, "../../../testdata/noise_3s_16k.wav", 16000)
 	detected, err = vad.Detect(noise)
 	if err != nil {
 		t.Fatalf("detect noise: %v", err)
@@ -195,57 +195,4 @@ func readPCM16MonoWAV(t *testing.T, path string, wantSampleRate uint32) []byte {
 		t.Fatal("wav data chunk is empty")
 	}
 	return data
-}
-
-func TestNewVADDetector(t *testing.T) {
-	tests := []struct {
-		name        string
-		cfg         *InPipeConfig
-		expectType  VADType
-		expectError bool
-	}{
-		{
-			name: "nil config returns noop",
-			cfg:  nil,
-		},
-		{
-			name: "disabled VAD returns noop",
-			cfg: &InPipeConfig{
-				EnableVAD: false,
-			},
-		},
-		{
-			name:        "RMS is not a VAD detector",
-			expectError: true,
-			cfg: &InPipeConfig{
-				EnableVAD:    true,
-				VADThreshold: 0.5,
-				VADType:      "rms",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			vad, err := NewVADDetector(tt.cfg)
-			if tt.expectError && err == nil {
-				t.Error("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if tt.expectError {
-				return
-			}
-			if vad == nil {
-				return
-			}
-			// Basic functionality test
-			_, err = vad.Detect([]byte{0, 0, 0, 0})
-			if err != nil {
-				t.Errorf("unexpected error in Detect: %v", err)
-			}
-			vad.Close()
-		})
-	}
 }

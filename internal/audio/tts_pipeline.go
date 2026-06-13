@@ -1,8 +1,6 @@
 package audio
 
-import (
-	"context"
-)
+import "context"
 
 // PlaybackFinishedCallback 播放完成回调
 type PlaybackFinishedCallback func()
@@ -38,8 +36,8 @@ type TTSPipeline interface {
 	// Stats 获取统计信息（用于调试和监控）
 	Stats() PipelineStats
 
-	// SetMixer 设置音频混音器
-	SetMixer(mixer AudioMixer)
+	// SetSink 设置音频输出目标
+	SetSink(sink AudioSink)
 
 	// SetOnPlaybackFinished 设置播放完成回调
 	// 当所有队列清空且播放完成时触发
@@ -62,20 +60,12 @@ type PipelineStats struct {
 // TTSPipelineConfig TTS Pipeline 配置
 type TTSPipelineConfig struct {
 	// MaxTTSBuffer TTS 缓冲区最大容量
-	// 已生成但未播放的 TTS 流数量上限
-	// 超出则阻塞 TTS Worker，等待播放器消费
-	// 默认: 3
 	MaxTTSBuffer int `json:"max_tts_buffer"`
 
 	// MaxConcurrentTTS 最大并发 TTS 生成数
-	// 控制同时调用 TTS 服务的数量，避免过多并发
-	// 默认: 2
 	MaxConcurrentTTS int `json:"max_concurrent_tts"`
 
 	// TextQueueSize 文本队列大小
-	// 待处理的文本数量上限，防止内存爆炸
-	// 超出则阻塞入队（保护内存）
-	// 默认: 100
 	TextQueueSize int `json:"text_queue_size"`
 }
 

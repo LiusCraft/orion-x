@@ -1,4 +1,4 @@
-package audio
+package vad
 
 // Int16PCMToFloat32 converts int16 PCM audio to float32
 // Input: []byte of int16 PCM (little-endian)

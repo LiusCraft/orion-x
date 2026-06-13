@@ -1,4 +1,4 @@
-package sink
+package main
 
 import (
 	"context"
@@ -94,7 +94,7 @@ func (s *PortAudioSink) WritePCM(samples []int16) error {
 			now := time.Now()
 			if now.Sub(s.lastUnderflowLog) >= 5*time.Second {
 				s.lastUnderflowLog = now
-				logging.Warnf("PortAudioSink: output underflowed; continuing local playback")
+				logging.Debugf("PortAudioSink: output underflowed; continuing local playback")
 			}
 			return nil
 		}
