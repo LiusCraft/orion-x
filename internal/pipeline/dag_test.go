@@ -101,7 +101,7 @@ func TestDAGPipelineLinear(t *testing.T) {
 	if err := p.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer p.Stop()
+	defer func() { _ = p.Stop() }()
 
 	p.Input() <- NewMessage(MessageTypeTextChunk, "hello")
 
@@ -144,7 +144,7 @@ func TestDAGPipelineFanOut(t *testing.T) {
 	if err := p.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer p.Stop()
+	defer func() { _ = p.Stop() }()
 
 	p.Input() <- NewMessage(MessageTypeTextChunk, "hello")
 	p.Input() <- NewMessage(MessageTypeTextChunk, "world")
@@ -194,7 +194,7 @@ func TestDAGPipelineFanIn(t *testing.T) {
 	if err := p.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer p.Stop()
+	defer func() { _ = p.Stop() }()
 
 	// 通过 input 发送消息（两个 source 节点都从 input 读取）
 	p.Input() <- NewMessage(MessageTypeTextChunk, "hello")
@@ -230,7 +230,7 @@ func TestDAGPipelineDiamond(t *testing.T) {
 	if err := p.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer p.Stop()
+	defer func() { _ = p.Stop() }()
 
 	p.Input() <- NewMessage(MessageTypeTextChunk, "hello")
 
@@ -334,7 +334,7 @@ func TestDAGPipelineReportScenario(t *testing.T) {
 	if err := p.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer p.Stop()
+	defer func() { _ = p.Stop() }()
 
 	// 发送 3 个文本
 	for i := 0; i < 3; i++ {
@@ -482,7 +482,7 @@ func TestDAGPipelineObserver(t *testing.T) {
 	if err := p.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer p.Stop()
+	defer func() { _ = p.Stop() }()
 
 	p.Input() <- NewMessage(MessageTypeTextChunk, "hello")
 	p.Input() <- NewMessage(MessageTypeTextChunk, "world")
@@ -572,7 +572,7 @@ func TestDAGPipelineAsyncReportNonBlocking(t *testing.T) {
 	if err := p.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer p.Stop()
+	defer func() { _ = p.Stop() }()
 
 	// 快速发送 2 条消息
 	p.Input() <- NewMessage(MessageTypeTextChunk, "msg-1")
@@ -625,7 +625,7 @@ func TestDAGBuilderImmutable(t *testing.T) {
 	if err := p1.Start(ctx); err != nil {
 		t.Fatalf("p1 Start failed: %v", err)
 	}
-	defer p1.Stop()
+	defer func() { _ = p1.Stop() }()
 
 	p1.Input() <- NewMessage(MessageTypeTextChunk, "hello")
 	msg := <-p1.Output()
@@ -637,7 +637,7 @@ func TestDAGBuilderImmutable(t *testing.T) {
 	if err := p2.Start(ctx); err != nil {
 		t.Fatalf("p2 Start failed: %v", err)
 	}
-	defer p2.Stop()
+	defer func() { _ = p2.Stop() }()
 
 	p2.Input() <- NewMessage(MessageTypeTextChunk, "hello")
 	msg = <-p2.Output()

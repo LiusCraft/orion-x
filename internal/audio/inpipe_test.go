@@ -223,7 +223,7 @@ func TestInPipeStartWhenAlreadyStarted(t *testing.T) {
 		t.Error("Expected error when starting already started pipe")
 	}
 
-	pipe.Stop()
+	_ = pipe.Stop()
 }
 
 func TestInPipeSendAudioWhenNotStarted(t *testing.T) {
@@ -258,7 +258,7 @@ func TestInPipeSendAudio(t *testing.T) {
 		t.Error("Recognizer SendAudio was not called")
 	}
 
-	pipe.Stop()
+	_ = pipe.Stop()
 }
 
 func TestInPipeOnASRResult(t *testing.T) {
@@ -291,7 +291,7 @@ func TestInPipeOnASRResult(t *testing.T) {
 		t.Errorf("Expected final result, got text=%s, isFinal=%v", receivedText, receivedIsFinal)
 	}
 
-	pipe.Stop()
+	_ = pipe.Stop()
 }
 
 func TestInPipeStopWhenIdle(t *testing.T) {
@@ -454,7 +454,7 @@ func TestInPipeVADSegmentsAudioBeforeASR(t *testing.T) {
 		t.Fatalf("expected active speech to be buffered before ASR, got start=%d send=%d finish=%d", start, send, finish)
 	}
 
-	pipe.segmenter.Close()
+	_ = pipe.segmenter.Close()
 	pipe.segmenter = vad.NewSegmenter(&staticVAD{detected: false}, config.SampleRate, config.VADSpeechPadMs)
 	if err := pipe.SendAudio(makePCM(0, 160)); err != nil {
 		t.Fatalf("SendAudio silence failed: %v", err)
@@ -549,14 +549,14 @@ func TestInPipeVADIncludesSpeechPadAndFirstSpeechFrame(t *testing.T) {
 		t.Fatalf("SendAudio silence failed: %v", err)
 	}
 
-	pipe.segmenter.Close()
+	_ = pipe.segmenter.Close()
 	pipe.segmenter = vad.NewSegmenter(&staticVAD{detected: true}, config.SampleRate, config.VADSpeechPadMs)
 	speech := makePCM(12000, 160)
 	if err := pipe.SendAudio(speech); err != nil {
 		t.Fatalf("SendAudio speech failed: %v", err)
 	}
 
-	pipe.segmenter.Close()
+	_ = pipe.segmenter.Close()
 	pipe.segmenter = vad.NewSegmenter(&staticVAD{detected: false}, config.SampleRate, config.VADSpeechPadMs)
 	if err := pipe.SendAudio(makePCM(0, 160)); err != nil {
 		t.Fatalf("SendAudio ending silence failed: %v", err)

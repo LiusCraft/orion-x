@@ -68,7 +68,7 @@ func TestSileroVADWithWAVFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new Silero VAD: %v", err)
 	}
-	defer vad.Close()
+	defer func() { _ = vad.Close() }()
 
 	voice := readPCM16MonoWAV(t, "../../../testdata/human_voice.wav", 16000)
 	detected, err := vad.Detect(voice)
@@ -117,7 +117,7 @@ func readPCM16MonoWAV(t *testing.T, path string, wantSampleRate uint32) []byte {
 	if err != nil {
 		t.Fatalf("open wav fixture %s: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var riff [12]byte
 	if _, err := io.ReadFull(f, riff[:]); err != nil {

@@ -70,7 +70,7 @@ func TestPipelineBasic(t *testing.T) {
 	if err := pipeline.Start(ctx); err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 发送消息
 	go func() {
@@ -115,7 +115,7 @@ func TestPipelineInterrupt(t *testing.T) {
 	if err := pipeline.Start(ctx); err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 发送消息
 	go func() {
@@ -165,7 +165,7 @@ func TestPipelineErrorPropagation(t *testing.T) {
 	if err := pipeline.Start(ctx); err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 发送消息
 	go func() {
@@ -201,7 +201,7 @@ func TestPipelineWithObserver(t *testing.T) {
 	if err := pipeline.Start(ctx); err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 发送多条消息
 	go func() {

@@ -12,7 +12,7 @@ func TestSQLiteStoreSaveQueryPurge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	now := time.Now()
 	expired := now.Add(-time.Hour)

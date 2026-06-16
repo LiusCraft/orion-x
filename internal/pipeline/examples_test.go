@@ -84,7 +84,7 @@ func TestPipelineWithFiltersAndExtractors(t *testing.T) {
 	if err := pipeline.Start(ctx); err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	go func() {
 		pipeline.Input() <- NewMessage(MessageTypeTextChunk, "I'm <emotion>happy</emotion> <metadata>today</metadata>!")

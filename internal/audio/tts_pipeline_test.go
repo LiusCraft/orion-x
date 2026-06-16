@@ -252,7 +252,7 @@ func TestTTSPipelineConcurrentEnqueue(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			pipeline.EnqueueText("Concurrent text", "neutral")
+			_ = pipeline.EnqueueText("Concurrent text", "neutral")
 		}(i)
 	}
 
@@ -556,7 +556,7 @@ func BenchmarkTTSPipelineEnqueue(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pipeline.EnqueueText("Benchmark text", "neutral")
+		_ = pipeline.EnqueueText("Benchmark text", "neutral")
 	}
 }
 
@@ -575,9 +575,9 @@ func BenchmarkTTSPipelineInterrupt(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// 入队一些内容
-		pipeline.EnqueueText("Test", "neutral")
+		_ = pipeline.EnqueueText("Test", "neutral")
 		// 打断
-		pipeline.Interrupt()
+		_ = pipeline.Interrupt()
 	}
 }
 
@@ -705,7 +705,6 @@ func (s *delayMockTTSStream) WriteTextChunk(ctx context.Context, text string) er
 	s.audioData = []byte(text)
 	s.reader = &delayMockAudioReader{
 		data:   s.audioData,
-		text:   text,
 		closed: false,
 	}
 
@@ -738,7 +737,6 @@ func (s *delayMockTTSStream) Channels() int {
 type delayMockAudioReader struct {
 	mu     sync.Mutex
 	data   []byte
-	text   string
 	pos    int
 	closed bool
 }
@@ -767,12 +765,6 @@ func (r *delayMockAudioReader) markClosed() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.closed = true
-}
-
-func (r *delayMockAudioReader) getText() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.text
 }
 
 // TestTTSPipelineRaceCondition 测试竞态条件

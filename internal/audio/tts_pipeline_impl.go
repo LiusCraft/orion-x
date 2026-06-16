@@ -274,7 +274,7 @@ func (p *ttsPipelineImpl) Interrupt() error {
 	if currentItem != nil {
 		currentItem.Reader.Close()
 		if closer, ok := currentItem.OrigReader.(io.Closer); ok {
-			closer.Close()
+			_ = closer.Close()
 		}
 	}
 
@@ -417,7 +417,7 @@ func (p *ttsPipelineImpl) notifySeqCompleted(seqNum int64, item *ttsItem) {
 		case <-p.ctx.Done():
 			itm.Reader.Close()
 			if closer, ok := itm.OrigReader.(io.Closer); ok {
-				closer.Close()
+				_ = closer.Close()
 			}
 			return
 		case p.ttsBuffer <- itm:
@@ -456,7 +456,7 @@ func (p *ttsPipelineImpl) playItem(item *ttsItem) {
 			case <-p.ctx.Done():
 				item.Reader.Close()
 				if closer, ok := item.OrigReader.(io.Closer); ok {
-					closer.Close()
+					_ = closer.Close()
 				}
 				goto cleanup
 			default:

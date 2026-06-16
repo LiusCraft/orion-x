@@ -10,13 +10,11 @@ import (
 
 // mockTTSProvider 模拟 TTS Provider
 type mockTTSProvider struct {
-	mu           sync.Mutex
-	startCount   int
-	startDelay   int // milliseconds
-	startErr     error
-	streams      []*mockTTSStream
-	lastConfig   tts.Config
-	onStartCalls []string
+	mu         sync.Mutex
+	startCount int
+	startErr   error
+	streams    []*mockTTSStream
+	lastConfig tts.Config
 }
 
 func newMockTTSProvider() *mockTTSProvider {
@@ -125,12 +123,6 @@ func (s *mockTTSStream) SampleRate() int {
 
 func (s *mockTTSStream) Channels() int {
 	return s.channels
-}
-
-func (s *mockTTSStream) isClosed() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.closed
 }
 
 // mockAudioReader 模拟音频读取器

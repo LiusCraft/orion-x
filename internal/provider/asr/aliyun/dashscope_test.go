@@ -26,7 +26,7 @@ func TestDashScopeRecognizerReusesConnectionAcrossTasks(t *testing.T) {
 			t.Errorf("upgrade failed: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		mu.Lock()
 		connections++
@@ -83,7 +83,7 @@ func TestDashScopeRecognizerReusesConnectionAcrossTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new recognizer failed: %v", err)
 	}
-	defer recognizer.Close()
+	defer func() { _ = recognizer.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -118,7 +118,7 @@ func TestDashScopeRecognizerRejectsOverlappingTasks(t *testing.T) {
 			t.Errorf("upgrade failed: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		for {
 			msgType, data, err := conn.ReadMessage()
@@ -149,7 +149,7 @@ func TestDashScopeRecognizerRejectsOverlappingTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new recognizer failed: %v", err)
 	}
-	defer recognizer.Close()
+	defer func() { _ = recognizer.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
