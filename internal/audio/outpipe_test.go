@@ -188,7 +188,7 @@ func TestOutPipe_PlayResource(t *testing.T) {
 	reader := newMockAudioReader()
 	reader.setData([]byte{0x00, 0x01, 0x02, 0x03})
 	// 标记关闭以让 PlayResource 在读完数据后收到 EOF
-	reader.Close()
+	_ = reader.Close()
 	err = pipe.PlayResource(reader)
 	if err != nil {
 		t.Errorf("PlayResource with mixer should succeed: %v", err)
