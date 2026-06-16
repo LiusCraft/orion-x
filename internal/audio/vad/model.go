@@ -59,7 +59,7 @@ func downloadFile(url, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("http get: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -69,7 +69,7 @@ func downloadFile(url, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("create file: %w", err)
 	}
-	defer outFile.Close()
+	defer func() { _ = outFile.Close() }()
 
 	_, err = io.Copy(outFile, resp.Body)
 	if err != nil {

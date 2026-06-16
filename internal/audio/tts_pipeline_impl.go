@@ -174,7 +174,7 @@ func (p *ttsPipelineImpl) Stop() error {
 	if currentItem != nil {
 		currentItem.Reader.Close()
 		if closer, ok := currentItem.OrigReader.(io.Closer); ok {
-			closer.Close()
+			_ = closer.Close()
 		}
 	}
 
@@ -191,7 +191,7 @@ func (p *ttsPipelineImpl) Stop() error {
 					case item := <-p.ttsBuffer:
 						item.Reader.Close()
 						if closer, ok := item.OrigReader.(io.Closer); ok {
-							closer.Close()
+							_ = closer.Close()
 						}
 						drained++
 					default:
@@ -201,7 +201,7 @@ func (p *ttsPipelineImpl) Stop() error {
 			case item := <-p.ttsBuffer:
 				item.Reader.Close()
 				if closer, ok := item.OrigReader.(io.Closer); ok {
-					closer.Close()
+					_ = closer.Close()
 				}
 				drained++
 			}
@@ -510,7 +510,7 @@ func (p *ttsPipelineImpl) generateTTS(ctx context.Context, text string, emotion 
 	}
 
 	if err := stream.WriteTextChunk(ttsCtx, text); err != nil {
-		stream.Close(ttsCtx)
+		_ = stream.Close(ttsCtx)
 		return nil, err
 	}
 

@@ -192,7 +192,7 @@ func (s *SQLiteStore) queryFTS(userID, query string, limit int, minScore float64
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := make([]MemoryItem, 0, limit)
 	for rows.Next() {
@@ -232,7 +232,7 @@ func (s *SQLiteStore) queryRecent(userID string, limit int) ([]MemoryItem, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := make([]MemoryItem, 0, limit)
 	for rows.Next() {

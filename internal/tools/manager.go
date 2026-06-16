@@ -30,7 +30,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) (*Manager, error) {
 	for _, serverCfg := range cfg.MCPServers {
 		specs, session, err := loadMCPSpecs(ctx, serverCfg)
 		if err != nil {
-			m.Close()
+			_ = m.Close()
 			return nil, fmt.Errorf("failed to load MCP tools from %s: %w", serverCfg.ID, err)
 		}
 		m.sessions = append(m.sessions, session)

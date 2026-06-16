@@ -204,7 +204,7 @@ func (p *InPipe) Stop() error {
 		logging.Infof("AudioInPipe: waiting for audio reader to finish...")
 		p.readWG.Wait()
 		if seg := segmenter.Flush(); seg != nil && seg.Bytes > 0 {
-			p.recognizeSegment(ctx, *seg)
+			_ = p.recognizeSegment(ctx, *seg)
 		}
 		if cancel != nil {
 			cancel()
@@ -306,7 +306,7 @@ func (p *InPipe) readAudioFromSource(ctx context.Context) {
 	defer func() {
 		if p.vadEnabled && p.segmenter != nil {
 			if seg := p.segmenter.Flush(); seg != nil && seg.Bytes > 0 {
-				p.recognizeSegment(ctx, *seg)
+				_ = p.recognizeSegment(ctx, *seg)
 			}
 		}
 	}()

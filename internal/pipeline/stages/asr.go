@@ -80,7 +80,7 @@ func (s *ASRStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 		}
 
 		<-ctx.Done()
-		s.audioInPipe.Stop()
+		_ = s.audioInPipe.Stop()
 	}()
 
 	return output

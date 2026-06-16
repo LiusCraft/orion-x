@@ -1,7 +1,7 @@
 version: "2"
 
 run:
-  tests: false
+  tests: true
 
 linters:
   enable:

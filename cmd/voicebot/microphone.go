@@ -212,7 +212,7 @@ func SelectInputDevice() (string, error) {
 
 	fmt.Print("\n请选择设备序号 (直接回车使用默认设备): ")
 	var input string
-	fmt.Scanln(&input)
+	_, _ = fmt.Scanln(&input)
 
 	if input == "" {
 		return "", nil // 使用默认设备

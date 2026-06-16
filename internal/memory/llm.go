@@ -31,7 +31,7 @@ func (s *llmSummarizer) Summarize(ctx context.Context, turns []Turn) (string, er
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		b.WriteString(fmt.Sprintf("用户: %s\n助手: %s", strings.TrimSpace(turn.UserText), strings.TrimSpace(turn.AssistantText)))
+		fmt.Fprintf(&b, "用户: %s\n助手: %s", strings.TrimSpace(turn.UserText), strings.TrimSpace(turn.AssistantText))
 	}
 	req := llm.Request{
 		Messages: []llm.Message{

@@ -299,7 +299,7 @@ func main() {
 	// Raw _exit syscall bypasses C/C++ library cleanup to avoid
 	// PortAudio CoreAudio thread destructor crash on macOS.
 	// os.Exit() goes through C exit() which triggers C++ atexit handlers.
-	syscall.Syscall(syscall.SYS_EXIT, 0, 0, 0)
+	_, _, _ = syscall.Syscall(syscall.SYS_EXIT, 0, 0, 0)
 }
 
 func toToolsMCPServers(cfgs []config.MCPServerConfig) []tools.MCPServerConfig {

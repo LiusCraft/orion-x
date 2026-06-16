@@ -31,7 +31,7 @@ func (s *TTSStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 		defer close(output)
 		defer func() {
 			if s.ttsActive {
-				s.audioOutPipe.EndTTSStream()
+				_ = s.audioOutPipe.EndTTSStream()
 			}
 		}()
 
@@ -74,7 +74,7 @@ func (s *TTSStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 				case pipeline.MessageTypeInterrupt:
 					// 打断 TTS
 					if s.ttsActive {
-						s.audioOutPipe.Interrupt()
+						_ = s.audioOutPipe.Interrupt()
 						s.ttsActive = false
 					}
 				}
