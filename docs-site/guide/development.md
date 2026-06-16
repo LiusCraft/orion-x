@@ -1,182 +1,108 @@
 # 工具开发
 
-## 工具类型
+当前工具系统由 `internal/tools.Manager` 和 `Registry` 管理。Agent 不区分旧版 query/action 类型，而是把 registry 中的 tool schema 提供给 LLM；LLM 请求工具后，Agent 执行工具并把结果作为 `tool` message 写回 session，再进入下一步 LLM 生成。
 
-Orion-X 支持两种工具类型，决定了工具执行后的处理流程：
+## 工具来源
 
-| 类型 | 说明 | 适用场景 |
-|------|------|----------|
-| query | 工具执行结果返回给 LLM 处理 | 查询天气、搜索、获取时间等 |
-| action | 直接返回预设响应，不经过 LLM | 播放音乐、设置音量、暂停音乐等 |
+| 来源 | 说明 |
+|---|---|
+| 本地工具 | 由 `LocalSpecs()` 返回，当前内置 `getTime` |
+| MCP 工具 | 通过 `tools.mcp` 配置加载，支持 stdio、SSE、streamable |
 
-## 工具开发流程
+## 本地工具结构
 
-### 1. 实现工具函数
-
-在 `internal/tools/` 中创建工具文件：
+本地工具使用 `tools.Spec`：
 
 ```go
-package tools
-
-import (
-    "context"
-    "fmt"
-)
-
-// MyToolFunc 自定义工具函数
-func MyToolFunc(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-    // 获取参数
-    param, ok := args["param"].(string)
-    if !ok {
-        return nil, fmt.Errorf("missing param")
-    }
-
-    // 执行工具逻辑
-    result := fmt.Sprintf("处理结果: %s", param)
-
-    // query 类型返回数据，action 类型返回 nil
-    return result, nil
+type Spec struct {
+    Name         string
+    Description  string
+    Parameters   map[string]any
+    ParallelSafe bool
+    Execute      func(ctx context.Context, arguments json.RawMessage) (Result, error)
 }
 ```
 
-### 2. 注册工具
-
-在工具初始化代码中注册：
+返回值：
 
 ```go
-executor := tools.NewExecutor()
-
-executor.RegisterTool("myTool", myToolFunc)
-executor.RegisterTool("playMusic", playMusicFunc)
+type Result struct {
+    Output string
+    Error  error
+}
 ```
 
-### 3. 配置文件注册
+`Output` 应该是适合写入 LLM tool message 的文本。结构化结果建议编码成 JSON 字符串。
 
-在配置文件中添加 MCP 工具配置：
+## 添加本地工具
+
+在 `internal/tools/manager.go` 的 `LocalSpecs()` 中追加 `Spec`：
+
+```go
+{
+    Name:        "getTime",
+    Description: "获取当前时间",
+    Parameters: map[string]any{
+        "type":       "object",
+        "properties": map[string]any{},
+    },
+    Execute: func(ctx context.Context, args json.RawMessage) (Result, error) {
+        data := map[string]any{
+            "current": time.Now().Format("2006-01-02 15:04:05"),
+        }
+        b, _ := json.Marshal(data)
+        return Result{Output: string(b)}, nil
+    },
+}
+```
+
+参数 schema 会通过 `Registry.Definitions()` 暴露给 LLM provider。工具实现应自行解析 `json.RawMessage` 并返回明确错误。
+
+## 配置 MCP 工具
 
 ```json
 {
   "tools": {
-    "mcp": []
+    "mcp": [
+      {
+        "id": "local-search",
+        "transport": "stdio",
+        "command": "node",
+        "args": ["server.js"],
+        "tool_name_list": ["search"],
+        "timeout_ms": 10000
+      }
+    ]
   }
 }
 ```
 
-## 工具示例
+字段说明：
 
-### Query 类型：获取天气
+| 字段 | 说明 |
+|---|---|
+| `id` | MCP server 唯一标识 |
+| `transport` | `stdio`、`sse` 或 `streamable` |
+| `command` / `args` | stdio server 启动命令 |
+| `endpoint` | sse/streamable server 地址 |
+| `tool_name_list` | 只加载指定工具；为空加载全部 |
+| `timeout_ms` | 工具加载和调用超时 |
 
-```go
-func GetWeatherTool(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-    city, ok := args["city"].(string)
-    if !ok {
-        return nil, fmt.Errorf("missing city parameter")
-    }
+## Agent 调用流程
 
-    // 调用天气 API
-    weather := callWeatherAPI(city)
-
-    // 返回结构化数据，LLM 会将其转换为自然语言
-    return map[string]interface{}{
-        "city":    city,
-        "weather": weather.Condition,
-        "temp":    weather.Temperature,
-    }, nil
-}
+```mermaid
+flowchart TD
+    Request["LLM Chat request"] --> Definitions["tools = registry.Definitions()"]
+    Definitions --> ToolCalls["LLM returns tool_calls"]
+    ToolCalls --> Execute["registry.Execute(ctx, name, rawArgs)"]
+    Execute --> Session["session.Add(RoleTool, result.Output)"]
+    Session --> Summary["next LLM step summarizes result"]
 ```
 
-### Action 类型：播放音乐
+当前 Agent 默认 `maxSteps=2`，适合一次工具调用加一次总结。需要更复杂的多工具链路时，可以通过 `Agent.SetMaxSteps(n)` 调整。
 
-```go
-func PlayMusicTool(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-    song, ok := args["song"].(string)
-    if !ok {
-        return nil, fmt.Errorf("missing song parameter")
-    }
+## 测试建议
 
-    // 执行播放逻辑
-    audioStream := playMusic(song)
-
-    // action 类型返回音频流（可选）
-    return nil, audioStream
-}
-```
-
-MCP 工具通过配置文件加载：
-
-```json
-{
-  "tools": {
-    "mcp": []
-  }
-}
-```
-
-## 工具参数规范
-
-### 参数获取
-
-```go
-// 字符串参数
-name, _ := args["name"].(string)
-
-// 数字参数
-count, _ := args["count"].(float64)
-
-// 布尔参数
-enabled, _ := args["enabled"].(bool)
-```
-
-### 错误处理
-
-```go
-if !ok {
-    return nil, fmt.Errorf("invalid parameter: %s", key)
-}
-```
-
-## LLM 工具调用格式
-
-LLM 需要按照以下格式调用工具：
-
-```
-<tool_call>
-{"name": "getWeather", "arguments": {"city": "北京"}}
-</tool_call>
-```
-
-系统会自动：
-1. 解析工具名称和参数
-2. 调用对应的工具函数
-3. query 类型：将结果返回给 LLM 继续处理
-4. action 类型：直接播放预设响应
-
-## 测试工具
-
-```go
-func TestMyTool(t *testing.T) {
-    ctx := context.Background()
-    args := map[string]interface{}{
-        "param": "test",
-    }
-
-    result, err := MyToolFunc(ctx, args)
-    assert.NoError(t, err)
-    assert.NotNil(t, result)
-}
-```
-
-## 开发规范
-
-本项目遵循 `AGENTS.md` 中定义的开发规范：
-
-1. **自上而下的架构设计** - 优先定义接口，后实现细节
-2. **单元测试强制覆盖** - 公共 API 必须有测试
-3. **模块职责分明** - 单一职责原则
-4. **设计文档优先** - 实现前先更新文档
-5. **主动沟通确认** - 不确定时主动询问
-
-## 相关文档
-
-- [配置管理](/guide/configuration) - 工具配置说明
-- [系统架构](/architecture/overview) - 架构设计
+- 本地工具测试直接构造 `json.RawMessage`
+- MCP 工具测试优先用小型 stdio server
+- Agent 工具流测试使用 inline mock，不使用 mock generator

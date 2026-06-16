@@ -1,219 +1,162 @@
-# 语音机器人模块拆分文档
+# 模块说明
 
-## 已创建的模块结构
+本文按当前代码结构说明各模块职责。`cmd/voicebot` 是当前唯一可运行产品入口，`internal/*` 包提供可复用能力。
 
-```
-internal/
-├── agent/             # 通用 Agent 模块
-│   ├── agent.go # Agent接口
-│   ├── runtime.go     # Agent运行主流程
-│   ├── output_metadata_node.go # 输出元数据提取
-│   └── events.go      # Agent事件定义
-├── audio/             # 音频处理模块
-│   ├── mixer.go       # AudioMixer接口
-│   ├── outpipe.go     # AudioOutPipe接口
-│   └── inpipe.go      # AudioInPipe接口
-├── text/              # 文本处理模块
-│   ├── segmenter.go   # 分句器（已存在）
-│   └── markdown_filter.go # Markdown过滤器
-├── tools/             # 工具执行模块
-│   ├── executor.go    # ToolExecutor接口
-│   ├── music.go       # 音乐工具示例
-│   └── weather.go     # 天气工具示例
-├── config/            # 配置管理模块
-│   ├── config.go       # 配置结构与加载
-├── asr/               # ASR模块（已存在）
-│   ├── recognizer.go
-│   └── dashscope.go
-└── tts/               # TTS模块（已存在）
-    ├── tts.go
-    └── dashscope.go
-```
+## 入口层
 
-## 各模块接口概览
+### `cmd/voicebot`
 
-### 1. agent 包
+职责：
 
-#### Agent（具体类型）
-- `Process(ctx context.Context, text string) (<-chan AgentEvent, error)`
+- 读取 `data/voicebot.json` 或 `-config` 指定的配置文件
+- 初始化 zap logging、PortAudio、ToolManager、Memory Service、Agent
+- 创建本地麦克风输入和 PortAudio 播放 sink
+- 组装 `ASRStage -> AgentStage -> TTSStage`
+- 处理 `SIGINT`、`SIGTERM` 并关闭 pipeline
 
-#### Agent Runtime
-- `Process(ctx context.Context, text string) (<-chan AgentEvent, error)`
-- 负责 LLM 流式输出、工具调用请求事件、工具结果总结
+当前入口是本地 CLI harness。真实产品可以在同一批 internal 包上扩展 WebSocket、GUI 或其他交互通道。
 
-#### OutputMetadataNode (接口)
-- `Process(text string) OutputMetadata`
-- 在 Orchestrator 输出链路中从文本提取 `[EMO:xxx]` 标签
+## Pipeline
 
-#### 文本清洗
-- `text.FilterMarkdown(text string) string`
-- `agent.TextFilterNode.Process(text string) string`
-- `TextFilterNode` 在 Orchestrator 进入 TTS 前编排 Markdown 清洗与语音情绪标签移除
+### `internal/pipeline`
 
-### 3. audio 包
+核心类型：
 
-#### AudioMixer (接口)
-- `AddTTSStream(audio io.Reader)`
-- `AddResourceStream(audio io.Reader)`
-- `RemoveTTSStream()`
-- `RemoveResourceStream()`
-- `SetTTSVolume(volume float64)`
-- `SetResourceVolume(volume float64)`
-- `OnTTSStarted()` - 资源音频自动降为50%
-- `OnTTSFinished()` - 资源音频恢复正常
-- `SetSink(sink AudioSink)`
-- `Start() error`, `Stop() error`
-
-#### AudioSink (接口)
-- `Start(ctx context.Context, format AudioFormat) error`
-- `WritePCM(samples []int16) error`
-- `Stop() error`
-
-#### AudioOutPipe (接口)
-- `Start(ctx context.Context) error`
-- `Stop() error`
-- `PlayTTS(text string, emotion string) error`
-- `PlayResource(audio io.Reader) error`
-- `Interrupt() error`
-- `SetMixer(mixer AudioMixer)`
-
-**实现细节**：
-- 集成 `tts.DashScopeProvider` 进行文本到音频的转换
-- 根据情绪映射到不同的音色
-- 音色映射表：
-  - `happy` → `longanyang`
-  - `sad` → `zhichu`
-  - `angry` → `zhimeng`
-  - `calm` → `longxiaochun`
-  - `excited` → `longanyang`
-  - `default` → `longanyang`
-- 使用 `AudioMixer` 管理音频流播放
-- 支持中断功能（清空 TTS 流和资源音频）
-- 并发安全（使用 `sync.Mutex`）
-
-#### AudioInPipe (接口)
-- `Start(ctx context.Context) error`
-- `Stop() error`
-- `SendAudio(audio []byte) error`
-- `OnASRResult(handler func(text string, isFinal bool))`
-- `OnUserSpeakingDetected(handler func())`
-
-### 4. text 包
-
-#### 文本清洗函数
-- `FilterMarkdown(text string) string`
-- `RemoveEmotionTags(text string) string`
-
-### 5. tools 包
-
-#### ToolExecutor (接口)
-- `Execute(tool string, args map[string]interface{}) (result interface{}, audio io.Reader, error)`
-- `RegisterTool(name string, executor ToolExecutorFunc)`
-
-#### 工具示例
-- `PlayMusicTool` - 播放音乐，返回音频流
-- `PauseMusicTool` - 暂停音乐
-- `SetVolumeTool` - 设置音量
-- `GetWeatherTool` - 获取天气信息
-- `GetTimeTool` - 获取当前时间
-- `SearchTool` - 搜索
-
-### 6. config 包
-
-#### AppConfig
-- 统一管理日志、ASR、TTS、LLM、音频与工具配置
-- 支持从配置文件加载并与环境变量合并
-
-## 关键设计点
-
-### 1. 工具调用流程
-
-#### 直接播放类工具（如播放音乐）
-```
-用户输入 → 意图识别 → 识别工具 → 生成固定回复
-  → 调用工具 → 工具返回资源音频 → TTS播报回复
+```go
+type Stage interface {
+    Name() string
+    Process(ctx context.Context, input <-chan Message) <-chan Message
+}
 ```
 
-#### 工具结果总结（如查询天气）
-```
-用户输入 → 意图识别 → 识别工具 → 调用工具获取数据
-  → LLM总结数据 → 情绪标注 → Markdown过滤 → TTS播放
-```
+`pipeline.Message` 是 Stage 间传递的数据单元，主要类型包括：
 
-### 2. 音频混音逻辑
+- `text_partial`：ASR 中间结果
+- `text_chunk`：ASR 最终文本或 Agent 文本增量
+- `interrupt`：用户插话
+- `finished`：Agent 完成
+- `error`：错误消息
+- `tts_start` / `tts_stop`：TTS 播放状态
 
-```
-TTS音频 ────┐
-           ├─→ AudioMixer → 播放
-资源音频 ──┘
+`NewBuilder()` 当前构建线性 pipeline。包内也保留 DAG 相关实现和测试，供后续复杂拓扑使用。
 
-混音规则:
-- TTS播放时: 资源音频降为50%音量
-- TTS停止时: 资源音频恢复100%音量
-```
+### `internal/pipeline/stages`
 
-### 3. 情绪标注格式
+| Stage | 依赖 | 说明 |
+|---|---|---|
+| `ASRStage` | `audio.InPipe` | source stage，启动音频输入和 ASR，输出文本与打断消息 |
+| `AgentStage` | `agent.Agent`、`session.Session` | 维护对话 session，运行 Agent，支持被上游新输入取消 |
+| `TTSStage` | `audio.AudioOutPipe` | 接收 Agent 文本流，管理 TTS stream 的 begin/write/end/interrupt |
 
-```
-回答内容 [EMO:emotion]
-示例:
-"北京今天天气不错，晴朗，温度25度 [EMO:happy]"
-"很抱歉，我没有找到相关信息 [EMO:sad]"
-```
+## Agent 与 LLM
 
-### 4. Markdown过滤
+### `internal/agent`
 
-支持过滤:
-- 加粗: `**text**`
-- 代码块: ````code````
-- 行内代码: `` `code` ``
-- 链接: `[text](url)`
-- 图片: `![alt](url)`
-- 标题: `## Heading`
+Agent 负责：
 
-### 5. 状态转换
+- 组装 session messages 和 memory context
+- 调用 LLM provider 的 `Chat`
+- 流式输出新增文本 delta
+- 收集并执行 tool calls
+- 将 assistant/tool message 写回 session
+- 控制多 step 工具调用循环
 
-```
-Idle ─────→ Processing ───→ Speaking
-  ↑            ↓               ↑
-  └────Listening←───────────────┘
+当前事件只有两类：
+
+```go
+type TextChunkEvent struct { Chunk string }
+type FinishedEvent struct { Error error }
 ```
 
-## 下一步工作
+### `internal/llm`
 
-### 已完成功能
+定义 provider 无关的 LLM 类型，包括 `Message`、`Request`、`ToolDefinition`、`ToolCall`、`Stream`。当前 provider 是 OpenAI-compatible，注册在 `internal/llm/provider/openai`。
 
-1. **agent 包**
-    - [x] `Agent` 完整实现
-    - [x] 集成 `internal/agent`、`internal/tools` 与 `internal/provider/llm` 的工具调用逻辑
-    - [x] 启用流式LLM输出
-    - [x] 集成 `OutputMetadataNode` 和 `internal/text` 文本清洗
+## 工具
 
-3. **audio 包**
-    - [x] `AudioMixer` 实现（音频混音）
-    - [x] `AudioOutPipe` 实现（基于现有TTS）
-    - [x] `AudioInPipe` 实现（基于现有ASR）
+### `internal/tools`
 
-4. **text 包**
-    - [x] Markdown 与语音文本清洗完整实现
+`Manager` 会先注册本地工具，再加载配置里的 MCP server。
 
-5. **tools 包**
-    - 实现真实工具（如天气API调用）
-    - 工具注册和发现机制
+当前本地工具：
 
-### 需要集成的现有模块
+| 工具 | 说明 |
+|---|---|
+| `getTime` | 返回当前时间、星期和 Unix timestamp |
 
-- `internal/agent/*` - Agent 与 LLM 工具调用编排
-- `internal/tools/*` - 工具加载、注册与执行
-- `internal/provider/llm/*` - LLM provider 模块
-- `internal/provider/asr/*` - ASR provider 模块
-- `internal/provider/tts/*` - TTS provider 模块
-- `internal/text/segmenter.go` - 分句器
+核心注册结构：
 
-### 扩展功能
+```go
+type Spec struct {
+    Name        string
+    Description string
+    Parameters  map[string]any
+    Execute     func(ctx context.Context, arguments json.RawMessage) (Result, error)
+}
+```
 
-- 音色映射表（情绪→音色）
-- VAD监听实现
-- 音频播放器集成
-- 配置文件支持
-- 日志和监控
+MCP server 支持 `stdio`、`sse`、`streamable` transport。可以用 `tool_name_list` 限制加载的工具集合。
+
+## 音频
+
+### `internal/audio`
+
+主要边界：
+
+- `AudioSource`：抽象音频输入源，当前由 `cmd/voicebot` 的 microphone 实现
+- `InPipe`：读取音频、VAD 切段、调用 ASR recognizer
+- `AudioOutPipe`：管理 TTS 输出、播放 sink 和中断
+- `TTSPipeline`：异步 TTS 队列、buffer、播放协调
+- `AudioSink`：抽象播放目标，当前由 PortAudio sink 实现
+- `resampler`：线性插值重采样
+- `vad`：Silero VAD ONNX 模型封装
+
+当前没有单独的全局 AudioMixer 模块；播放链路以 TTS 输出为主，资源音频接口保留在 `AudioOutPipe` 边界上。
+
+## Provider
+
+### `internal/provider/asr`
+
+ASR 使用 factory registration。当前实际实现是阿里云 DashScope realtime ASR。
+
+### `internal/provider/tts`
+
+TTS 使用 factory registration。当前实际实现是阿里云 DashScope CosyVoice，支持 voice、sample rate、volume、rate、pitch、SSML、data inspection 等配置。
+
+## 会话与记忆
+
+### `internal/session`
+
+保存当前对话历史，支持 user、assistant、tool 角色和 tool call 元数据。`AgentStage` 将 ASR 最终文本写入 session，Agent 将 LLM 回复和工具结果继续追加。
+
+### `internal/memory`
+
+提供三种模式：
+
+- `none`：不构建额外 memory context
+- `session`：基于最近轮次和摘要构建上下文
+- `long_term`：使用 SQLite 存储 turn 和抽取出的长期记忆，并通过 FTS 查询注入 prompt
+
+## 文本处理
+
+### `internal/text`
+
+包含：
+
+- `segmenter.go`：文本分句
+- `markdown_filter.go`：过滤 Markdown 结构，避免 TTS 读出格式符
+- `emotion_tags.go`：处理 `[EMO:xxx]` 语音情绪标签
+
+当前主 pipeline 走流式 TTS chunk，文本处理能力主要供 Agent 输出和 TTS 前处理扩展复用。
+
+## 配置与日志
+
+### `internal/config`
+
+负责 JSON 配置加载、默认值、环境变量覆盖、provider 类型校验、MCP 配置校验和 memory 配置校验。
+
+默认路径是 `data/voicebot.json`，示例文件是项目根目录的 `voicebot.example.json`。
+
+### `internal/logging`
+
+zap wrapper。业务代码应使用 `logging.Infof/Errorf/Warnf/Debugf` 等封装，不直接使用标准库 `log`。

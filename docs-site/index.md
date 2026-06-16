@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Orion-X
-  text: 智能语音机器人系统
-  tagline: 基于 Go 的实时语音交互平台
+  text: 实时语音 Agent 实验工程
+  tagline: 当前版本以 CLI VoiceBot 为入口，验证 ASR -> Agent -> TTS 的端到端语音交互链路。
   actions:
     - theme: brand
       text: 快速开始
@@ -15,21 +15,21 @@ hero:
 
 features:
   - icon: ⚡
-    title: 实时语音交互
-    details: 低延迟的语音输入输出，支持语音活动检测 (VAD)
-  - icon: 🎯
-    title: 智能打断
-    details: 支持用户在 AI 播放时随时打断
-  - icon: 😊
-    title: 情感语音合成
-    details: 根据对话内容自动切换情感音色
+    title: 线性 Pipeline
+    details: 通过 pipeline.NewBuilder() 组装 ASR、Agent、TTS Stage，消息在统一 Message 总线上流转。
+  - icon: 🎙️
+    title: 实时音频输入
+    details: PortAudio 麦克风输入接入 AudioInPipe，支持 Silero VAD 和阿里云 DashScope 实时 ASR。
+  - icon: 🧠
+    title: LLM Agent
+    details: 使用 OpenAI-compatible provider，支持流式输出和工具调用循环。
   - icon: 🔧
-    title: 工具调用
-    details: 支持本地工具和 MCP 工具扩展
-  - icon: 🎵
-    title: 音频混音
-    details: 双通道音频混音，支持背景音乐播放
-  - icon: 🚀
-    title: 异步 TTS Pipeline
-    details: 异步处理文本到语音转换，预缓冲减少播放间隙
+    title: 工具扩展
+    details: 内置 getTime 工具，并可通过 MCP stdio、SSE、streamable transport 加载外部工具。
+  - icon: 💾
+    title: 记忆与会话
+    details: Session 负责对话轮次，Memory Service 支持 none、session、long_term 三种模式。
+  - icon: 🔊
+    title: 异步 TTS 输出
+    details: AudioOutPipe 管理 TTS 流和播放 sink，异步 TTS Pipeline 降低句间等待。
 ---

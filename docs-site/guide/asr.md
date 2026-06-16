@@ -12,30 +12,12 @@
 
 ## 架构设计
 
-```
-┌─────────────┐
-│   麦克风     │  16kHz 单声道 PCM
-└──────┬──────┘
-       │
-       ▼
-┌──────────────────┐
-│  音频采集层      │  PortAudio (gordonklaus/portaudio)
-└──────┬───────────┘
-       │
-       ▼
-┌──────────────────┐
-│  音频处理层      │  帧切分 (3200 samples/帧)
-└──────┬───────────┘
-       │
-       ▼
-┌────────────────────┐
-│  ASR 流式调用层    │  DashScope WebSocket (gorilla/websocket)
-└──────┬─────────────┘
-       │
-       ▼
-┌──────────────────┐
-│  文本输出层      │  partial/final 结果回调
-└──────────────────┘
+```mermaid
+flowchart TD
+    Mic["麦克风<br/>16kHz 单声道 PCM"] --> Capture["音频采集层<br/>PortAudio"]
+    Capture --> Frame["音频处理层<br/>帧切分 3200 samples/帧"]
+    Frame --> ASR["ASR 流式调用层<br/>DashScope WebSocket"]
+    ASR --> Text["文本输出层<br/>partial/final 结果回调"]
 ```
 
 ## 项目结构
@@ -147,24 +129,20 @@ rec.Finish(ctx)
 
 ### WebSocket 交互时序
 
-```
-客户端                服务端
-  |                      |
-  |--- 连接 ------------->|
-  |                      |
-  |-- run-task --------->|
-  |<-- task-started ----|
-  |                      |
-  |--[音频帧]---------->|
-  |<-- result-generated-| (partial)
-  |                      |
-  |--[音频帧]---------->|
-  |<-- result-generated-| (final)
-  |                      |
-  |-- finish-task ------>|
-  |<-- task-finished ---|
-  |                      |
-  |--- 关连 ----------->|
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant Server as 服务端
+    Client->>Server: 连接
+    Client->>Server: run-task
+    Server-->>Client: task-started
+    Client->>Server: 音频帧
+    Server-->>Client: result-generated (partial)
+    Client->>Server: 音频帧
+    Server-->>Client: result-generated (final)
+    Client->>Server: finish-task
+    Server-->>Client: task-finished
+    Client->>Server: 关闭连接
 ```
 
 ### 断句策略

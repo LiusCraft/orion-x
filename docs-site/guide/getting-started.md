@@ -3,86 +3,73 @@
 ## 环境要求
 
 - Go 1.24.4+
-- PortAudio 库 (音频 I/O)
+- PortAudio
+- ONNX Runtime（macOS 下 `make build` 需要）
 
-## 安装 PortAudio
+## 安装依赖
 
 ### macOS
 
 ```bash
-brew install portaudio
+brew install portaudio onnxruntime
 ```
 
-### Ubuntu/Debian
+### Ubuntu / Debian
 
 ```bash
 sudo apt-get install libportaudio2
 ```
 
-### Windows
+## 准备配置
 
-下载并安装 [PortAudio](http://www.portaudio.com/download.html)
-
-## 克隆项目
+复制示例配置：
 
 ```bash
-git clone https://github.com/liuscraft/orion-x.git
-cd orion-x
+cp voicebot.example.json data/voicebot.json
 ```
 
-## 配置
+填入以下密钥：
 
-### 方式一：配置文件（推荐）
+- `provider.asr.aliyun.api_key`
+- `provider.tts.aliyun.api_key`
+- `provider.llm.openai.api_key`
 
-复制示例配置文件并填入你的 API 密钥：
+也可以使用环境变量覆盖：
 
 ```bash
-cp config.example.json data/config.json
+export DASHSCOPE_API_KEY=...
+export ZHIPU_API_KEY=...
+export LOG_LEVEL=debug
 ```
-
-编辑 `data/config.json`，填入：
-- 阿里云 Dashscope API Key (ASR/TTS)
-- 智谱 AI API Key (LLM)
-
-### 方式二：环境变量
-
-```bash
-export DASHSCOPE_API_KEY=your_dashscope_api_key
-export ZHIPU_API_KEY=your_zhipu_api_key
-```
-
-环境变量会覆盖配置文件中的值。
 
 ## 运行
 
 ```bash
-go run main.go
+make run-voicebot
 ```
 
-### 运行参数
+或手动构建：
 
 ```bash
-# 指定配置文件
-go run main.go -config /path/to/config.json
+GOTOOLCHAIN=$(go env GOTOOLCHAIN) CGO_CFLAGS="-I$(brew --prefix)/include/onnxruntime" CGO_LDFLAGS="-L$(brew --prefix)/lib" go build -o bin/voicebot ./cmd/voicebot
+```
 
-# 设置日志级别
-LOG_LEVEL=debug go run main.go
+然后执行：
+
+```bash
+./bin/voicebot -config data/voicebot.json
 ```
 
 ## 测试
 
 ```bash
-# 运行所有测试
-go test ./...
-
-# 运行特定模块测试
-go test ./internal/agent/
-
-# 查看测试覆盖率
-go test -cover ./...
+make test
+go vet ./...
 ```
 
-## 相关文档
+## 入口说明
 
-- [配置管理](/guide/configuration) - 详细配置说明
-- [工具开发](/guide/development) - 工具开发指南
+- 当前产品入口是 `cmd/voicebot`
+- 运行时流程是 `ASR -> Agent -> TTS`
+- 工具调用走 `internal/tools.Manager`
+- 记忆能力走 `internal/memory.Service`
