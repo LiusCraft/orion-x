@@ -72,10 +72,13 @@ func TestPipelineBasic(t *testing.T) {
 	}
 	defer func() { _ = pipeline.Stop() }()
 
-	// 发送消息
+	// 发送消息并等待 goroutine 完成
+	done := make(chan struct{})
 	go func() {
-		pipeline.Input() <- NewMessage(MessageTypeTextChunk, "input")
+		defer close(done)
+		pipeline.Input() <- NewMessage(MessageTypeTextChunk, "test")
 	}()
+	<-done
 
 	// 接收输出
 	msg := <-pipeline.Output()
@@ -117,10 +120,19 @@ func TestPipelineInterrupt(t *testing.T) {
 	}
 	defer func() { _ = pipeline.Stop() }()
 
-	// 发送消息
+	// 发送消息并等待 goroutine 完成
+	msgSent := make(chan struct{})
 	go func() {
 		pipeline.Input() <- NewMessage(MessageTypeTextChunk, "test")
+		close(msgSent)
 	}()
+
+	// 确保消息已发送
+	select {
+	case <-msgSent:
+	case <-time.After(1 * time.Second):
+		t.Fatal("message not sent before timeout")
+	}
 
 	// 立即打断
 	time.Sleep(10 * time.Millisecond)

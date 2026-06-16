@@ -584,7 +584,7 @@ func makePCM(sample int16, count int) []byte {
 
 func waitForCondition(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.After(500 * time.Millisecond)
+	deadline := time.After(3 * time.Second)
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	for {

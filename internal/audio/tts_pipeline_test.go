@@ -633,15 +633,20 @@ func TestTTSPipelinePlaybackOrder(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// 验证播放顺序
+	playedMu.Lock()
 	if len(playedOrder) != len(texts) {
+		playedMu.Unlock()
 		t.Fatalf("Expected %d items played, got %d", len(texts), len(playedOrder))
 	}
 
 	for i, text := range texts {
 		if playedOrder[i] != text {
+			playedMu.Unlock()
 			t.Errorf("Expected order[%d] = %q, got %q", i, text, playedOrder[i])
+			return
 		}
 	}
+	playedMu.Unlock()
 
 	t.Logf("Playback order verified: %v", playedOrder)
 }

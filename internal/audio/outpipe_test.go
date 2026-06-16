@@ -181,8 +181,8 @@ func TestOutPipe_PlayResource(t *testing.T) {
 	}
 
 	// 设置 mixer
-
-	pipe.SetSink(nil)
+	sink := &noopAudioSink{started: make(chan struct{})}
+	pipe.SetSink(sink)
 
 	// 现在应该成功
 	reader := newMockAudioReader()
@@ -251,4 +251,21 @@ func TestOutPipe_MultipleInterrupts(t *testing.T) {
 	if stats.TotalInterrupts != 5 {
 		t.Errorf("Expected TotalInterrupts=5, got %d", stats.TotalInterrupts)
 	}
+}
+
+type noopAudioSink struct {
+	started chan struct{}
+}
+
+func (s *noopAudioSink) Start(ctx context.Context, format AudioFormat) error {
+	close(s.started)
+	return nil
+}
+
+func (s *noopAudioSink) WritePCM(samples []int16) error {
+	return nil
+}
+
+func (s *noopAudioSink) Stop() error {
+	return nil
 }

@@ -278,7 +278,8 @@ func (m *MicrophoneSource) Read(ctx context.Context) ([]byte, error) {
 
 	select {
 	case <-ctx.Done():
-		<-readErr // 等待内部 goroutine 完成（由 Close() 负责 abort 流），确保 Pa_ReadStream 已退出
+		m.abortStream("context cancelled")
+		<-readErr
 		return nil, ctx.Err()
 	case <-m.closeCh:
 		<-readErr // 等待内部 goroutine 完成（由 Close() 负责 abort 流），确保 Pa_ReadStream 已退出
