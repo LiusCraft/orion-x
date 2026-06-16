@@ -1,9 +1,34 @@
 import { defineConfig } from 'vitepress'
 
+function escapeHtml(value) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 export default defineConfig({
   title: 'Orion-X',
   description: '智能语音机器人系统 - 基于 Go 的实时语音交互平台',
   base: '/orion-x/',
+
+  markdown: {
+    config(md) {
+      const defaultFence = md.renderer.rules.fence
+
+      md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+        const token = tokens[idx]
+        const info = token.info.trim()
+
+        if (info === 'mermaid') {
+          return `<MermaidChart code="${escapeHtml(token.content)}" />`
+        }
+
+        return defaultFence(tokens, idx, options, env, self)
+      }
+    }
+  },
 
   themeConfig: {
     nav: [

@@ -1,0 +1,32 @@
+.mermaid-chart {
+  margin: 24px 0;
+  padding: 16px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+  overflow-x: auto;
+}
+
+.mermaid-chart__canvas {
+  min-width: 320px;
+}
+
+.mermaid-chart__canvas svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mermaid-chart__source {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--vp-c-text-2);
+}
+
+.mermaid-chart__error {
+  margin: 0;
+  color: var(--vp-c-danger-1);
+  font-size: 14px;
+  line-height: 1.6;
+}
