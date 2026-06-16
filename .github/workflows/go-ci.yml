@@ -18,6 +18,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 portaudio19-dev
+
       - name: install onnxruntime
         run: |
           curl -sSL https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-1.22.0.tgz -o onnxruntime.tgz
@@ -32,4 +37,4 @@ jobs:
           version: latest
 
       - name: go test
-        run: go test -race -count=1 $(go list ./... | grep -v 'cmd/voicebot')
+        run: go test -race -count=1 ./...
