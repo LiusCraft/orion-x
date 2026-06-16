@@ -438,7 +438,8 @@ func TestInPipeVADSegmentsAudioBeforeASR(t *testing.T) {
 
 	mock := &mockRecognizer{}
 	pipe := newTestInPipe(config, mock)
-	pipe.segmenter = vad.NewSegmenter(&staticVAD{detected: true}, config.SampleRate, config.VADSpeechPadMs)
+	vadDetector := &staticVAD{detected: true}
+	pipe.segmenter = vad.NewSegmenter(vadDetector, config.SampleRate, config.VADSpeechPadMs)
 	pipe.vadEnabled = true
 
 	if err := pipe.Start(context.Background()); err != nil {
@@ -454,8 +455,8 @@ func TestInPipeVADSegmentsAudioBeforeASR(t *testing.T) {
 		t.Fatalf("expected active speech to be buffered before ASR, got start=%d send=%d finish=%d", start, send, finish)
 	}
 
-	_ = pipe.segmenter.Close()
-	pipe.segmenter = vad.NewSegmenter(&staticVAD{detected: false}, config.SampleRate, config.VADSpeechPadMs)
+	// 将 VAD 改为非语音以触发语音段完成
+	vadDetector.detected = false
 	if err := pipe.SendAudio(makePCM(0, 160)); err != nil {
 		t.Fatalf("SendAudio silence failed: %v", err)
 	}
@@ -537,7 +538,8 @@ func TestInPipeVADIncludesSpeechPadAndFirstSpeechFrame(t *testing.T) {
 
 	mock := &mockRecognizer{}
 	pipe := newTestInPipe(config, mock)
-	pipe.segmenter = vad.NewSegmenter(&staticVAD{detected: false}, config.SampleRate, config.VADSpeechPadMs)
+	vadDetector := &staticVAD{detected: false}
+	pipe.segmenter = vad.NewSegmenter(vadDetector, config.SampleRate, config.VADSpeechPadMs)
 	pipe.vadEnabled = true
 
 	if err := pipe.Start(context.Background()); err != nil {
@@ -549,15 +551,15 @@ func TestInPipeVADIncludesSpeechPadAndFirstSpeechFrame(t *testing.T) {
 		t.Fatalf("SendAudio silence failed: %v", err)
 	}
 
-	_ = pipe.segmenter.Close()
-	pipe.segmenter = vad.NewSegmenter(&staticVAD{detected: true}, config.SampleRate, config.VADSpeechPadMs)
+	// 将 VAD 改为检测到语音
+	vadDetector.detected = true
 	speech := makePCM(12000, 160)
 	if err := pipe.SendAudio(speech); err != nil {
 		t.Fatalf("SendAudio speech failed: %v", err)
 	}
 
-	_ = pipe.segmenter.Close()
-	pipe.segmenter = vad.NewSegmenter(&staticVAD{detected: false}, config.SampleRate, config.VADSpeechPadMs)
+	// 将 VAD 改回非语音以触发语音段完成
+	vadDetector.detected = false
 	if err := pipe.SendAudio(makePCM(0, 160)); err != nil {
 		t.Fatalf("SendAudio ending silence failed: %v", err)
 	}

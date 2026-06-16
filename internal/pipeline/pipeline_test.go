@@ -82,8 +82,8 @@ func TestPipelineBasic(t *testing.T) {
 
 	// 接收输出
 	msg := <-pipeline.Output()
-	if msg.Payload != "input-stage1-stage2" {
-		t.Errorf("Expected 'input-stage1-stage2', got '%s'", msg.Payload)
+	if msg.Payload != "test-stage1-stage2" {
+		t.Errorf("Expected 'test-stage1-stage2', got '%s'", msg.Payload)
 	}
 }
 
