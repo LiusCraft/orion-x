@@ -1,0 +1,35 @@
+name: Go CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: install onnxruntime
+        run: |
+          curl -sSL https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-1.22.0.tgz -o onnxruntime.tgz
+          tar xzf onnxruntime.tgz
+          echo "CGO_CFLAGS=-I$(pwd)/onnxruntime-linux-x64-1.22.0/include" >> $GITHUB_ENV
+          echo "CGO_LDFLAGS=-L$(pwd)/onnxruntime-linux-x64-1.22.0/lib -lonnxruntime" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$(pwd)/onnxruntime-linux-x64-1.22.0/lib" >> $GITHUB_ENV
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+
+      - name: go test
+        run: go test -race -count=1 $(go list ./... | grep -v 'cmd/voicebot')
