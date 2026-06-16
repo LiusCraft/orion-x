@@ -1,74 +1,39 @@
 # VoiceBot
 
-语音机器人主程序，集成所有模块实现完整的语音对话功能。
+语音机器人测试程序，用于快速验证语音 Agent Pipeline 能力。
 
-## 环境变量
+> 这是开发调试用途的 CLI 入口，实际产品可能通过 WebSocket、GUI 等渠道交互。
 
-运行前需要设置以下环境变量：
+## 配置
+
+复制 `voicebot.example.json` 到 `data/voicebot.json`，填入 API 密钥后直接运行。
 
 ```bash
-export DASHSCOPE_API_KEY=your_api_key_here
-# 或
-export ZHIPU_API_KEY=your_api_key_here
+make run-voicebot
 ```
 
 ## 构建
 
 ```bash
-go build -o voicebot ./cmd/voicebot
+make build
+# 或手动：
+# GOTOOLCHAIN=$(go env GOTOOLCHAIN) CGO_CFLAGS="-I$(brew --prefix)/include/onnxruntime" CGO_LDFLAGS="-L$(brew --prefix)/lib" go build -o bin/voicebot ./cmd/voicebot
 ```
 
-## 运行
-
-```bash
-./voicebot
-```
-
-## 功能特性
-
-- 语音识别 (ASR) - 实时将语音转换为文本
-- 语音合成 (TTS) - 将文本转换为语音输出
-- 对话管理 - 管理对话状态和流程
-- 工具调用 - 支持获取时间、天气等工具
-- 情绪标注 - 根据对话情绪调整音色
-- 音频混音 - 支持 TTS 和背景音频混合
-- 中断机制 - 检测用户说话时自动中断当前播放
-- 多音频源支持 - 支持麦克风、WebSocket、文件等多种输入源
-
-## 架构
+## 管线
 
 ```
-麦克风 AudioSource
-        ↓
-AudioInPipe (ASR) → Orchestrator → Agent (LLM) → AudioOutPipe (TTS) → 扬声器
-                                                                 ↓
-                                                            ToolExecutor
+AudioSource (麦克风) → AudioInPipe (VAD→ASR) → Pipeline → Agent (LLM+Tool) → AudioOutPipe (TTS) → AudioSink (扬声器)
 ```
 
-## 状态机
+Pipeline 阶段：`ASR → Agent → TTS`
 
-- Idle: 空闲状态
-- Listening: 监听中
-- Processing: 处理中
-- Speaking: 播放中
+## 本地工具
 
-## 已实现的工具
+- `getTime`: 获取当前时间
 
-- getTime: 获取当前时间
-- getWeather: 获取天气信息
-
-## 日志说明
-
-程序运行时会输出详细的日志信息：
-
-- 组件启动/停止
-- 状态转换
-- ASR 识别结果
-- LLM 生成内容
-- 工具调用和执行
-- TTS 播放状态
-- 情绪变化
+（更多工具通过 MCP 协议扩展）
 
 ## macOS 权限
 
-首次运行时需要在"系统设置 → 隐私与安全性 → 麦克风"中授权 Terminal 或 VS Code。
+首次运行时需在"系统设置 → 隐私与安全性 → 麦克风"中授权终端。

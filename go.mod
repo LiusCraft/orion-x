@@ -5,7 +5,6 @@ go 1.26
 require (
 	github.com/gordonklaus/portaudio v0.0.0-20250206071425-98a94950218b
 	github.com/gorilla/websocket v1.5.3
-	github.com/hraban/opus v0.0.0-20251117090126-c76ea7e21bf3
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/openai/openai-go/v3 v3.39.0
 	go.uber.org/zap v1.27.0

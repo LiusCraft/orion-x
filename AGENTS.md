@@ -1,303 +1,52 @@
-Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
+# AGENTS.md
 
-# AGENTS.md - AI 开发规范
+## Build & run
 
-## 开发原则
-
-### 1. 自上而下的架构设计
-- 优先从用户视角和业务需求出发，先设计高层接口和流程
-- 使用 Mock 或接口定义验证架构可行性
-- 确定接口后，再逐步实现底层细节
-- 避免过早陷入实现细节，先保证整体流程可运行
-
-**示例**：
-```go
-// 先定义接口
-type Orchestrator interface {
-    Start(ctx context.Context) error
-    OnASRFinal(text string)
-}
-
-// 再实现具体逻辑
-type orchestratorImpl struct { ... }
-```
-
-### 2. 单元测试强制覆盖
-- 所有公共 API 必须有单元测试
-- 边界条件、错误处理必须有测试覆盖
-- 复杂逻辑需要集成测试
-- 测试失败时，优先修复代码而非忽略测试
-
-**测试要求**：
-```go
-func TestOrchestrator(t *testing.T) {
-    tests := []struct {
-        name     string
-        input    Input
-        expected Expected
-    }{ ... }
-
-    for _, tt := range tests { ... }
-}
-```
-
-### 3. 模块职责分明
-- 每个模块只负责单一职责
-- 避免功能混乱，如：Orchestrator 不应包含音频编解码逻辑
-- 接口设计遵循最小暴露原则
-- 依赖关系清晰，避免循环依赖
-
-**模块职责示例**：
-- `Orchestrator`: 状态管理、事件路由、组件协调
-- `Agent`: LLM 调用、工具识别、工具结果总结
-- `AudioMixer`: 音频混合、音量控制
-- `ToolExecutor`: 工具执行、结果返回
-
-### 4. 设计文档优先
-- 重要架构设计和新模块开发前需要设计文档
-- 简单 bug 修复、代码优化等无需单独文档
-- 文档应包含：接口定义、流程图、状态机、依赖关系
-- 代码实现后需同步更新文档
-
-**文档分级原则**：
-- **需要详细文档**：新模块、架构变更、复杂功能、API 设计
-- **简要说明即可**：bug 修复、性能优化、日志调整、小重构
-- **无需文档**：代码格式化、注释调整、变量重命名
-
-**文档模块化原则**：
-- 每个文档专注于自己的职责，避免重复描述其他模块的详细内容
-- 对依赖模块只需说明依赖的接口/功能，详细实现引用对应文档
-- 使用链接引用其他设计文档，遵循 DRY（Don't Repeat Yourself）原则
-- 示例：`AudioInPipe` 设计文档只说明依赖 `AudioSource` 接口，详细实现引用 `audio-source-design.md`
-
-**文档检查清单**（仅适用于需要详细文档的改动）：
-- [ ] 接口定义是否完整
-- [ ] 状态转换是否清晰
-- [ ] 数据流是否正确
-- [ ] 错误处理是否考虑
-- [ ] 是否避免重复描述其他模块的详细内容
-- [ ] 依赖模块是否正确引用对应文档
-
-### 5. 文档简洁性
-- 避免过度文档化，根据改动重要性决定文档详细程度
-- 简单改动在 commit message 或代码注释中说明即可
-- 只有重要的设计决策、架构变更才需要独立文档
-- 更新已有文档时只修改变更部分，不重写整个文档
-
-**示例**：
-- ❌ 过度：优化一个日志级别，写 200 行设计文档
-- ✅ 合适：在 `fixes-summary.md` 中简要说明改动和原因
-- ✅ 合适：重构整个音频处理模块，写详细的设计文档
-
-### 6. TODO 同步更新
-- 完成 TODO 任务后，必须同步更新项目 TODO 文档
-- 将已完成的任务标记为 `[x]`
-- 更新进度状态，确保文档与实际开发进度一致
-- 遇到 TODO 中未记录的新任务时，先补充到文档再实现
-
-### 7. 主动沟通确认
-- 遇到不确定的需求或设计时，必须主动询问
-- 不要自行假设或猜测
-- 对设计有不同意见时，可以提出讨论
-- 明确任务范围，避免过度设计
-
-**提问示例**：
-- "关于工具调用的流程，我建议先实现查询类工具，您认为？"
-- "AudioMixer 需要支持淡入淡出效果吗？当前文档未提及。"
-
-### 8. 技术决策与沟通
-- 基于项目实际情况做出技术决策
-- 认为方案更优时，可以提出建议并说明理由
-- 保持开放心态，接受合理的反馈
-- 重要技术决策需记录到文档
-
-### 9. 外部资源查询
-- 当项目内搜不到的源码/文档/协议时，优先使用 Context7 MCP 查询
-- Context7 不仅限于标准库，任何需要了解的外部代码、API、协议都可以尝试用它
-- 查询不到时再考虑使用 WebSearch 或直接读取源码
-
-### 10. GitHub Project 与 Worktree 流程
-- 新需求默认先创建 GitHub Issue，再开始开发
-- 新需求 Issue 需包含：优先级、服务、背景、现状、期望（优先使用 `.github/ISSUE_TEMPLATE/service_delivery_request.yml`）
-- 新需求 Issue 默认不分配 assignee
-- 当用户说“开始处理某个 issue”时，先检查该 issue 是否在 Project 中：
-  - 已在 Project：先更新状态到 `In Progress`
-  - 不在 Project：先加入 Project，再更新状态
-- 开始处理 issue 时，必须为其创建独立分支，分支命名遵循 Conventional Commits 类型映射：
-  - `feat/issue-<id>-<slug>`、`fix/issue-<id>-<slug>`、`docs/issue-<id>-<slug>` 等
-- 默认基于 `main` 分支创建 issue 开发分支；若仓库默认分支不明确，需先询问用户
-- 默认使用 worktree 开发；若用户明确说明不使用 worktree，则按用户要求执行
-- worktree 路径默认：`~/.worktrees/<branch-name>/`
-- 创建方式：在项目主目录执行 `git worktree add` 指向上述目录
-- 创建完成后，询问用户是否切换到该 worktree 目录继续开发
-
-## 代码规范
-
-### 文件结构
-```go
-package pipeline
-
-// 1. 常量定义
-const (
-    StateIdle State = iota
-    StateListening
-)
-
-// 2. 类型定义
-type Orchestrator interface { ... }
-
-// 3. 结构体
-type orchestratorImpl struct { ... }
-
-// 4. 构造函数
-func NewOrchestrator(...) Orchestrator { ... }
-
-// 5. 公共方法
-func (o *orchestratorImpl) Start(...) error { ... }
-
-// 6. 私有方法
-func (o *orchestratorImpl) handleEvent(...) { ... }
-```
-
-### 错误处理
-- 公共 API 必须返回 error
-- 使用 `errors.New()` 或 `fmt.Errorf()` 创建错误
-- 不要忽略错误，必须处理
-- 上下文取消错误检查：`if errors.Is(err, context.Canceled)`
-
-### 并发安全
-- 共享状态使用 `sync.Mutex` 保护
-- 读写操作区分 `RLock()` / `Lock()`
-- 避免 defer + 锁的性能问题
-- Context 传递贯穿调用链
-
-### 日志规范
-- 统一使用 `internal/logging` 封装，不直接使用标准库 `log`
-- 日志字段包含 `trace_id`、`turn_id` 与 `log_id=traceId-turnId`
-- `traceId` 在单客户端运行时进程级固定，`turnId` 每轮完整交互自增
-
-```go
-import "github.com/liuscraft/orion-x/internal/logging"
-
-logging.Infof("State changed: %s -> %s", oldState, newState)
-logging.Errorf("Tool execution error: %v", err)
-```
-
-## 开发流程
-
-### 新功能开发
-1. **设计阶段**
-   - 阅读相关模块设计文档
-   - 确认需求和边界条件
-   - 设计接口和数据流
-   - 更新设计文档
-
-2. **实现阶段**
-   - 定义接口（自顶向下）
-   - 编写单元测试（TDD 推荐）
-   - 实现核心逻辑
-   - 运行测试确保通过
-
-3. **验证阶段**
-   - 运行所有测试：`go test ./...`
-   - 代码审查：`go vet ./...`
-   - 文档更新
-
-### Bug 修复
-1. 复现问题，定位根因
-2. 编写测试用例验证问题（可选，视复杂度）
-3. 修复代码
-4. 确保测试通过
-5. 检查是否影响其他模块
-6. 简要记录（commit message 或 fixes-summary.md）
-
-## 项目架构概览
-
-### 模块依赖关系
-```
-voicebot (Orchestrator)
-    ├── agent (Agent)
-    ├── audio (AudioOutPipe/AudioInPipe/AudioMixer)
-    ├── tools (ToolExecutor)
-    ├── asr (ASR - 已有)
-    └── tts (TTS - 已有)
-```
-
-### 状态机
-```
-Idle → Listening → Processing → Speaking → Idle
-  ↑                      ↑
-  └──────────────────────┘
-```
-
-### 事件流
-```
-ASRFinal → Orchestrator → Agent → LLM/Tool → AudioOutPipe
-UserSpeakingDetected → Orchestrator → AudioOutPipe.Interrupt()
-```
-
-## 工具使用
-
-### 测试
 ```bash
-# 运行所有测试
-go test ./...
+# Build (macOS needs ONNX Runtime via Homebrew)
+make build
 
-# 测试覆盖率
-go test -cover ./...
+# Run
+make run-voicebot
 
-# 详细输出
-go test -v ./...
+# Build manually
+GOTOOLCHAIN=$(go env GOTOOLCHAIN) CGO_CFLAGS="-I$(brew --prefix)/include/onnxruntime" CGO_LDFLAGS="-L$(brew --prefix)/lib" go build -o bin/voicebot ./cmd/voicebot
 ```
 
-### 构建
+Config file: `data/voicebot.json` (template: `voicebot.example.json`). ASR/TTS/LLM keys are required on startup.
+
+## Test
+
 ```bash
-# 构建所有包
-go build ./...
-
-# 格式化代码
-go fmt ./...
-
-# 检查代码
-go vet ./...
+make test              # go test ./...
+make test-audio        # go test ./internal/audio (needs audio device + ASR keys)
 ```
 
-### 依赖管理
-```bash
-# 整理依赖
-go mod tidy
+No CI for Go -- only docs deploy in `.github/workflows/deploy-docs.yml`. Run `go vet ./...` manually.
 
-# 更新依赖
-go get -u ./...
-```
+## Architecture
 
-## 常见问题
+Pipeline: `ASR → Agent → TTS` built via `pipeline.NewBuilder()` in `cmd/voicebot/main.go`.
 
-### Q: 如何确定某个功能应该放在哪个模块？
-A: 查看现有模块的职责定义，选择最匹配的。如果不确定，询问或查看设计文档。
+`cmd/voicebot/` is a quick test harness for the voice agent pipeline. The real product will expand beyond CLI to WebSocket, GUI, or other interaction channels.
 
-### Q: 测试覆盖率目标是多少？
-A: 核心逻辑必须 100% 覆盖，公共 API 建议 >80%。
+| Package | Role |
+|---|---|
+| `internal/config/` | JSON config loader + validation |
+| `internal/logging/` | Zap wrapper; use `logging.Infof/Errorf/...` (not std lib `log`) |
+| `internal/agent/` | LLM agent with tool calling loop |
+| `internal/pipeline/` | DAG pipeline: `Stage` interface, `Builder`, `Message` bus |
+| `internal/audio/` | AudioInPipe (mic→ASR), AudioOutPipe (TTS→sink), VAD, resampler |
+| `internal/provider/` | ASR/TTS factory + Aliyun Dashscope impls |
+| `internal/llm/` | LLM types + OpenAI-compatible provider |
+| `internal/tools/` | Tool registry + MCP client |
+| `internal/memory/` | Session buffer + SQLite long-term memory |
+| `internal/session/` | Chat session / message tracking |
+| `internal/text/` | Text segmenter, markdown filter, emotion tags |
 
-### Q: 如何处理依赖缺失的情况？
-A: 优先使用接口定义，然后提供 Mock 实现。避免阻塞其他模块开发。
+Design docs in `docs/` -- read before modifying major modules.
 
-### Q: 设计文档在哪里？
-A: 在 `docs/` 目录下，模块通常有对应的设计文档。
+## Quirks
 
-## 质量标准
-
-- ✅ 所有公共 API 有单元测试
-- ✅ 代码通过 `go vet` 检查
-- ✅ 无明显的性能问题（避免 O(n^2)、内存泄漏）
-- ✅ 错误处理完善
-- ✅ 文档更新及时
-- ✅ 遵循 Go 最佳实践
-
-## 提醒
-
-- 遵循自上而下的设计原则
-- 主动沟通不确定的内容
-- 保持代码简洁清晰
-- 先写文档再写代码
-- 测试驱动开发
+- **Mock convention**: inline mock structs in `*_test.go` files, no mock generator.
+- **Provider pattern**: ASR/TTS use factory registration (`provider/asr/factory.go`, `provider/tts/factory.go`). LLM uses `llm/provider/` with blank import in `main.go`.
