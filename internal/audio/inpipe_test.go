@@ -322,7 +322,7 @@ func TestInPipeContextCancellation(t *testing.T) {
 	cancel()
 	time.Sleep(50 * time.Millisecond)
 
-	pipe.Stop()
+	_ = pipe.Stop()
 }
 
 func TestDefaultInPipeConfig(t *testing.T) {

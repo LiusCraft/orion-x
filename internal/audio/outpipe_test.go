@@ -59,7 +59,7 @@ func TestOutPipe_PlayTTS_EmptyText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
-	defer pipe.Stop()
+	defer func() { _ = pipe.Stop() }()
 
 	err = pipe.PlayTTS("", "happy")
 	if err != nil {
@@ -79,7 +79,7 @@ func TestOutPipe_PlayTTS_Async(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
-	defer pipe.Stop()
+	defer func() { _ = pipe.Stop() }()
 
 	// PlayTTS 应该是异步的，立即返回
 	start := time.Now()
@@ -108,7 +108,7 @@ func TestOutPipe_Interrupt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
-	defer pipe.Stop()
+	defer func() { _ = pipe.Stop() }()
 
 	// 入队一些文本
 	for i := 0; i < 3; i++ {
@@ -140,7 +140,7 @@ func TestOutPipe_Stats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
-	defer pipe.Stop()
+	defer func() { _ = pipe.Stop() }()
 
 	stats := pipe.Stats()
 	if stats.TotalEnqueued != 0 {
@@ -172,7 +172,7 @@ func TestOutPipe_PlayResource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
-	defer pipe.Stop()
+	defer func() { _ = pipe.Stop() }()
 
 	// 没有设置 mixer 时应该报错
 	err = pipe.PlayResource(nil)
@@ -202,7 +202,7 @@ func TestOutPipe_DoubleStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("First Start error: %v", err)
 	}
-	defer pipe.Stop()
+	defer func() { _ = pipe.Stop() }()
 
 	// 第二次启动应该报错（因为 Pipeline 已经启动）
 	err = pipe.Start(ctx)
@@ -232,7 +232,7 @@ func TestOutPipe_MultipleInterrupts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
-	defer pipe.Stop()
+	defer func() { _ = pipe.Stop() }()
 
 	// 多次打断应该正常工作
 	for i := 0; i < 5; i++ {

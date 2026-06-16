@@ -476,7 +476,7 @@ func (p *ttsPipelineImpl) playItem(item *ttsItem) {
 	}
 
 	if closer, ok := item.OrigReader.(io.Closer); ok {
-		closer.Close()
+		_ = closer.Close()
 	}
 
 cleanup:
@@ -647,7 +647,7 @@ clearPending:
 		if item != nil {
 			item.Reader.Close()
 			if closer, ok := item.OrigReader.(io.Closer); ok {
-				closer.Close()
+				_ = closer.Close()
 			}
 		}
 	}
@@ -660,7 +660,7 @@ clearPending:
 		case item := <-p.ttsBuffer:
 			item.Reader.Close()
 			if closer, ok := item.OrigReader.(io.Closer); ok {
-				closer.Close()
+				_ = closer.Close()
 			}
 			cleared++
 		default:

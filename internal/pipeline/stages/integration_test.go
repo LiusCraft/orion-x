@@ -43,7 +43,7 @@ func TestAgentStage_Integration(t *testing.T) {
 	if err := p.Start(ctx); err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer p.Stop()
+	defer func() { _ = p.Stop() }()
 
 	// 发送用户输入
 	go func() {
@@ -113,7 +113,7 @@ func TestMultipleStages_MessageFlow(t *testing.T) {
 	if err := p.Start(ctx); err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer p.Stop()
+	defer func() { _ = p.Stop() }()
 
 	// 发送输入
 	go func() {

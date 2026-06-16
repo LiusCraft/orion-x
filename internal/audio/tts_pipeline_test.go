@@ -61,7 +61,7 @@ func TestTTSPipelineDoubleStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 重复启动应该报错
 	err = pipeline.Start(ctx)
@@ -85,7 +85,7 @@ func TestTTSPipelineEnqueueText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 入队文本
 	err = pipeline.EnqueueText("Hello, World!", "happy")
@@ -120,7 +120,7 @@ func TestTTSPipelineOnItemStarted(t *testing.T) {
 	if err := pipeline.Start(ctx); err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	if err := pipeline.EnqueueText("Hello", "happy"); err != nil {
 		t.Fatalf("Failed to enqueue text: %v", err)
@@ -149,7 +149,7 @@ func TestTTSPipelineEnqueueEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 入队空文本应该直接返回
 	err = pipeline.EnqueueText("", "happy")
@@ -193,7 +193,7 @@ func TestTTSPipelineInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 入队多个文本
 	for i := 0; i < 5; i++ {
@@ -242,7 +242,7 @@ func TestTTSPipelineConcurrentEnqueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 并发入队
 	var wg sync.WaitGroup
@@ -280,7 +280,7 @@ func TestTTSPipelineStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 初始状态
 	stats := pipeline.Stats()
@@ -318,7 +318,7 @@ func TestTTSPipelineVoiceMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 入队文本
 	err = pipeline.EnqueueText("Hello", "happy")
@@ -385,7 +385,7 @@ func TestTTSPipelineTTSError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 入队文本
 	err = pipeline.EnqueueText("Hello", "happy")
@@ -426,7 +426,7 @@ func TestTTSPipelineMaxConcurrentTTS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 快速入队 5 个
 	for i := 0; i < 5; i++ {
@@ -459,7 +459,7 @@ func TestTTSPipelineResetAfterInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 入队并打断多次
 	for i := 0; i < 3; i++ {
@@ -552,7 +552,7 @@ func BenchmarkTTSPipelineEnqueue(b *testing.B) {
 
 	ctx := context.Background()
 	_ = pipeline.Start(ctx)
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -570,7 +570,7 @@ func BenchmarkTTSPipelineInterrupt(b *testing.B) {
 
 	ctx := context.Background()
 	_ = pipeline.Start(ctx)
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -618,7 +618,7 @@ func TestTTSPipelinePlaybackOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start pipeline: %v", err)
 	}
-	defer pipeline.Stop()
+	defer func() { _ = pipeline.Stop() }()
 
 	// 按顺序入队
 	texts := []string{"First sentence.", "Second sentence.", "Third sentence."}
