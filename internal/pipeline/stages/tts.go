@@ -6,13 +6,14 @@ import (
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/pipeline"
+	"github.com/liuscraft/orion-x/internal/provider/tts"
 )
 
 // TTSStage wraps a TTSProcessor as a pipeline sink stage.
 type TTSStage struct {
 	*pipeline.BaseStage
-	proc      audio.TTSProcessor
-	ttsActive bool
+	proc        audio.TTSProcessor
+	lastEmotion string
 }
 
 // NewTTSStage creates a TTSStage. The proc must be started externally before
@@ -30,9 +31,9 @@ func (s *TTSStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 	go func() {
 		defer close(output)
 		defer func() {
-			if s.ttsActive {
-				_ = s.proc.EndStream()
-			}
+			// 确保管道关闭时把剩余文本送出去
+			opts := s.currentOpts()
+			_ = s.proc.Flush(opts)
 		}()
 
 		for {
@@ -52,27 +53,24 @@ func (s *TTSStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 					}
 
 				case pipeline.MessageTypeFinished:
-					if s.ttsActive {
-						if err := s.proc.EndStream(); err != nil {
-							logging.Errorf("TTSStage: end TTS stream error: %v", err)
-						}
-						s.ttsActive = false
+					opts := s.currentOpts()
+					if err := s.proc.Flush(opts); err != nil {
+						logging.Errorf("TTSStage: flush TTS error: %v", err)
+					}
+					s.lastEmotion = ""
 
-						select {
-						case output <- pipeline.Message{
-							Type:     pipeline.MessageTypeTTSStop,
-							Metadata: msg.Metadata,
-						}:
-						case <-ctx.Done():
-							return
-						}
+					select {
+					case output <- pipeline.Message{
+						Type:     pipeline.MessageTypeTTSStop,
+						Metadata: msg.Metadata,
+					}:
+					case <-ctx.Done():
+						return
 					}
 
 				case pipeline.MessageTypeInterrupt:
-					if s.ttsActive {
-						_ = s.proc.Interrupt()
-						s.ttsActive = false
-					}
+					_ = s.proc.Interrupt()
+					s.lastEmotion = ""
 				}
 
 				select {
@@ -93,17 +91,19 @@ func (s *TTSStage) handleTextChunk(msg pipeline.Message) error {
 		return nil
 	}
 
-	if !s.ttsActive {
-		emotion := msg.Metadata.Emotion
-		if emotion == "" {
-			emotion = "default"
-		}
-		if err := s.proc.BeginStream(audio.TTSRequest{Emotion: emotion}); err != nil {
-			return err
-		}
-		s.ttsActive = true
-		logging.Infof("TTSStage: TTS stream started with emotion: %s", emotion)
+	emotion := msg.Metadata.Emotion
+	if emotion == "" {
+		emotion = "default"
 	}
+	s.lastEmotion = emotion
 
-	return s.proc.WriteChunk(text)
+	return s.proc.Write(text, tts.SynthesisOptions{Emotion: emotion})
+}
+
+func (s *TTSStage) currentOpts() tts.SynthesisOptions {
+	emotion := s.lastEmotion
+	if emotion == "" {
+		emotion = "default"
+	}
+	return tts.SynthesisOptions{Emotion: emotion}
 }

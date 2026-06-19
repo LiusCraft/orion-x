@@ -90,21 +90,26 @@ func (s *PortAudioSink) WritePCM(samples []int16) error {
 		return errors.New("PortAudioSink: not started")
 	}
 
-	n := copy(s.buffer, samples)
-	for i := n; i < len(s.buffer); i++ {
-		s.buffer[i] = 0
-	}
-
-	if err := s.stream.Write(); err != nil {
-		if isOutputUnderflow(err) {
-			now := time.Now()
-			if now.Sub(s.lastUnderflowLog) >= 5*time.Second {
-				s.lastUnderflowLog = now
-				logging.Debugf("PortAudioSink: output underflowed; continuing local playback")
-			}
-			return nil
+	frameSize := len(s.buffer)
+	for len(samples) > 0 {
+		n := copy(s.buffer, samples)
+		// 不足一帧时补零
+		for i := n; i < frameSize; i++ {
+			s.buffer[i] = 0
 		}
-		return err
+		samples = samples[n:]
+
+		if err := s.stream.Write(); err != nil {
+			if isOutputUnderflow(err) {
+				now := time.Now()
+				if now.Sub(s.lastUnderflowLog) >= 5*time.Second {
+					s.lastUnderflowLog = now
+					logging.Debugf("PortAudioSink: output underflowed; continuing local playback")
+				}
+				continue
+			}
+			return err
+		}
 	}
 	return nil
 }

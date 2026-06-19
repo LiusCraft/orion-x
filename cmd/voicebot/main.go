@@ -162,17 +162,30 @@ func main() {
 
 	// --- TTS ---
 	logging.Infof("Creating TTS Provider...")
-	ttsProvider, err := tts.NewProvider(tts.ProviderConfig{Type: appConfig.Provider.TTS.Type})
+	ttsProvider, err := tts.NewProvider(tts.ProviderConfig{
+		Type: appConfig.Provider.TTS.Type,
+		Config: tts.Config{
+			APIKey:               ttsCfgSpec.APIKey,
+			Endpoint:             ttsCfgSpec.Endpoint,
+			Workspace:            ttsCfgSpec.Workspace,
+			Model:                ttsCfgSpec.Model,
+			Voice:                ttsCfgSpec.Voice,
+			Format:               "pcm",
+			SampleRate:           22050,
+			Volume:               ttsCfgSpec.Volume,
+			Rate:                 ttsCfgSpec.Rate,
+			Pitch:                ttsCfgSpec.Pitch,
+			EnableSSML:           ttsCfgSpec.EnableSSML,
+			TextType:             ttsCfgSpec.TextType,
+			EnableDataInspection: ttsCfgSpec.EnableDataInspection,
+		},
+	})
 	if err != nil {
 		logging.Fatalf("Failed to create TTS provider: %v", err)
 	}
 
 	logging.Infof("Creating TTSProcessor...")
 	ttsPipeCfg := appConfig.Audio.TTSPipeline
-	maxBuffer := ttsPipeCfg.MaxTTSBuffer
-	if maxBuffer <= 0 {
-		maxBuffer = 3
-	}
 	maxConcurrent := ttsPipeCfg.MaxConcurrentTTS
 	if maxConcurrent <= 0 {
 		maxConcurrent = 2
@@ -184,25 +197,6 @@ func main() {
 
 	processorCfg := audio.DefaultTTSConfig()
 	processorCfg.Provider = ttsProvider
-	processorCfg.CallConfig = tts.Config{
-		APIKey:               ttsCfgSpec.APIKey,
-		Endpoint:             ttsCfgSpec.Endpoint,
-		Workspace:            ttsCfgSpec.Workspace,
-		Model:                ttsCfgSpec.Model,
-		Voice:                ttsCfgSpec.Voice,
-		Format:               "pcm",
-		SampleRate:           audio.InternalSampleRate,
-		Volume:               ttsCfgSpec.Volume,
-		Rate:                 ttsCfgSpec.Rate,
-		Pitch:                ttsCfgSpec.Pitch,
-		EnableSSML:           ttsCfgSpec.EnableSSML,
-		TextType:             ttsCfgSpec.TextType,
-		EnableDataInspection: ttsCfgSpec.EnableDataInspection,
-	}
-	if len(ttsCfgSpec.VoiceMap) > 0 {
-		processorCfg.VoiceMap = ttsCfgSpec.VoiceMap
-	}
-	processorCfg.MaxBuffer = maxBuffer
 	processorCfg.MaxConcurrent = maxConcurrent
 	processorCfg.QueueSize = queueSize
 
@@ -210,7 +204,7 @@ func main() {
 	if err != nil {
 		logging.Fatalf("Failed to create TTSProcessor: %v", err)
 	}
-	logging.Infof("TTSProcessor created (maxBuffer=%d, maxConcurrent=%d)", maxBuffer, maxConcurrent)
+	logging.Infof("TTSProcessor created (maxConcurrent=%d)", maxConcurrent)
 
 	// --- Microphone source ---
 	bufferSize := inPipeCfg.BufferSize
@@ -259,7 +253,7 @@ func main() {
 	defer cancel()
 
 	sinkFormat := AudioFormat{
-		SampleRate:      audio.InternalSampleRate,
+		SampleRate:      22050,
 		Channels:        audio.InternalChannels,
 		FramesPerBuffer: 1024,
 	}
@@ -269,8 +263,8 @@ func main() {
 	}
 
 	// Wire TTS audio output to the sink.
-	ttsProc.OnAudio(func(data []byte) {
-		samples := audio.BytesToInt16LE(data)
+	ttsProc.OnChunk(func(chunk audio.TTSChunk) {
+		samples := audio.BytesToInt16LE(chunk.Audio)
 		if err := sink.WritePCM(samples); err != nil {
 			logging.Errorf("Sink write error: %v", err)
 		}

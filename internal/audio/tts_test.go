@@ -2,8 +2,9 @@ package audio
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,146 +12,48 @@ import (
 	"github.com/liuscraft/orion-x/internal/provider/tts"
 )
 
-// --- mocks ---
+// --- mock ---
 
 type mockTTSProvider struct {
-	mu         sync.Mutex
-	startCount int
-	startErr   error
-	streams    []*mockTTSStream
-	lastConfig tts.Config
+	mu        sync.Mutex
+	callCount int
+	callErr   error
+	// per-call 延迟，用于测试播放顺序
+	delays map[string]time.Duration
 }
 
-func newMockTTSProvider() *mockTTSProvider { return &mockTTSProvider{} }
+func newMockTTSProvider() *mockTTSProvider {
+	return &mockTTSProvider{delays: make(map[string]time.Duration)}
+}
 
-func (p *mockTTSProvider) Start(ctx context.Context, cfg tts.Config) (tts.Stream, error) {
+func (p *mockTTSProvider) Synthesize(ctx context.Context, text string, _ tts.SynthesisOptions) (io.ReadCloser, error) {
+	p.mu.Lock()
+	p.callCount++
+	err := p.callErr
+	delay := p.delays[text]
+	p.mu.Unlock()
+
+	if err != nil {
+		return nil, err
+	}
+	if delay > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	// 返回文本的字节作为 mock 音频
+	return io.NopCloser(strings.NewReader(text)), nil
+}
+
+func (p *mockTTSProvider) getCallCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.startCount++
-	p.lastConfig = cfg
-	if p.startErr != nil {
-		return nil, p.startErr
-	}
-	stream := newMockTTSStream()
-	p.streams = append(p.streams, stream)
-	return stream, nil
+	return p.callCount
 }
 
-func (p *mockTTSProvider) getStartCount() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.startCount
-}
-
-func (p *mockTTSProvider) getLastConfig() tts.Config {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.lastConfig
-}
-
-type mockTTSStream struct {
-	mu          sync.Mutex
-	text        string
-	closed      bool
-	audioData   []byte
-	reader      *mockAudioReader
-	sampleRate  int
-	channels    int
-	writeErr    error
-	closeErr    error
-	writeCalled int
-	closeCalled int
-}
-
-func newMockTTSStream() *mockTTSStream {
-	s := &mockTTSStream{sampleRate: InternalSampleRate, channels: 1}
-	s.reader = newMockAudioReader()
-	return s
-}
-
-func (s *mockTTSStream) WriteTextChunk(ctx context.Context, text string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.writeCalled++
-	s.text = text
-	if s.writeErr != nil {
-		return s.writeErr
-	}
-	s.audioData = make([]byte, len(text)*100)
-	for i := range s.audioData {
-		s.audioData[i] = byte(i % 256)
-	}
-	s.reader.setData(s.audioData)
-	return nil
-}
-
-func (s *mockTTSStream) Finish(ctx context.Context) error { return s.Close(ctx) }
-
-func (s *mockTTSStream) Close(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.closeCalled++
-	if s.closeErr != nil {
-		return s.closeErr
-	}
-	s.closed = true
-	s.reader.close()
-	return nil
-}
-
-func (s *mockTTSStream) AudioReader() io.ReadCloser { return s.reader }
-func (s *mockTTSStream) SampleRate() int            { return s.sampleRate }
-func (s *mockTTSStream) Channels() int              { return s.channels }
-
-type mockAudioReader struct {
-	mu       sync.Mutex
-	data     []byte
-	pos      int
-	closed   bool
-	readCond *sync.Cond
-}
-
-func newMockAudioReader() *mockAudioReader {
-	r := &mockAudioReader{}
-	r.readCond = sync.NewCond(&r.mu)
-	return r
-}
-
-func (r *mockAudioReader) setData(data []byte) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.data = data
-	r.readCond.Broadcast()
-}
-
-func (r *mockAudioReader) Read(p []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for r.pos >= len(r.data) && !r.closed {
-		r.readCond.Wait()
-	}
-	if r.closed && r.pos >= len(r.data) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
-}
-
-func (r *mockAudioReader) Close() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.closed = true
-	r.readCond.Broadcast()
-	return nil
-}
-
-func (r *mockAudioReader) close() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.closed = true
-	r.readCond.Broadcast()
-}
+// --- helpers ---
 
 func newTestTTSProcessor(provider tts.Provider) TTSProcessor {
 	cfg := DefaultTTSConfig()
@@ -159,543 +62,390 @@ func newTestTTSProcessor(provider tts.Provider) TTSProcessor {
 	return proc
 }
 
-func newTestTTSProcessorWithConfig(provider tts.Provider, maxBuffer, maxConcurrent, queueSize int) TTSProcessor {
+func newTestTTSProcessorWithConfig(provider tts.Provider, maxConcurrent, queueSize, maxRunes int) TTSProcessor {
 	cfg := DefaultTTSConfig()
 	cfg.Provider = provider
-	cfg.MaxBuffer = maxBuffer
 	cfg.MaxConcurrent = maxConcurrent
 	cfg.QueueSize = queueSize
+	cfg.MaxRunes = maxRunes
 	proc, _ := NewTTSProcessor(cfg)
 	return proc
 }
 
-// TestTTSProcessorCreate 测试创建 Processor
+var defaultOpts = tts.SynthesisOptions{Emotion: "default"}
+
+// --- tests ---
+
 func TestTTSProcessorCreate(t *testing.T) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
+	proc := newTestTTSProcessor(newMockTTSProvider())
 	if proc == nil {
-		t.Fatal("Expected processor to be created")
+		t.Fatal("expected non-nil processor")
+	}
+
+	_, err := NewTTSProcessor(&TTSConfig{Provider: nil})
+	if err == nil {
+		t.Fatal("expected error when Provider is nil")
 	}
 }
 
-// TestTTSProcessorStartStop 测试启动和停止
 func TestTTSProcessorStartStop(t *testing.T) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
-
-	ctx := context.Background()
-
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
+	proc := newTestTTSProcessor(newMockTTSProvider())
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
 	}
-
 	if err := proc.Stop(); err != nil {
-		t.Fatalf("Failed to stop processor: %v", err)
+		t.Fatalf("Stop failed: %v", err)
 	}
 }
 
-// TestTTSProcessorDoubleStart 测试重复启动
 func TestTTSProcessorDoubleStart(t *testing.T) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
-
+	proc := newTestTTSProcessor(newMockTTSProvider())
 	ctx := context.Background()
-
 	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
+		t.Fatalf("first Start failed: %v", err)
 	}
 	defer func() { _ = proc.Stop() }()
 
 	if err := proc.Start(ctx); err == nil {
-		t.Fatal("Expected error on double start")
+		t.Fatal("expected error on double Start")
 	}
 }
 
-// TestTTSProcessorSynthesize 测试入队文本
-func TestTTSProcessorSynthesize(t *testing.T) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
-	proc.OnAudio(func([]byte) {})
+func TestTTSProcessorWriteBeforeStart(t *testing.T) {
+	proc := newTestTTSProcessor(newMockTTSProvider())
+	if err := proc.Write("hello", defaultOpts); err == nil {
+		t.Fatal("expected error when writing before Start")
+	}
+}
 
-	ctx := context.Background()
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
+// TestTTSProcessorOnChunk_StrongBoundary 验证强停顿切句并触发 OnChunk。
+func TestTTSProcessorOnChunk_StrongBoundary(t *testing.T) {
+	proc := newTestTTSProcessor(newMockTTSProvider())
+
+	chunkCh := make(chan TTSChunk, 5)
+	proc.OnChunk(func(c TTSChunk) { chunkCh <- c })
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
 	}
 	defer func() { _ = proc.Stop() }()
 
-	if err := proc.Synthesize(TTSRequest{Text: "Hello, World!", Emotion: "happy"}); err != nil {
-		t.Fatalf("Failed to synthesize text: %v", err)
-	}
+	_ = proc.Write("今天天气很好。", defaultOpts)
 
-	time.Sleep(200 * time.Millisecond)
-
-	stats := proc.Stats()
-	if stats.TotalEnqueued != 1 {
-		t.Errorf("Expected TotalEnqueued=1, got %d", stats.TotalEnqueued)
+	select {
+	case got := <-chunkCh:
+		if got.Text != "今天天气很好。" {
+			t.Errorf("unexpected text: %q", got.Text)
+		}
+		if len(got.Audio) == 0 {
+			t.Error("expected non-empty audio")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for OnChunk")
 	}
 }
 
-// TestTTSProcessorOnItemStarted 测试条目开始回调
-func TestTTSProcessorOnItemStarted(t *testing.T) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
-	proc.OnAudio(func([]byte) {})
+// TestTTSProcessorFirstSentenceWeakBoundary 验证首句在弱停顿处切句。
+func TestTTSProcessorFirstSentenceWeakBoundary(t *testing.T) {
+	proc := newTestTTSProcessor(newMockTTSProvider())
 
-	startedCh := make(chan string, 1)
-	proc.OnItemStarted(func(text string, emotion string) {
-		startedCh <- text
+	chunkCh := make(chan TTSChunk, 5)
+	proc.OnChunk(func(c TTSChunk) { chunkCh <- c })
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	// 逗号是弱停顿，首句应在此触发
+	_ = proc.Write("今天天气很好，", defaultOpts)
+
+	select {
+	case got := <-chunkCh:
+		if got.Text != "今天天气很好，" {
+			t.Errorf("unexpected text: %q", got.Text)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout: first sentence should trigger at weak boundary")
+	}
+}
+
+// TestTTSProcessorSubsequentSentenceStrongOnly 验证首句后只有强停顿才切句。
+func TestTTSProcessorSubsequentSentenceStrongOnly(t *testing.T) {
+	proc := newTestTTSProcessor(newMockTTSProvider())
+
+	var chunks []TTSChunk
+	var mu sync.Mutex
+	proc.OnChunk(func(c TTSChunk) {
+		mu.Lock()
+		chunks = append(chunks, c)
+		mu.Unlock()
 	})
 
-	ctx := context.Background()
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
 	}
 	defer func() { _ = proc.Stop() }()
 
-	if err := proc.Synthesize(TTSRequest{Text: "Hello", Emotion: "happy"}); err != nil {
-		t.Fatalf("Failed to synthesize text: %v", err)
+	// 首句在逗号触发，第二句必须等句号
+	_ = proc.Write("首句，", defaultOpts)
+	time.Sleep(200 * time.Millisecond) // 等首句合成
+
+	_ = proc.Write("第二句，逗号不切，", defaultOpts) // 不应切
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	countAfterComma := len(chunks)
+	mu.Unlock()
+
+	if countAfterComma != 1 {
+		t.Errorf("expected 1 chunk after comma (only first sentence), got %d", countAfterComma)
+	}
+
+	_ = proc.Write("句号切。", defaultOpts) // 强停顿，应切
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	total := len(chunks)
+	mu.Unlock()
+
+	if total != 2 {
+		t.Errorf("expected 2 chunks total, got %d", total)
+	}
+}
+
+// TestTTSProcessorFlush 验证 Flush 输出剩余文本。
+func TestTTSProcessorFlush(t *testing.T) {
+	proc := newTestTTSProcessor(newMockTTSProvider())
+
+	chunkCh := make(chan TTSChunk, 5)
+	proc.OnChunk(func(c TTSChunk) { chunkCh <- c })
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	_ = proc.Write("没有停顿的文本", defaultOpts)
+
+	// 还没有切句，Flush 强制输出
+	if err := proc.Flush(defaultOpts); err != nil {
+		t.Fatalf("Flush failed: %v", err)
 	}
 
 	select {
-	case got := <-startedCh:
-		if got != "Hello" {
-			t.Fatalf("unexpected text: %s", got)
+	case got := <-chunkCh:
+		if got.Text != "没有停顿的文本" {
+			t.Errorf("unexpected text: %q", got.Text)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timeout waiting for OnItemStarted")
+		t.Fatal("timeout waiting for Flush output")
 	}
 }
 
-// TestTTSProcessorSynthesizeEmpty 测试入队空文本
-func TestTTSProcessorSynthesizeEmpty(t *testing.T) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
-
-	ctx := context.Background()
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
-	}
-	defer func() { _ = proc.Stop() }()
-
-	if err := proc.Synthesize(TTSRequest{Text: ""}); err != nil {
-		t.Fatalf("Empty text should not return error: %v", err)
-	}
-
-	stats := proc.Stats()
-	if stats.TotalEnqueued != 0 {
-		t.Errorf("Empty text should not be enqueued, got TotalEnqueued=%d", stats.TotalEnqueued)
-	}
-}
-
-// TestTTSProcessorSynthesizeBeforeStart 测试启动前入队
-func TestTTSProcessorSynthesizeBeforeStart(t *testing.T) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
-
-	if err := proc.Synthesize(TTSRequest{Text: "Hello"}); err == nil {
-		t.Fatal("Expected error when synthesizing before start")
-	}
-}
-
-// TestTTSProcessorInterrupt 测试打断
+// TestTTSProcessorInterrupt 验证 Interrupt 清空队列并重置状态。
 func TestTTSProcessorInterrupt(t *testing.T) {
 	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
-	proc.OnAudio(func([]byte) {})
+	provider.delays["第一句，"] = 200 * time.Millisecond
 
-	ctx := context.Background()
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
+	proc := newTestTTSProcessorWithConfig(provider, 1, 50, 100)
+
+	var mu sync.Mutex
+	var chunks []TTSChunk
+	proc.OnChunk(func(c TTSChunk) {
+		mu.Lock()
+		chunks = append(chunks, c)
+		mu.Unlock()
+	})
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
 	}
 	defer func() { _ = proc.Stop() }()
 
-	for i := 0; i < 5; i++ {
-		if err := proc.Synthesize(TTSRequest{Text: "Test sentence"}); err != nil {
-			t.Fatalf("Failed to synthesize text: %v", err)
-		}
-	}
-
+	_ = proc.Write("第一句，第二句，第三句，", defaultOpts)
 	time.Sleep(50 * time.Millisecond)
 
 	if err := proc.Interrupt(); err != nil {
-		t.Fatalf("Failed to interrupt: %v", err)
+		t.Fatalf("Interrupt failed: %v", err)
 	}
 
-	stats := proc.Stats()
-	if stats.TotalInterrupts != 1 {
-		t.Errorf("Expected TotalInterrupts=1, got %d", stats.TotalInterrupts)
-	}
+	time.Sleep(300 * time.Millisecond)
 
-	if stats.TextQueueSize != 0 {
-		t.Errorf("Expected TextQueueSize=0 after interrupt, got %d", stats.TextQueueSize)
+	mu.Lock()
+	got := len(chunks)
+	mu.Unlock()
+
+	// Interrupt 后不应再有新的 chunk
+	if got != 0 {
+		t.Errorf("expected 0 chunks after interrupt, got %d", got)
 	}
 }
 
-// TestTTSProcessorConcurrentSynthesize 测试并发入队
-func TestTTSProcessorConcurrentSynthesize(t *testing.T) {
+// TestTTSProcessorPlaybackOrder 验证并发合成时按入队顺序回调。
+func TestTTSProcessorPlaybackOrder(t *testing.T) {
 	provider := newMockTTSProvider()
-	proc := newTestTTSProcessorWithConfig(provider, 5, 3, 50)
-	proc.OnAudio(func([]byte) {})
+	// 第一句慢，第二句快，验证顺序不变
+	provider.delays["First."] = 100 * time.Millisecond
+	provider.delays["Second."] = 10 * time.Millisecond
 
-	ctx := context.Background()
+	proc := newTestTTSProcessorWithConfig(provider, 2, 50, 100)
+
+	var mu sync.Mutex
+	var order []string
+	proc.OnChunk(func(c TTSChunk) {
+		mu.Lock()
+		order = append(order, c.Text)
+		mu.Unlock()
+	})
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	_ = proc.Write("First.", defaultOpts)
+	_ = proc.Write("Second.", defaultOpts)
+
+	time.Sleep(400 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(order) != 2 {
+		t.Fatalf("expected 2 chunks, got %d", len(order))
+	}
+	if order[0] != "First." || order[1] != "Second." {
+		t.Errorf("wrong playback order: %v", order)
+	}
+}
+
+// TestTTSProcessorContextCancel 验证 context 取消后 Stop 正常完成。
+func TestTTSProcessorContextCancel(t *testing.T) {
+	proc := newTestTTSProcessor(newMockTTSProvider())
+
+	ctx, cancel := context.WithCancel(context.Background())
 	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+
+	if err := proc.Stop(); err != nil {
+		t.Logf("Stop returned (may be expected): %v", err)
+	}
+}
+
+// TestTTSProcessorSynthesizeError 验证合成失败时不回调（不 panic）。
+func TestTTSProcessorSynthesizeError(t *testing.T) {
+	provider := newMockTTSProvider()
+	provider.callErr = fmt.Errorf("TTS service unavailable")
+
+	proc := newTestTTSProcessor(provider)
+
+	chunkCh := make(chan TTSChunk, 1)
+	proc.OnChunk(func(c TTSChunk) { chunkCh <- c })
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	_ = proc.Write("测试。", defaultOpts)
+
+	select {
+	case <-chunkCh:
+		t.Fatal("should not receive chunk on error")
+	case <-time.After(300 * time.Millisecond):
+		// 正确：没有回调
+	}
+}
+
+// TestTTSProcessorConcurrentWrite 验证并发 Write 不 panic。
+func TestTTSProcessorConcurrentWrite(t *testing.T) {
+	proc := newTestTTSProcessor(newMockTTSProvider())
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
 	}
 	defer func() { _ = proc.Stop() }()
 
 	var wg sync.WaitGroup
-	const enqueueCount = 20
-
-	for i := 0; i < enqueueCount; i++ {
+	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = proc.Synthesize(TTSRequest{Text: "Concurrent text"})
+			_ = proc.Write("并发文本。", defaultOpts)
 		}()
 	}
-
 	wg.Wait()
-	time.Sleep(500 * time.Millisecond)
+}
 
-	stats := proc.Stats()
-	if stats.TotalEnqueued != enqueueCount {
-		t.Errorf("Expected TotalEnqueued=%d, got %d", enqueueCount, stats.TotalEnqueued)
+// TestSentenceSplitter_FirstWeakThenStrong 验证分句器两阶段逻辑。
+func TestSentenceSplitter_FirstWeakThenStrong(t *testing.T) {
+	s := newSentenceSplitter(100)
+
+	// 首句：遇到弱停顿触发
+	out := s.feed("你好，")
+	if len(out) != 1 || out[0] != "你好，" {
+		t.Errorf("expected first sentence at weak boundary, got %v", out)
+	}
+
+	// 第二句：弱停顿不触发
+	out = s.feed("世界，")
+	if len(out) != 0 {
+		t.Errorf("subsequent sentence should not trigger at weak boundary, got %v", out)
+	}
+
+	// 强停顿触发
+	out = s.feed("再见。")
+	if len(out) != 1 || out[0] != "世界，再见。" {
+		t.Errorf("expected second sentence at strong boundary, got %v", out)
 	}
 }
 
-// TestTTSProcessorStats 测试统计信息
-func TestTTSProcessorStats(t *testing.T) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
+// TestSentenceSplitter_MaxRunes 验证超过最大字数时强制切句。
+func TestSentenceSplitter_MaxRunes(t *testing.T) {
+	s := newSentenceSplitter(5)
 
-	ctx := context.Background()
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
+	out := s.feed("一二三四五六") // 6 个字，到第 5 个时触发
+	if len(out) == 0 {
+		t.Fatal("expected at least one sentence from maxRunes trigger")
 	}
-	defer func() { _ = proc.Stop() }()
-
-	stats := proc.Stats()
-	if stats.TotalEnqueued != 0 || stats.TotalPlayed != 0 || stats.TotalInterrupts != 0 || stats.IsPlaying {
-		t.Errorf("Unexpected initial stats: %+v", stats)
+	if len([]rune(out[0])) > 5 {
+		t.Errorf("sentence exceeds maxRunes: %q", out[0])
 	}
 }
 
-// TestTTSProcessorVoiceMap 测试音色映射
-func TestTTSProcessorVoiceMap(t *testing.T) {
-	provider := newMockTTSProvider()
-	cfg := DefaultTTSConfig()
-	cfg.Provider = provider
-	cfg.VoiceMap = map[string]string{
-		"happy":   "voice_happy",
-		"sad":     "voice_sad",
-		"default": "voice_default",
+// TestSentenceSplitter_Flush 验证 Flush 输出剩余。
+func TestSentenceSplitter_Flush(t *testing.T) {
+	s := newSentenceSplitter(100)
+	_ = s.feed("没有停顿")
+	got := s.flush()
+	if got != "没有停顿" {
+		t.Errorf("unexpected flush result: %q", got)
 	}
-	proc, _ := NewTTSProcessor(cfg)
-	proc.OnAudio(func([]byte) {})
-
-	ctx := context.Background()
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
-	}
-	defer func() { _ = proc.Stop() }()
-
-	if err := proc.Synthesize(TTSRequest{Text: "Hello", Emotion: "happy"}); err != nil {
-		t.Fatalf("Failed to synthesize text: %v", err)
-	}
-
-	time.Sleep(200 * time.Millisecond)
-
-	lastConfig := provider.getLastConfig()
-	if lastConfig.Voice != "voice_happy" {
-		t.Errorf("Expected voice=voice_happy, got %s", lastConfig.Voice)
+	if s.flush() != "" {
+		t.Error("second flush should return empty")
 	}
 }
 
-// TestTTSProcessorContextCancellation 测试 context 取消
-func TestTTSProcessorContextCancellation(t *testing.T) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
-	}
-
-	cancel()
-	time.Sleep(100 * time.Millisecond)
-
-	// 停止应该能正常停止
-	if err := proc.Stop(); err != nil {
-		t.Logf("Stop returned error (may be expected): %v", err)
-	}
-}
-
-// TestTTSProcessorTTSError 测试 TTS 错误处理
-func TestTTSProcessorTTSError(t *testing.T) {
-	provider := newMockTTSProvider()
-	provider.startErr = errors.New("TTS service unavailable")
-
-	proc := newTestTTSProcessor(provider)
-
-	ctx := context.Background()
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
-	}
-	defer func() { _ = proc.Stop() }()
-
-	if err := proc.Synthesize(TTSRequest{Text: "Hello"}); err != nil {
-		t.Fatalf("Failed to synthesize text: %v", err)
-	}
-
-	time.Sleep(200 * time.Millisecond)
-
-	stats := proc.Stats()
-	if stats.TotalEnqueued != 1 {
-		t.Errorf("Expected TotalEnqueued=1, got %d", stats.TotalEnqueued)
-	}
-	if stats.TotalPlayed != 0 {
-		t.Errorf("Expected TotalPlayed=0 (TTS failed), got %d", stats.TotalPlayed)
-	}
-}
-
-// TestTTSProcessorResetAfterInterrupt 测试打断后重置
-func TestTTSProcessorResetAfterInterrupt(t *testing.T) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
-	proc.OnAudio(func([]byte) {})
-
-	ctx := context.Background()
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
-	}
-	defer func() { _ = proc.Stop() }()
-
-	for i := 0; i < 3; i++ {
-		if err := proc.Synthesize(TTSRequest{Text: "Test"}); err != nil {
-			t.Fatalf("Failed to synthesize text: %v", err)
-		}
-		time.Sleep(20 * time.Millisecond)
-		if err := proc.Interrupt(); err != nil {
-			t.Fatalf("Failed to interrupt: %v", err)
-		}
-	}
-
-	stats := proc.Stats()
-	if stats.TotalInterrupts != 3 {
-		t.Errorf("Expected TotalInterrupts=3, got %d", stats.TotalInterrupts)
-	}
-
-	if err := proc.Synthesize(TTSRequest{Text: "Final text"}); err != nil {
-		t.Fatalf("Failed to synthesize after multiple interrupts: %v", err)
-	}
-}
-
-// TestTruncateText 测试文本截断函数
+// TestTruncateText 验证 truncate 辅助函数。
 func TestTruncateText(t *testing.T) {
 	tests := []struct {
-		name     string
-		text     string
-		maxLen   int
-		expected string
+		in   string
+		n    int
+		want string
 	}{
-		{"短文本不截断", "Hello", 10, "Hello"},
-		{"长文本截断", "Hello, World!", 5, "Hello"},
-		{"空文本", "", 10, ""},
-		{"中文文本截断", "你好世界这是一段很长的中文", 5, "你好世界这"},
-		{"刚好等于最大长度", "Hello", 5, "Hello"},
+		{"hello", 10, "hello"},
+		{"hello world", 5, "hello..."},
+		{"", 5, ""},
+		{"你好世界", 2, "你好..."},
 	}
-
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := truncateText(tt.text, tt.maxLen)
-			if result != tt.expected {
-				t.Errorf("truncateText(%q, %d) = %q, want %q", tt.text, tt.maxLen, result, tt.expected)
-			}
-		})
-	}
-}
-
-// TestTTSProcessorPlaybackOrder 测试播放顺序
-func TestTTSProcessorPlaybackOrder(t *testing.T) {
-	provider := newDelayMockTTSProvider()
-	provider.delays = map[string]time.Duration{
-		"First sentence.":  100 * time.Millisecond,
-		"Second sentence.": 10 * time.Millisecond,
-		"Third sentence.":  50 * time.Millisecond,
-	}
-
-	cfg := DefaultTTSConfig()
-	cfg.Provider = provider
-	cfg.MaxBuffer = 10
-	cfg.MaxConcurrent = 3
-	cfg.QueueSize = 50
-	proc, _ := NewTTSProcessor(cfg)
-	proc.OnAudio(func([]byte) {})
-
-	var playedOrder []string
-	var playedMu sync.Mutex
-	proc.OnItemStarted(func(text string, emotion string) {
-		playedMu.Lock()
-		playedOrder = append(playedOrder, text)
-		playedMu.Unlock()
-	})
-
-	ctx := context.Background()
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Failed to start processor: %v", err)
-	}
-	defer func() { _ = proc.Stop() }()
-
-	texts := []string{"First sentence.", "Second sentence.", "Third sentence."}
-	for _, text := range texts {
-		if err := proc.Synthesize(TTSRequest{Text: text, Emotion: "default"}); err != nil {
-			t.Fatalf("Failed to synthesize text: %v", err)
+		got := truncate(tt.in, tt.n)
+		if got != tt.want {
+			t.Errorf("truncate(%q, %d) = %q, want %q", tt.in, tt.n, got, tt.want)
 		}
 	}
-
-	time.Sleep(500 * time.Millisecond)
-
-	playedMu.Lock()
-	defer playedMu.Unlock()
-	if len(playedOrder) != len(texts) {
-		t.Fatalf("Expected %d items played, got %d", len(texts), len(playedOrder))
-	}
-
-	for i, text := range texts {
-		if playedOrder[i] != text {
-			t.Errorf("Expected order[%d] = %q, got %q", i, text, playedOrder[i])
-			return
-		}
-	}
-
-	t.Logf("Playback order verified: %v", playedOrder)
-}
-
-// BenchmarkTTSProcessorSynthesize 基准测试入队性能
-func BenchmarkTTSProcessorSynthesize(b *testing.B) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessorWithConfig(provider, 100, 10, 1000)
-
-	ctx := context.Background()
-	_ = proc.Start(ctx)
-	defer func() { _ = proc.Stop() }()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = proc.Synthesize(TTSRequest{Text: "Benchmark text"})
-	}
-}
-
-// BenchmarkTTSProcessorInterrupt 基准测试打断性能
-func BenchmarkTTSProcessorInterrupt(b *testing.B) {
-	provider := newMockTTSProvider()
-	proc := newTestTTSProcessor(provider)
-
-	ctx := context.Background()
-	_ = proc.Start(ctx)
-	defer func() { _ = proc.Stop() }()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = proc.Synthesize(TTSRequest{Text: "Test"})
-		_ = proc.Interrupt()
-	}
-}
-
-// TestTTSProcessorRaceCondition 测试竞态条件
-func TestTTSProcessorRaceCondition(t *testing.T) {}
-
-// delayMockTTSProvider 带延迟控制的 TTS Provider，用于测试播放顺序
-type delayMockTTSProvider struct {
-	mu       sync.Mutex
-	delays   map[string]time.Duration
-	startErr error
-}
-
-func newDelayMockTTSProvider() *delayMockTTSProvider {
-	return &delayMockTTSProvider{
-		delays: make(map[string]time.Duration),
-	}
-}
-
-func (p *delayMockTTSProvider) Start(ctx context.Context, cfg tts.Config) (tts.Stream, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.startErr != nil {
-		return nil, p.startErr
-	}
-
-	return &delayMockTTSStream{
-		provider:   p,
-		sampleRate: InternalSampleRate,
-		channels:   1,
-	}, nil
-}
-
-type delayMockTTSStream struct {
-	provider   *delayMockTTSProvider
-	text       string
-	reader     *delayMockAudioReader
-	sampleRate int
-	channels   int
-}
-
-func (s *delayMockTTSStream) WriteTextChunk(ctx context.Context, text string) error {
-	s.text = text
-
-	s.provider.mu.Lock()
-	delay := s.provider.delays[text]
-	s.provider.mu.Unlock()
-
-	if delay > 0 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(delay):
-		}
-	}
-
-	s.reader = &delayMockAudioReader{data: []byte(text)}
-	return nil
-}
-
-func (s *delayMockTTSStream) Finish(ctx context.Context) error { return s.Close(ctx) }
-
-func (s *delayMockTTSStream) Close(ctx context.Context) error {
-	if s.reader != nil {
-		_ = s.reader.Close()
-	}
-	return nil
-}
-
-func (s *delayMockTTSStream) AudioReader() io.ReadCloser { return s.reader }
-func (s *delayMockTTSStream) SampleRate() int           { return s.sampleRate }
-func (s *delayMockTTSStream) Channels() int             { return s.channels }
-
-type delayMockAudioReader struct {
-	mu     sync.Mutex
-	data   []byte
-	pos    int
-	closed bool
-}
-
-func (r *delayMockAudioReader) Read(p []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
-	}
-
-	n := copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
-}
-
-func (r *delayMockAudioReader) Close() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.closed = true
-	return nil
 }

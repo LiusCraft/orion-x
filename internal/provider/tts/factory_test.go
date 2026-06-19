@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewProviderUsesRegisteredProvider(t *testing.T) {
-	Register("fake", func() Provider { return fakeProvider{} })
+	Register("fake", func(cfg Config) (Provider, error) { return fakeProvider{}, nil })
 
 	provider, err := NewProvider(ProviderConfig{Type: "fake"})
 	if err != nil {
@@ -28,15 +28,6 @@ func TestNewProviderRejectsUnsupportedProvider(t *testing.T) {
 
 type fakeProvider struct{}
 
-func (fakeProvider) Start(context.Context, Config) (Stream, error) {
-	return fakeStream{}, nil
+func (fakeProvider) Synthesize(_ context.Context, _ string, _ SynthesisOptions) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
 }
-
-type fakeStream struct{}
-
-func (fakeStream) WriteTextChunk(context.Context, string) error { return nil }
-func (fakeStream) Finish(context.Context) error                  { return nil }
-func (fakeStream) Close(context.Context) error                  { return nil }
-func (fakeStream) AudioReader() io.ReadCloser                   { return nil }
-func (fakeStream) SampleRate() int                              { return 16000 }
-func (fakeStream) Channels() int                                { return 1 }

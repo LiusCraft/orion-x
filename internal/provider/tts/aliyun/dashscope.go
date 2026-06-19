@@ -19,37 +19,65 @@ import (
 
 const defaultDashScopeEndpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 
-type DashScopeProvider struct{}
+// DashScopeProvider 是有状态的 TTS Provider，基础配置在创建时注入。
+type DashScopeProvider struct {
+	cfg tts.Config // 已经 normalize 过
+}
 
 func init() {
-	tts.Register(tts.TypeAliyun, func() tts.Provider {
-		return NewDashScopeProvider()
+	tts.Register(tts.TypeAliyun, func(cfg tts.Config) (tts.Provider, error) {
+		return NewDashScopeProvider(cfg)
 	})
 }
 
-func NewDashScopeProvider() *DashScopeProvider {
-	return &DashScopeProvider{}
-}
-
-func (p *DashScopeProvider) Start(ctx context.Context, cfg tts.Config) (tts.Stream, error) {
+func NewDashScopeProvider(cfg tts.Config) (*DashScopeProvider, error) {
 	normalized, err := normalizeConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
+	return &DashScopeProvider{cfg: normalized}, nil
+}
 
-	conn, err := connectDashScope(ctx, normalized)
+// Synthesize 合成一段文本，返回 PCM 音频 reader。
+// 调用方在完整读取后需要 Close reader。
+func (p *DashScopeProvider) Synthesize(ctx context.Context, text string, opts tts.SynthesisOptions) (io.ReadCloser, error) {
+	if strings.TrimSpace(text) == "" {
+		return io.NopCloser(strings.NewReader("")), nil
+	}
+
+	callCfg := p.cfg
+	if opts.Rate > 0 {
+		callCfg.Rate = opts.Rate
+	}
+
+	stream, err := p.newStream(ctx, callCfg, opts.Emotion)
 	if err != nil {
 		return nil, err
 	}
 
-	// Use a buffered channel-based pipe to avoid deadlock
-	// The standard io.Pipe blocks on Write if no one is reading,
-	// but generateTTS waits for Close() before returning the reader.
-	// This creates a deadlock. Using a buffer allows writes to proceed.
-	audioBuf := newBufferedPipe(1024 * 1024) // 1MB buffer for audio data
+	if err := stream.writeTextChunk(ctx, text); err != nil {
+		_ = stream.closeStream(ctx)
+		return nil, err
+	}
+
+	if err := stream.closeStream(ctx); err != nil {
+		return nil, err
+	}
+
+	return stream.audioBuf, nil
+}
+
+func (p *DashScopeProvider) newStream(ctx context.Context, cfg tts.Config, emotion string) (*dashScopeStream, error) {
+	conn, err := connectDashScope(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	audioBuf := newBufferedPipe(1024 * 1024)
 
 	stream := &dashScopeStream{
-		cfg:       normalized,
+		cfg:       cfg,
+		emotion:   emotion,
 		conn:      conn,
 		audioBuf:  audioBuf,
 		startedCh: make(chan struct{}),
@@ -76,10 +104,12 @@ func (p *DashScopeProvider) Start(ctx context.Context, cfg tts.Config) (tts.Stre
 }
 
 type dashScopeStream struct {
-	cfg       tts.Config
-	conn      *websocket.Conn
-	audioBuf  *bufferedPipe
-	writeMu   sync.Mutex
+	cfg      tts.Config
+	emotion  string
+	conn     *websocket.Conn
+	audioBuf *bufferedPipe
+	writeMu  sync.Mutex
+
 	startedCh chan struct{}
 	doneCh    chan struct{}
 	errCh     chan error
@@ -90,7 +120,7 @@ type dashScopeStream struct {
 	finishOnce  sync.Once
 }
 
-// bufferedPipe is a thread-safe buffered pipe that doesn't block on write
+// bufferedPipe is a thread-safe buffered pipe that doesn't block on write.
 type bufferedPipe struct {
 	buf    []byte
 	mu     sync.Mutex
@@ -116,7 +146,6 @@ func (bp *bufferedPipe) Write(p []byte) (int, error) {
 		return 0, io.ErrClosedPipe
 	}
 
-	// If buffer is full, wait for some space or just append (may grow)
 	bp.buf = append(bp.buf, p...)
 	bp.cond.Signal()
 	return len(p), nil
@@ -148,25 +177,7 @@ func (bp *bufferedPipe) Close() error {
 	return nil
 }
 
-func (s *dashScopeStream) AudioReader() io.ReadCloser {
-	return s.audioBuf
-}
-
-func (s *dashScopeStream) SampleRate() int {
-	// DashScope TTS 根据配置返回采样率
-	// 默认为 16000 Hz
-	if s.cfg.SampleRate > 0 {
-		return s.cfg.SampleRate
-	}
-	return 16000
-}
-
-func (s *dashScopeStream) Channels() int {
-	// DashScope TTS 输出单声道 PCM
-	return 1
-}
-
-func (s *dashScopeStream) WriteTextChunk(ctx context.Context, text string) error {
+func (s *dashScopeStream) writeTextChunk(ctx context.Context, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -181,7 +192,7 @@ func (s *dashScopeStream) WriteTextChunk(ctx context.Context, text string) error
 	return s.sendContinueTask(ctx, text)
 }
 
-func (s *dashScopeStream) Finish(ctx context.Context) error {
+func (s *dashScopeStream) finish(ctx context.Context) error {
 	var err error
 	s.finishOnce.Do(func() {
 		err = s.sendFinishTask(ctx)
@@ -192,8 +203,9 @@ func (s *dashScopeStream) Finish(ctx context.Context) error {
 	return err
 }
 
-func (s *dashScopeStream) Close(ctx context.Context) error {
-	if err := s.Finish(ctx); err != nil {
+// closeStream 发送 finish-task 并等待所有音频接收完毕，然后关闭连接。
+func (s *dashScopeStream) closeStream(ctx context.Context) error {
+	if err := s.finish(ctx); err != nil {
 		return err
 	}
 	select {
@@ -220,7 +232,23 @@ func (s *dashScopeStream) waitStarted(ctx context.Context) error {
 	}
 }
 
-func (s *dashScopeStream) sendRunTask(ctx context.Context) error {
+func (s *dashScopeStream) sendRunTask(_ context.Context) error {
+	params := map[string]any{
+		"text_type":   s.cfg.TextType,
+		"voice":       s.cfg.Voice,
+		"format":      s.cfg.Format,
+		"sample_rate": s.cfg.SampleRate,
+		"volume":      s.cfg.Volume,
+		"rate":        s.cfg.Rate,
+		"pitch":       s.cfg.Pitch,
+		"enable_ssml": s.cfg.EnableSSML,
+	}
+	// emotion 映射：系统内部 emotion → 该 voice 下可用的 emotion 参数
+	// 具体映射值由 voice 决定，后续按 voice 完善
+	if mapped := mapEmotion(s.cfg.Voice, s.emotion); mapped != "" {
+		params["emotion"] = mapped
+	}
+
 	payload := runTaskMessage{
 		Header: taskHeader{
 			Action:    "run-task",
@@ -228,21 +256,12 @@ func (s *dashScopeStream) sendRunTask(ctx context.Context) error {
 			Streaming: "duplex",
 		},
 		Payload: taskPayload{
-			TaskGroup: "audio",
-			Task:      "tts",
-			Function:  "SpeechSynthesizer",
-			Model:     s.cfg.Model,
-			Parameters: map[string]any{
-				"text_type":   s.cfg.TextType,
-				"voice":       s.cfg.Voice,
-				"format":      s.cfg.Format,
-				"sample_rate": s.cfg.SampleRate,
-				"volume":      s.cfg.Volume,
-				"rate":        s.cfg.Rate,
-				"pitch":       s.cfg.Pitch,
-				"enable_ssml": s.cfg.EnableSSML,
-			},
-			Input: map[string]any{},
+			TaskGroup:  "audio",
+			Task:       "tts",
+			Function:   "SpeechSynthesizer",
+			Model:      s.cfg.Model,
+			Parameters: params,
+			Input:      map[string]any{},
 		},
 	}
 
@@ -257,7 +276,7 @@ func (s *dashScopeStream) sendRunTask(ctx context.Context) error {
 	return err
 }
 
-func (s *dashScopeStream) sendContinueTask(ctx context.Context, text string) error {
+func (s *dashScopeStream) sendContinueTask(_ context.Context, text string) error {
 	payload := continueTaskMessage{
 		Header: taskHeader{
 			Action:    "continue-task",
@@ -282,7 +301,7 @@ func (s *dashScopeStream) sendContinueTask(ctx context.Context, text string) err
 	return err
 }
 
-func (s *dashScopeStream) sendFinishTask(ctx context.Context) error {
+func (s *dashScopeStream) sendFinishTask(_ context.Context) error {
 	payload := finishTaskMessage{
 		Header: taskHeader{
 			Action:    "finish-task",
@@ -349,7 +368,6 @@ func (s *dashScopeStream) handleEvent(event eventMessage) bool {
 		err := mapDashScopeError(event.Header.ErrorCode, event.Header.ErrorMessage)
 		s.closeWithError(err)
 		return true
-	// result-generated is expected, ignore it
 	case "result-generated":
 		// normal event, no action needed
 	}
@@ -385,6 +403,15 @@ func (s *dashScopeStream) streamErr() error {
 	default:
 		return nil
 	}
+}
+
+// mapEmotion 将系统内部 emotion 值映射到指定 voice 支持的 emotion 参数。
+// 不同 voice 支持的 emotion 不同，返回空字符串表示不传 emotion 参数。
+func mapEmotion(voice, emotion string) string {
+	// TODO: 根据实际 voice 的支持情况完善映射表
+	_ = voice
+	_ = emotion
+	return ""
 }
 
 func normalizeConfig(cfg tts.Config) (tts.Config, error) {
@@ -494,9 +521,9 @@ func mapDashScopeError(code, message string) error {
 }
 
 func newTaskID() string {
-	var bytes [16]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
 		return "fallback-task-id"
 	}
-	return hex.EncodeToString(bytes[:])
+	return hex.EncodeToString(b[:])
 }
