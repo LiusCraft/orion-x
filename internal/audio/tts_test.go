@@ -62,10 +62,9 @@ func newTestTTSProcessor(provider tts.Provider) TTSProcessor {
 	return proc
 }
 
-func newTestTTSProcessorWithConfig(provider tts.Provider, maxConcurrent, queueSize, maxRunes int) TTSProcessor {
+func newTestTTSProcessorWithConfig(provider tts.Provider, queueSize, maxRunes int) TTSProcessor {
 	cfg := DefaultTTSConfig()
 	cfg.Provider = provider
-	cfg.MaxConcurrent = maxConcurrent
 	cfg.QueueSize = queueSize
 	cfg.MaxRunes = maxRunes
 	proc, _ := NewTTSProcessor(cfg)
@@ -248,7 +247,7 @@ func TestTTSProcessorInterrupt(t *testing.T) {
 	provider := newMockTTSProvider()
 	provider.delays["第一句，"] = 200 * time.Millisecond
 
-	proc := newTestTTSProcessorWithConfig(provider, 1, 50, 100)
+	proc := newTestTTSProcessorWithConfig(provider, 50, 100)
 
 	var mu sync.Mutex
 	var chunks []TTSChunk
@@ -289,7 +288,7 @@ func TestTTSProcessorPlaybackOrder(t *testing.T) {
 	provider.delays["First."] = 100 * time.Millisecond
 	provider.delays["Second."] = 10 * time.Millisecond
 
-	proc := newTestTTSProcessorWithConfig(provider, 2, 50, 100)
+	proc := newTestTTSProcessorWithConfig(provider, 50, 100)
 
 	var mu sync.Mutex
 	var order []string

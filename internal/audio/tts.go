@@ -2,6 +2,7 @@ package audio
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,8 +15,8 @@ import (
 
 // TTSChunk 是一个文本-音频配对单元，对应一句话。
 type TTSChunk struct {
-	Text  string // 句子文本
-	Audio []byte // 该句完整 PCM 音频
+	Text  string
+	Audio []byte
 }
 
 // TTSConfig 配置 TTSProcessor。
@@ -23,6 +24,7 @@ type TTSConfig struct {
 	// Provider 是 TTS 后端。必填。
 	Provider tts.Provider
 	// MaxConcurrent 是并发合成的最大句数，默认 2。
+	// 合成完的结果由 orderer 按原始顺序排列后送入播放队列。
 	MaxConcurrent int
 	// QueueSize 是待合成句子队列的大小，默认 100。
 	QueueSize int
@@ -39,20 +41,20 @@ func DefaultTTSConfig() *TTSConfig {
 	}
 }
 
-// TTSProcessor 接收 LLM 流式文本，内部分句后逐句合成音频，
-// 以句为单位通过 OnChunk 回调文本+音频配对。
+// TTSProcessor 接收 LLM 流式文本，内部分句后并发合成音频，
+// 以句为单位通过 OnChunk 按原始顺序回调文本+音频配对。
+//
+// 流水线：
+//
+//	sentenceCh → [worker×MaxConcurrent] → resultCh → [orderer] → playbackCh → [playback]
+//
+// 合成并发数与播放独立控制，playbackCh 容量=1，合成最多比播放提前 1 句。
 type TTSProcessor interface {
-	// Write 持续送入 LLM 流式 token。内部按停顿分句，首句用弱停顿，后续用强停顿。
 	Write(text string, opts tts.SynthesisOptions) error
-	// Flush 强制输出剩余缓冲文本（LLM 输出结束时调用）。
 	Flush(opts tts.SynthesisOptions) error
-	// OnChunk 注册回调，每句话合成完时收到文本+音频配对。
 	OnChunk(func(TTSChunk))
-	// Interrupt 清空待合成队列，丢弃进行中的合成结果。
 	Interrupt() error
-	// Start 启动内部 worker。
 	Start(ctx context.Context) error
-	// Stop 停止并等待所有 goroutine 退出。
 	Stop() error
 }
 
@@ -80,17 +82,17 @@ func NewTTSProcessor(cfg *TTSConfig) (TTSProcessor, error) {
 		cfg:        cfg,
 		splitter:   newSentenceSplitter(mr),
 		sentenceCh: make(chan sentenceItem, qs),
+		resultCh:   make(chan synthResult, maxC),
+		playbackCh: make(chan TTSChunk, 1),
 		sem:        make(chan struct{}, maxC),
-		pending:    make(map[int64]TTSChunk),
 	}, nil
 }
 
 // --- 分句器 ---
 
-// sentenceSplitter 两阶段分句：首句在弱停顿处切，后续在强停顿处切。
 type sentenceSplitter struct {
 	buf          []rune
-	firstFlushed bool // 首句是否已输出
+	firstFlushed bool
 	maxRunes     int
 }
 
@@ -118,11 +120,9 @@ func (s *sentenceSplitter) feed(text string) []string {
 	var out []string
 	for _, r := range text {
 		s.buf = append(s.buf, r)
-
 		shouldFlush := isStrongBoundary(r) ||
 			(!s.firstFlushed && isWeakBoundary(r)) ||
 			(s.maxRunes > 0 && len(s.buf) >= s.maxRunes)
-
 		if shouldFlush {
 			if seg := s.flushBuf(); seg != "" {
 				out = append(out, seg)
@@ -132,9 +132,7 @@ func (s *sentenceSplitter) feed(text string) []string {
 	return out
 }
 
-func (s *sentenceSplitter) flush() string {
-	return s.flushBuf()
-}
+func (s *sentenceSplitter) flush() string { return s.flushBuf() }
 
 func (s *sentenceSplitter) flushBuf() string {
 	if len(s.buf) == 0 {
@@ -153,7 +151,7 @@ func (s *sentenceSplitter) reset() {
 	s.firstFlushed = false
 }
 
-// --- 待合成队列项 ---
+// --- 内部类型 ---
 
 type sentenceItem struct {
 	text  string
@@ -162,25 +160,39 @@ type sentenceItem struct {
 	epoch int64
 }
 
+type synthResult struct {
+	seq   int64
+	epoch int64
+	text  string
+	audio []byte // nil 表示合成失败，orderer 会跳过但推进序号
+}
+
 // --- ttsProcessor ---
 
 type ttsProcessor struct {
 	cfg *TTSConfig
 
+	// mu 保护：onChunk、started、splitter、seqNext
 	mu      sync.Mutex
 	onChunk func(TTSChunk)
 	started bool
+	splitter *sentenceSplitter
+	seqNext  int64
 
-	splitter   *sentenceSplitter
-	sentenceCh chan sentenceItem
-	sem        chan struct{}
+	// epochMu 保护 epoch
+	epochMu sync.Mutex
+	epoch   int64
 
-	// 顺序保证
-	pendingMu sync.Mutex
-	pending   map[int64]TTSChunk
-	seqNext   int64
-	seqPlay   int64
-	epoch     int64
+	// 流水线 channels
+	sentenceCh chan sentenceItem // 待合成
+	resultCh   chan synthResult  // 合成结果（无序）
+	playbackCh chan TTSChunk     // 排序后待播放（容量1）
+	sem        chan struct{}     // 并发合成控制
+
+	// synthCtx：Interrupt 时独立取消合成和 orderer 的 playbackCh 写入
+	synthMu     sync.Mutex
+	synthCtx    context.Context
+	synthCancel context.CancelFunc
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -202,10 +214,13 @@ func (p *ttsProcessor) Start(ctx context.Context) error {
 	}
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
+	p.synthCtx, p.synthCancel = context.WithCancel(p.ctx)
 	p.started = true
 
-	p.wg.Add(1)
+	p.wg.Add(3) // dispatcher, orderer, playbackLoop
 	go p.dispatcher()
+	go p.orderer()
+	go p.playbackLoop()
 
 	logging.Infof("TTSProcessor: started (maxConcurrent=%d)", cap(p.sem))
 	return nil
@@ -262,26 +277,55 @@ func (p *ttsProcessor) Flush(opts tts.SynthesisOptions) error {
 	return nil
 }
 
-// hasSpeakableText 判断文本是否含有可朗读的字符（字母、数字、汉字等），
-// 过滤掉纯 emoji / 标点 / 空白的句子，避免无效的 TTS 请求。
-func hasSpeakableText(s string) bool {
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			return true
+func (p *ttsProcessor) Interrupt() error {
+	// 1. 递增 epoch（使旧 epoch 的合成结果被 orderer 丢弃）
+	p.epochMu.Lock()
+	p.epoch++
+	p.epochMu.Unlock()
+
+	// 2. 取消当前合成 + orderer 等待写 playbackCh，重建 synthCtx
+	p.synthMu.Lock()
+	p.synthCancel()
+	p.synthCtx, p.synthCancel = context.WithCancel(p.ctx)
+	p.synthMu.Unlock()
+
+	// 3. 清空各队列
+	drainCh(p.sentenceCh)
+	drainCh(p.resultCh)
+	drainCh(p.playbackCh)
+
+	// 4. 重置分句器和序号
+	p.mu.Lock()
+	p.seqNext = 0
+	p.splitter.reset()
+	p.mu.Unlock()
+
+	logging.Infof("TTSProcessor: interrupted")
+	return nil
+}
+
+func drainCh[T any](ch chan T) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
 		}
 	}
-	return false
 }
 
 func (p *ttsProcessor) enqueue(ctx context.Context, text string, opts tts.SynthesisOptions) error {
 	if !hasSpeakableText(text) {
 		return nil
 	}
-	p.pendingMu.Lock()
+	p.mu.Lock()
 	seq := p.seqNext
 	p.seqNext++
+	p.mu.Unlock()
+
+	p.epochMu.Lock()
 	epoch := p.epoch
-	p.pendingMu.Unlock()
+	p.epochMu.Unlock()
 
 	select {
 	case p.sentenceCh <- sentenceItem{text: text, opts: opts, seq: seq, epoch: epoch}:
@@ -291,35 +335,7 @@ func (p *ttsProcessor) enqueue(ctx context.Context, text string, opts tts.Synthe
 	}
 }
 
-func (p *ttsProcessor) Interrupt() error {
-	// 递增 epoch，使正在进行的合成结果被丢弃
-	p.pendingMu.Lock()
-	p.epoch++
-	p.seqNext = 0
-	p.seqPlay = 0
-	p.pending = make(map[int64]TTSChunk)
-	p.pendingMu.Unlock()
-
-	// 清空待合成队列
-loop:
-	for {
-		select {
-		case <-p.sentenceCh:
-		default:
-			break loop
-		}
-	}
-
-	// 重置分句器（与 Write/Flush 共用 mu 保护）
-	p.mu.Lock()
-	p.splitter.reset()
-	p.mu.Unlock()
-
-	logging.Infof("TTSProcessor: interrupted")
-	return nil
-}
-
-// --- dispatcher & worker ---
+// --- dispatcher：从 sentenceCh 取句子，并发启动 worker ---
 
 func (p *ttsProcessor) dispatcher() {
 	defer p.wg.Done()
@@ -331,7 +347,6 @@ func (p *ttsProcessor) dispatcher() {
 			if !ok {
 				return
 			}
-			// 阻塞等待 semaphore（控制并发合成数量）
 			select {
 			case p.sem <- struct{}{}:
 			case <-p.ctx.Done():
@@ -343,59 +358,144 @@ func (p *ttsProcessor) dispatcher() {
 	}
 }
 
+// --- worker：合成单句，结果放入 resultCh ---
+
 func (p *ttsProcessor) worker(item sentenceItem) {
 	defer p.wg.Done()
 	defer func() { <-p.sem }()
 
-	reader, err := p.cfg.Provider.Synthesize(p.ctx, item.text, item.opts)
+	p.synthMu.Lock()
+	synthCtx := p.synthCtx
+	p.synthMu.Unlock()
+
+	reader, err := p.cfg.Provider.Synthesize(synthCtx, item.text, item.opts)
 	if err != nil {
-		logging.Errorf("TTSProcessor: synthesize %q error: %v", truncate(item.text, 20), err)
-		p.notifyDone(item, nil)
+		if !errors.Is(err, context.Canceled) {
+			logging.Errorf("TTSProcessor: synthesize %q: %v", truncate(item.text, 20), err)
+		}
+		p.sendResult(synthResult{seq: item.seq, epoch: item.epoch, text: item.text})
 		return
 	}
 	defer func() { _ = reader.Close() }()
 
 	audio, err := io.ReadAll(reader)
 	if err != nil {
-		logging.Errorf("TTSProcessor: read audio for %q error: %v", truncate(item.text, 20), err)
-		p.notifyDone(item, nil)
+		if !errors.Is(err, context.Canceled) {
+			logging.Errorf("TTSProcessor: read audio %q: %v", truncate(item.text, 20), err)
+		}
+		p.sendResult(synthResult{seq: item.seq, epoch: item.epoch, text: item.text})
 		return
 	}
 
-	p.notifyDone(item, audio)
+	p.sendResult(synthResult{seq: item.seq, epoch: item.epoch, text: item.text, audio: audio})
 }
 
-func (p *ttsProcessor) notifyDone(item sentenceItem, audio []byte) {
-	p.pendingMu.Lock()
-	defer p.pendingMu.Unlock()
+func (p *ttsProcessor) sendResult(r synthResult) {
+	p.synthMu.Lock()
+	synthCtx := p.synthCtx
+	p.synthMu.Unlock()
 
-	// 已被 Interrupt，丢弃
-	if item.epoch != p.epoch {
-		return
+	select {
+	case p.resultCh <- r:
+	case <-synthCtx.Done():
+	case <-p.ctx.Done():
 	}
+}
 
-	p.pending[item.seq] = TTSChunk{Text: item.text, Audio: audio}
+// --- orderer：按 seqNum 排序，顺序放入 playbackCh ---
 
-	p.mu.Lock()
-	fn := p.onChunk
-	p.mu.Unlock()
+func (p *ttsProcessor) orderer() {
+	defer p.wg.Done()
 
-	// 按序号顺序回调
+	pending := make(map[int64]synthResult)
+	var seqPlay int64
+	var curEpoch int64
+
 	for {
-		chunk, ok := p.pending[p.seqPlay]
-		if !ok {
-			break
-		}
-		delete(p.pending, p.seqPlay)
-		p.seqPlay++
+		select {
+		case <-p.ctx.Done():
+			return
+		case result, ok := <-p.resultCh:
+			if !ok {
+				return
+			}
 
-		if fn != nil && len(chunk.Audio) > 0 {
-			fn(chunk)
+			if result.epoch < curEpoch {
+				continue // 旧 epoch，丢弃
+			}
+			if result.epoch > curEpoch {
+				// 新 epoch（Interrupt 后），重置排序状态
+				pending = make(map[int64]synthResult)
+				seqPlay = 0
+				curEpoch = result.epoch
+			}
+
+			pending[result.seq] = result
+
+			// 按序号顺序推送到 playbackCh
+			interrupted := false
+			for !interrupted {
+				r, ok := pending[seqPlay]
+				if !ok {
+					break
+				}
+				delete(pending, seqPlay)
+				seqPlay++
+
+				if len(r.audio) == 0 {
+					continue // 合成失败的句子跳过，但序号继续推进
+				}
+
+				p.synthMu.Lock()
+				synthCtx := p.synthCtx
+				p.synthMu.Unlock()
+
+				select {
+				case p.playbackCh <- TTSChunk{Text: r.text, Audio: r.audio}:
+				case <-synthCtx.Done():
+					// Interrupt：清空 pending，不再向 playbackCh 写入
+					pending = make(map[int64]synthResult)
+					interrupted = true
+				case <-p.ctx.Done():
+					return
+				}
+			}
 		}
 	}
 }
 
-// --- 工具函数 ---
+// --- playbackLoop：顺序播放 ---
+
+func (p *ttsProcessor) playbackLoop() {
+	defer p.wg.Done()
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case chunk, ok := <-p.playbackCh:
+			if !ok {
+				return
+			}
+			p.mu.Lock()
+			fn := p.onChunk
+			p.mu.Unlock()
+			if fn != nil {
+				fn(chunk)
+			}
+		}
+	}
+}
+
+// --- 工具 ---
+
+func hasSpeakableText(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
+}
 
 func truncate(s string, n int) string {
 	runes := []rune(s)
