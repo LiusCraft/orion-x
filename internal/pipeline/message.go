@@ -6,17 +6,14 @@ import "time"
 type MessageType string
 
 const (
-	MessageTypeTextChunk   MessageType = "text_chunk"
-	MessageTypeTextPartial MessageType = "text_partial" // ASR interim result
-	MessageTypeAudioData   MessageType = "audio_data"
-	MessageTypeToolCall    MessageType = "tool_call"
-	MessageTypeToolResult  MessageType = "tool_result"
-	MessageTypeEmotion     MessageType = "emotion"
-	MessageTypeFinished    MessageType = "finished"
-	MessageTypeError       MessageType = "error"
-	MessageTypeInterrupt   MessageType = "interrupt" // 用户打断
-	MessageTypeTTSStart    MessageType = "tts_start" // TTS 开始
-	MessageTypeTTSStop     MessageType = "tts_stop"  // TTS 停止
+	// MessageTypeData 数据帧，Payload 的具体类型由各 Stage 自行约定。
+	// Pipeline 框架不感知 Payload 内容，只负责透传。
+	MessageTypeData MessageType = "data"
+
+	// 控制信号：框架级别，Stage 感知并处理。
+	MessageTypeFinished  MessageType = "finished"  // 流正常结束
+	MessageTypeError     MessageType = "error"     // 错误（携带于 Metadata.Error）
+	MessageTypeInterrupt MessageType = "interrupt" // 打断/取消
 )
 
 // Message Pipeline 中流转的数据单元

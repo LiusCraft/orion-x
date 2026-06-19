@@ -34,7 +34,7 @@ func (s *TextFilterStage) Process(ctx context.Context, input <-chan Message) <-c
 				}
 
 				// 只处理文本类型消息
-				if msg.Type == MessageTypeTextChunk {
+				if msg.Type == MessageTypeData {
 					if text, ok := msg.Payload.(string); ok {
 						// 过滤 <metadata> 标签
 						filtered := s.filterMetadataTags(text)
@@ -100,7 +100,7 @@ func (s *EmotionExtractorStage) Process(ctx context.Context, input <-chan Messag
 				}
 
 				// 只处理文本类型消息
-				if msg.Type == MessageTypeTextChunk {
+				if msg.Type == MessageTypeData {
 					if text, ok := msg.Payload.(string); ok {
 						emotion := s.extractEmotion(text)
 						if emotion != "" {

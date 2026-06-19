@@ -45,7 +45,7 @@ func TestAgentStage_TextChunk(t *testing.T) {
 
 	output := stage.Process(ctx, input)
 
-	input <- pipeline.NewMessage(pipeline.MessageTypeTextChunk, "hello")
+	input <- pipeline.NewMessage(pipeline.MessageTypeData, "hello")
 
 	var messages []pipeline.Message
 	for i := 0; i < 2; i++ {
@@ -64,8 +64,8 @@ func TestAgentStage_TextChunk(t *testing.T) {
 		t.Fatalf("Expected 2 messages, got %d", len(messages))
 	}
 
-	if messages[0].Type != pipeline.MessageTypeTextChunk {
-		t.Errorf("Expected MessageTypeTextChunk, got %s", messages[0].Type)
+	if messages[0].Type != pipeline.MessageTypeData {
+		t.Errorf("Expected MessageTypeData, got %s", messages[0].Type)
 	}
 	if messages[0].Payload != "Response: hello" {
 		t.Errorf("Expected 'Response: hello', got '%s'", messages[0].Payload)
@@ -89,7 +89,7 @@ func TestAgentStage_Error(t *testing.T) {
 
 	output := stage.Process(ctx, input)
 
-	input <- pipeline.NewMessage(pipeline.MessageTypeTextChunk, "test")
+	input <- pipeline.NewMessage(pipeline.MessageTypeData, "test")
 	close(input)
 
 	// 验证错误
@@ -111,11 +111,11 @@ func TestAgentStage_Passthrough(t *testing.T) {
 	output := stage.Process(ctx, input)
 
 	// 发送非文本消息，应该透传
-	input <- pipeline.NewMessage(pipeline.MessageTypeAudioData, []byte{1, 2, 3})
+	input <- pipeline.NewMessage(pipeline.MessageTypeData, []byte{1, 2, 3})
 	close(input)
 
 	msg := <-output
-	if msg.Type != pipeline.MessageTypeAudioData {
-		t.Errorf("Expected MessageTypeAudioData, got %s", msg.Type)
+	if msg.Type != pipeline.MessageTypeData {
+		t.Errorf("Expected MessageTypeData, got %s", msg.Type)
 	}
 }

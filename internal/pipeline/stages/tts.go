@@ -46,7 +46,7 @@ func (s *TTSStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 				}
 
 				switch msg.Type {
-				case pipeline.MessageTypeTextChunk:
+				case pipeline.MessageTypeData:
 					if err := s.handleTextChunk(msg); err != nil {
 						logging.Errorf("TTSStage: handle text chunk error: %v", err)
 						msg = msg.WithError(err)
@@ -58,15 +58,6 @@ func (s *TTSStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 						logging.Errorf("TTSStage: flush TTS error: %v", err)
 					}
 					s.lastEmotion = ""
-
-					select {
-					case output <- pipeline.Message{
-						Type:     pipeline.MessageTypeTTSStop,
-						Metadata: msg.Metadata,
-					}:
-					case <-ctx.Done():
-						return
-					}
 
 				case pipeline.MessageTypeInterrupt:
 					_ = s.proc.Interrupt()

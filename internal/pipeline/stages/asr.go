@@ -38,13 +38,12 @@ func (s *ASRStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 	output := make(chan pipeline.Message, 16)
 
 	s.proc.OnResult(func(result audio.ASRResult) {
-		msgType := pipeline.MessageTypeTextPartial
-		if result.IsFinal {
-			msgType = pipeline.MessageTypeTextChunk
+		if !result.IsFinal {
+			return // 中间结果不走 pipeline，外部通过 ASRProcessor 回调直接处理
 		}
 		select {
 		case output <- pipeline.Message{
-			Type:    msgType,
+			Type:    pipeline.MessageTypeData,
 			Payload: result.Text,
 			Metadata: pipeline.Metadata{
 				Timestamp: time.Now(),

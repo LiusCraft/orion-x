@@ -14,7 +14,7 @@ func TestTextFilterStage(t *testing.T) {
 	output := stage.Process(ctx, input)
 
 	// 发送带有 metadata 标签的文本
-	input <- NewMessage(MessageTypeTextChunk, "Hello <metadata>world</metadata>!")
+	input <- NewMessage(MessageTypeData, "Hello <metadata>world</metadata>!")
 
 	msg := <-output
 	if msg.Payload != "Hello !" {
@@ -31,11 +31,11 @@ func TestTextFilterStage_NonTextMessage(t *testing.T) {
 	output := stage.Process(ctx, input)
 
 	// 发送非文本消息，应该原样透传
-	input <- NewMessage(MessageTypeAudioData, []byte{1, 2, 3})
+	input <- NewMessage(MessageTypeData, []byte{1, 2, 3})
 
 	msg := <-output
-	if msg.Type != MessageTypeAudioData {
-		t.Errorf("Expected MessageTypeAudioData, got %s", msg.Type)
+	if msg.Type != MessageTypeData {
+		t.Errorf("Expected MessageTypeData, got %s", msg.Type)
 	}
 }
 
@@ -48,7 +48,7 @@ func TestEmotionExtractorStage(t *testing.T) {
 	output := stage.Process(ctx, input)
 
 	// 发送带有 emotion 标签的文本
-	input <- NewMessage(MessageTypeTextChunk, "I'm so <emotion>happy</emotion> today!")
+	input <- NewMessage(MessageTypeData, "I'm so <emotion>happy</emotion> today!")
 
 	msg := <-output
 	if msg.Metadata.Emotion != "happy" {
@@ -65,7 +65,7 @@ func TestEmotionExtractorStage_NoEmotion(t *testing.T) {
 	output := stage.Process(ctx, input)
 
 	// 发送不带 emotion 标签的文本
-	input <- NewMessage(MessageTypeTextChunk, "Just a normal message")
+	input <- NewMessage(MessageTypeData, "Just a normal message")
 
 	msg := <-output
 	if msg.Metadata.Emotion != "" {
@@ -87,7 +87,7 @@ func TestPipelineWithFiltersAndExtractors(t *testing.T) {
 	defer func() { _ = pipeline.Stop() }()
 
 	go func() {
-		pipeline.Input() <- NewMessage(MessageTypeTextChunk, "I'm <emotion>happy</emotion> <metadata>today</metadata>!")
+		pipeline.Input() <- NewMessage(MessageTypeData, "I'm <emotion>happy</emotion> <metadata>today</metadata>!")
 	}()
 
 	msg := <-pipeline.Output()

@@ -47,7 +47,7 @@ func TestAgentStage_Integration(t *testing.T) {
 
 	// 发送用户输入
 	go func() {
-		p.Input() <- pipeline.NewMessage(pipeline.MessageTypeTextChunk, "hello <metadata>world</metadata>")
+		p.Input() <- pipeline.NewMessage(pipeline.MessageTypeData, "hello <metadata>world</metadata>")
 	}()
 
 	// 接收输出
@@ -79,7 +79,7 @@ done:
 	}
 
 	// 第一个是文本响应
-	if messages[0].Type != pipeline.MessageTypeTextChunk {
+	if messages[0].Type != pipeline.MessageTypeData {
 		t.Errorf("Expected first message to be TextChunk, got %s", messages[0].Type)
 	}
 
@@ -118,7 +118,7 @@ func TestMultipleStages_MessageFlow(t *testing.T) {
 	// 发送输入
 	go func() {
 		p.Input() <- pipeline.NewMessage(
-			pipeline.MessageTypeTextChunk,
+			pipeline.MessageTypeData,
 			"I'm <emotion>happy</emotion> <metadata>today</metadata>",
 		)
 	}()

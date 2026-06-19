@@ -76,7 +76,7 @@ func TestPipelineBasic(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		pipeline.Input() <- NewMessage(MessageTypeTextChunk, "test")
+		pipeline.Input() <- NewMessage(MessageTypeData, "test")
 	}()
 	<-done
 
@@ -123,7 +123,7 @@ func TestPipelineInterrupt(t *testing.T) {
 	// 发送消息并等待 goroutine 完成
 	msgSent := make(chan struct{})
 	go func() {
-		pipeline.Input() <- NewMessage(MessageTypeTextChunk, "test")
+		pipeline.Input() <- NewMessage(MessageTypeData, "test")
 		close(msgSent)
 	}()
 
@@ -181,7 +181,7 @@ func TestPipelineErrorPropagation(t *testing.T) {
 
 	// 发送消息
 	go func() {
-		pipeline.Input() <- NewMessage(MessageTypeTextChunk, "test")
+		pipeline.Input() <- NewMessage(MessageTypeData, "test")
 	}()
 
 	// 接收错误消息
@@ -218,7 +218,7 @@ func TestPipelineWithObserver(t *testing.T) {
 	// 发送多条消息
 	go func() {
 		for i := 0; i < 3; i++ {
-			pipeline.Input() <- NewMessage(MessageTypeTextChunk, fmt.Sprintf("msg-%d", i))
+			pipeline.Input() <- NewMessage(MessageTypeData, fmt.Sprintf("msg-%d", i))
 		}
 	}()
 

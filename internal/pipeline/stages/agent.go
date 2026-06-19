@@ -56,20 +56,10 @@ func (s *AgentStage) Process(ctx context.Context, input <-chan pipeline.Message)
 				continue
 			}
 
-			if msg.Type != pipeline.MessageTypeTextChunk {
-				select {
-				case output <- msg:
-				case <-ctx.Done():
-					return
-				}
-				continue
-			}
-
 			text, ok := msg.Payload.(string)
 			if !ok {
-				logging.Errorf("AgentStage: invalid payload type, expected string")
 				select {
-				case output <- msg.WithError(fmt.Errorf("invalid payload type")):
+				case output <- msg:
 				case <-ctx.Done():
 					return
 				}
@@ -168,8 +158,8 @@ func (s *AgentStage) convertAgentEvent(event agent.AgentEvent, metadata pipeline
 	switch e := event.(type) {
 	case *agent.TextChunkEvent:
 		return pipeline.Message{
-			Type:     pipeline.MessageTypeTextChunk,
-			Payload:  e.Chunk,
+			Type:     pipeline.MessageTypeData,
+			Payload:  e.Chunk, // string，TTS Stage 通过类型断言消费
 			Metadata: metadata,
 		}
 

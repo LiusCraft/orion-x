@@ -103,7 +103,7 @@ func TestDAGPipelineLinear(t *testing.T) {
 	}
 	defer func() { _ = p.Stop() }()
 
-	p.Input() <- NewMessage(MessageTypeTextChunk, "hello")
+	p.Input() <- NewMessage(MessageTypeData, "hello")
 
 	msg := <-p.Output()
 	result, ok := msg.Payload.(string)
@@ -146,8 +146,8 @@ func TestDAGPipelineFanOut(t *testing.T) {
 	}
 	defer func() { _ = p.Stop() }()
 
-	p.Input() <- NewMessage(MessageTypeTextChunk, "hello")
-	p.Input() <- NewMessage(MessageTypeTextChunk, "world")
+	p.Input() <- NewMessage(MessageTypeData, "hello")
+	p.Input() <- NewMessage(MessageTypeData, "world")
 
 	// 等待所有分支处理完毕
 	time.Sleep(100 * time.Millisecond)
@@ -197,7 +197,7 @@ func TestDAGPipelineFanIn(t *testing.T) {
 	defer func() { _ = p.Stop() }()
 
 	// 通过 input 发送消息（两个 source 节点都从 input 读取）
-	p.Input() <- NewMessage(MessageTypeTextChunk, "hello")
+	p.Input() <- NewMessage(MessageTypeData, "hello")
 
 	msg := <-p.Output()
 
@@ -232,7 +232,7 @@ func TestDAGPipelineDiamond(t *testing.T) {
 	}
 	defer func() { _ = p.Stop() }()
 
-	p.Input() <- NewMessage(MessageTypeTextChunk, "hello")
+	p.Input() <- NewMessage(MessageTypeData, "hello")
 
 	// D 会收到两条消息（来自 B 和 C）
 	results := collectAll(t, p.Output(), 2, 500*time.Millisecond)
@@ -295,7 +295,7 @@ func TestDAGPipelineReportScenario(t *testing.T) {
 					}
 					text := msg.Payload.(string)
 					// 1. 先发句子
-					sentenceMsg := NewMessage(MessageTypeTTSStart, text)
+					sentenceMsg := NewMessage(MessageTypeData, text)
 					sentenceMsg.Metadata = msg.Metadata
 					select {
 					case output <- sentenceMsg:
@@ -303,7 +303,7 @@ func TestDAGPipelineReportScenario(t *testing.T) {
 						return
 					}
 					// 2. 再发音频（模拟）
-					audioMsg := NewMessage(MessageTypeAudioData, text+"-audio")
+					audioMsg := NewMessage(MessageTypeData, text+"-audio")
 					select {
 					case output <- audioMsg:
 					case <-ctx.Done():
@@ -338,27 +338,20 @@ func TestDAGPipelineReportScenario(t *testing.T) {
 
 	// 发送 3 个文本
 	for i := 0; i < 3; i++ {
-		p.Input() <- NewMessage(MessageTypeTextChunk, fmt.Sprintf("sentence-%d", i))
+		p.Input() <- NewMessage(MessageTypeData, fmt.Sprintf("sentence-%d", i))
 	}
 
 	// output 应收到 6 条消息（3 个句子 + 3 个音频，sink 只有 tts）
 	results := collectAll(t, p.Output(), 6, 500*time.Millisecond)
 
-	sentenceCount := 0
-	audioCount := 0
+	dataCount := 0
 	for _, m := range results {
-		switch m.Type {
-		case MessageTypeTTSStart:
-			sentenceCount++
-		case MessageTypeAudioData:
-			audioCount++
+		if m.Type == MessageTypeData {
+			dataCount++
 		}
 	}
-	if sentenceCount != 3 {
-		t.Errorf("Expected 3 sentences, got %d", sentenceCount)
-	}
-	if audioCount != 3 {
-		t.Errorf("Expected 3 audio messages, got %d", audioCount)
+	if dataCount != 6 {
+		t.Errorf("Expected 6 data messages (3 sentences + 3 audio), got %d", dataCount)
 	}
 
 	// report 应收到 6 条消息（异步分支，需要等待）
@@ -439,7 +432,7 @@ func TestDAGPipelineInterrupt(t *testing.T) {
 	}
 
 	// 发送消息触发慢处理
-	p.Input() <- NewMessage(MessageTypeTextChunk, "slow")
+	p.Input() <- NewMessage(MessageTypeData, "slow")
 
 	// 立即打断
 	time.Sleep(50 * time.Millisecond)
@@ -484,8 +477,8 @@ func TestDAGPipelineObserver(t *testing.T) {
 	}
 	defer func() { _ = p.Stop() }()
 
-	p.Input() <- NewMessage(MessageTypeTextChunk, "hello")
-	p.Input() <- NewMessage(MessageTypeTextChunk, "world")
+	p.Input() <- NewMessage(MessageTypeData, "hello")
+	p.Input() <- NewMessage(MessageTypeData, "world")
 
 	// 收集输出
 	_ = collectAll(t, p.Output(), 2, 200*time.Millisecond)
@@ -575,8 +568,8 @@ func TestDAGPipelineAsyncReportNonBlocking(t *testing.T) {
 	defer func() { _ = p.Stop() }()
 
 	// 快速发送 2 条消息
-	p.Input() <- NewMessage(MessageTypeTextChunk, "msg-1")
-	p.Input() <- NewMessage(MessageTypeTextChunk, "msg-2")
+	p.Input() <- NewMessage(MessageTypeData, "msg-1")
+	p.Input() <- NewMessage(MessageTypeData, "msg-2")
 
 	// 主链路应快速收到（不等待 report）
 	_ = collectAll(t, p.Output(), 2, 200*time.Millisecond)
@@ -627,7 +620,7 @@ func TestDAGBuilderImmutable(t *testing.T) {
 	}
 	defer func() { _ = p1.Stop() }()
 
-	p1.Input() <- NewMessage(MessageTypeTextChunk, "hello")
+	p1.Input() <- NewMessage(MessageTypeData, "hello")
 	msg := <-p1.Output()
 	if msg.Payload.(string) != "hello-A-B" {
 		t.Errorf("p1: Expected 'hello-A-B', got '%s'", msg.Payload)
@@ -639,7 +632,7 @@ func TestDAGBuilderImmutable(t *testing.T) {
 	}
 	defer func() { _ = p2.Stop() }()
 
-	p2.Input() <- NewMessage(MessageTypeTextChunk, "hello")
+	p2.Input() <- NewMessage(MessageTypeData, "hello")
 	msg = <-p2.Output()
 	if msg.Payload.(string) != "hello-A-B" {
 		t.Errorf("p2: Expected 'hello-A-B', got '%s' (c is passthrough)", msg.Payload)
