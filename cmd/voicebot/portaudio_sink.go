@@ -7,9 +7,15 @@ import (
 	"time"
 
 	"github.com/gordonklaus/portaudio"
-	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/logging"
 )
+
+// AudioFormat describes the PCM format for the audio sink.
+type AudioFormat struct {
+	SampleRate      int
+	Channels        int
+	FramesPerBuffer int
+}
 
 // PortAudioSink plays PCM16 samples through the system audio device.
 // Note: PortAudio must be initialized by the caller before Start().
@@ -26,7 +32,7 @@ func NewPortAudioSink() *PortAudioSink {
 	return &PortAudioSink{}
 }
 
-func (s *PortAudioSink) Start(ctx context.Context, format audio.AudioFormat) error {
+func (s *PortAudioSink) Start(ctx context.Context, format AudioFormat) error {
 	_ = ctx
 
 	s.mu.Lock()

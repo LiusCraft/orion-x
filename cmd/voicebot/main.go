@@ -18,7 +18,10 @@ import (
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/pipeline"
 	pstages "github.com/liuscraft/orion-x/internal/pipeline/stages"
+	"github.com/liuscraft/orion-x/internal/provider/asr"
+	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
+	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
@@ -37,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 	asrCfg := appConfig.Provider.ASR.Aliyun
-	ttsCfg := appConfig.Provider.TTS.Aliyun
+	ttsCfgSpec := appConfig.Provider.TTS.Aliyun
 	llmCfg := appConfig.Provider.LLM.OpenAI
 
 	if err := logging.Init(logging.Config{
@@ -123,78 +126,111 @@ func main() {
 	}
 	// portaudio.Terminate() crashes on macOS due to C++ static destructor
 	// ordering issues (mutex lock failed: Invalid argument).
-	// All streams are properly closed, OS will clean up remaining resources.
 	logging.Infof("PortAudio initialized successfully")
 
-	logging.Infof("Creating AudioOutPipe...")
-	outPipeCfg := audio.DefaultOutPipeConfig()
-	outPipeCfg.TTSProviderType = appConfig.Provider.TTS.Type
-	// 配置 TTS Pipeline
-	outPipeCfg.TTSPipeline = &audio.TTSPipelineConfig{
-		MaxTTSBuffer:     appConfig.Audio.TTSPipeline.MaxTTSBuffer,
-		MaxConcurrentTTS: appConfig.Audio.TTSPipeline.MaxConcurrentTTS,
-		TextQueueSize:    appConfig.Audio.TTSPipeline.TextQueueSize,
-	}
-	// 如果配置值为 0，使用默认值
-	if outPipeCfg.TTSPipeline.MaxTTSBuffer <= 0 {
-		outPipeCfg.TTSPipeline.MaxTTSBuffer = 3
-	}
-	if outPipeCfg.TTSPipeline.MaxConcurrentTTS <= 0 {
-		outPipeCfg.TTSPipeline.MaxConcurrentTTS = 2
-	}
-	if outPipeCfg.TTSPipeline.TextQueueSize <= 0 {
-		outPipeCfg.TTSPipeline.TextQueueSize = 100
-	}
-	outPipeCfg.TTS = tts.Config{
-		APIKey:               ttsCfg.APIKey,
-		Endpoint:             ttsCfg.Endpoint,
-		Workspace:            ttsCfg.Workspace,
-		Model:                ttsCfg.Model,
-		Voice:                ttsCfg.Voice,
-		Format:               ttsCfg.Format,
-		SampleRate:           ttsCfg.SampleRate,
-		Volume:               ttsCfg.Volume,
-		Rate:                 ttsCfg.Rate,
-		Pitch:                ttsCfg.Pitch,
-		EnableSSML:           ttsCfg.EnableSSML,
-		TextType:             ttsCfg.TextType,
-		EnableDataInspection: ttsCfg.EnableDataInspection,
-	}
-	if len(ttsCfg.VoiceMap) > 0 {
-		outPipeCfg.VoiceMap = ttsCfg.VoiceMap
-	}
-	audioOutPipe := audio.NewOutPipeWithConfig(outPipeCfg)
-	sink := NewPortAudioSink()
-	audioOutPipe.SetSink(sink)
-	logging.Infof("AudioOutPipe created successfully (async TTS pipeline: maxBuffer=%d, maxConcurrent=%d)",
-		outPipeCfg.TTSPipeline.MaxTTSBuffer, outPipeCfg.TTSPipeline.MaxConcurrentTTS)
-
-	logging.Infof("Creating AudioInPipe...")
-	inPipeCfg := &audio.InPipeConfig{
-		SampleRate:      appConfig.Audio.InPipe.SampleRate,
-		Channels:        appConfig.Audio.InPipe.Channels,
-		EnableVAD:       appConfig.Audio.InPipe.EnableVAD,
-		VADThreshold:    appConfig.Audio.InPipe.VADThreshold,
-		VADType:         appConfig.Audio.InPipe.VADType,
-		VADModelPath:    appConfig.Audio.InPipe.VADModelPath,
-		VADMinSilenceMs: appConfig.Audio.InPipe.VADMinSilenceMs,
-		VADSpeechPadMs:  appConfig.Audio.InPipe.VADSpeechPadMs,
-		ASRAPIKey:       asrCfg.APIKey,
-		ASRProviderType: appConfig.Provider.ASR.Type,
-		ASRModel:        asrCfg.Model,
-		ASREndpoint:     asrCfg.Endpoint,
+	// --- ASR ---
+	logging.Infof("Creating ASR Recognizer...")
+	recognizer, err := asr.NewRecognizer(asr.ProviderConfig{
+		Type: appConfig.Provider.ASR.Type,
+		Config: asr.Config{
+			APIKey:     asrCfg.APIKey,
+			Endpoint:   asrCfg.Endpoint,
+			Model:      asrCfg.Model,
+			Format:     "pcm",
+			SampleRate: audio.InternalSampleRate,
+		},
+	})
+	if err != nil {
+		logging.Fatalf("Failed to create ASR recognizer: %v", err)
 	}
 
-	// 配置缓冲区大小，默认 3200 样本 (200ms @ 16kHz)
-	bufferSize := appConfig.Audio.InPipe.BufferSize
+	logging.Infof("Creating ASRProcessor...")
+	inPipeCfg := appConfig.Audio.InPipe
+	asrProc, err := audio.NewASRProcessor(&audio.ASRConfig{
+		EnableVAD:       inPipeCfg.EnableVAD,
+		VADThreshold:    inPipeCfg.VADThreshold,
+		VADType:         inPipeCfg.VADType,
+		VADModelPath:    inPipeCfg.VADModelPath,
+		VADMinSilenceMs: inPipeCfg.VADMinSilenceMs,
+		VADSpeechPadMs:  inPipeCfg.VADSpeechPadMs,
+		Recognizer:      recognizer,
+	})
+	if err != nil {
+		logging.Fatalf("Failed to create ASRProcessor: %v", err)
+	}
+	logging.Infof("ASRProcessor created successfully")
+
+	// --- TTS ---
+	logging.Infof("Creating TTS Provider...")
+	ttsProvider, err := tts.NewProvider(tts.ProviderConfig{Type: appConfig.Provider.TTS.Type})
+	if err != nil {
+		logging.Fatalf("Failed to create TTS provider: %v", err)
+	}
+
+	logging.Infof("Creating TTSProcessor...")
+	ttsPipeCfg := appConfig.Audio.TTSPipeline
+	maxBuffer := ttsPipeCfg.MaxTTSBuffer
+	if maxBuffer <= 0 {
+		maxBuffer = 3
+	}
+	maxConcurrent := ttsPipeCfg.MaxConcurrentTTS
+	if maxConcurrent <= 0 {
+		maxConcurrent = 2
+	}
+	queueSize := ttsPipeCfg.TextQueueSize
+	if queueSize <= 0 {
+		queueSize = 100
+	}
+
+	processorCfg := audio.DefaultTTSConfig()
+	processorCfg.Provider = ttsProvider
+	processorCfg.CallConfig = tts.Config{
+		APIKey:               ttsCfgSpec.APIKey,
+		Endpoint:             ttsCfgSpec.Endpoint,
+		Workspace:            ttsCfgSpec.Workspace,
+		Model:                ttsCfgSpec.Model,
+		Voice:                ttsCfgSpec.Voice,
+		Format:               "pcm",
+		SampleRate:           audio.InternalSampleRate,
+		Volume:               ttsCfgSpec.Volume,
+		Rate:                 ttsCfgSpec.Rate,
+		Pitch:                ttsCfgSpec.Pitch,
+		EnableSSML:           ttsCfgSpec.EnableSSML,
+		TextType:             ttsCfgSpec.TextType,
+		EnableDataInspection: ttsCfgSpec.EnableDataInspection,
+	}
+	if len(ttsCfgSpec.VoiceMap) > 0 {
+		processorCfg.VoiceMap = ttsCfgSpec.VoiceMap
+	}
+	processorCfg.MaxBuffer = maxBuffer
+	processorCfg.MaxConcurrent = maxConcurrent
+	processorCfg.QueueSize = queueSize
+
+	ttsProc, err := audio.NewTTSProcessor(processorCfg)
+	if err != nil {
+		logging.Fatalf("Failed to create TTSProcessor: %v", err)
+	}
+	logging.Infof("TTSProcessor created (maxBuffer=%d, maxConcurrent=%d)", maxBuffer, maxConcurrent)
+
+	// --- Microphone source ---
+	bufferSize := inPipeCfg.BufferSize
 	if bufferSize <= 0 {
 		bufferSize = 3200
 	}
 
-	logging.Infof("Creating Microphone source (bufferSize=%d, highLatency=%v, inputDevice=%q)...",
-		bufferSize, appConfig.Audio.InPipe.HighLatency, appConfig.Audio.InPipe.InputDevice)
+	sampleRate := inPipeCfg.SampleRate
+	if sampleRate <= 0 {
+		sampleRate = audio.InternalSampleRate
+	}
+	channels := inPipeCfg.Channels
+	if channels <= 0 {
+		channels = audio.InternalChannels
+	}
 
-	inputDevice := appConfig.Audio.InPipe.InputDevice
+	logging.Infof("Creating Microphone source (bufferSize=%d, highLatency=%v, inputDevice=%q)...",
+		bufferSize, inPipeCfg.HighLatency, inPipeCfg.InputDevice)
+
+	inputDevice := inPipeCfg.InputDevice
 	if inputDevice == "" {
 		selected, err := SelectInputDevice()
 		if err != nil {
@@ -205,10 +241,10 @@ func main() {
 	}
 
 	micSource, err := NewMicrophoneSourceWithDevice(
-		inPipeCfg.SampleRate,
-		inPipeCfg.Channels,
+		sampleRate,
+		channels,
 		bufferSize,
-		appConfig.Audio.InPipe.HighLatency,
+		inPipeCfg.HighLatency,
 		inputDevice,
 	)
 	if err != nil {
@@ -216,30 +252,43 @@ func main() {
 	}
 	logging.Infof("Microphone source created successfully")
 
-	audioSource := audio.AudioSource(micSource)
-
-	audioInPipe, err := audio.NewInPipe(inPipeCfg, audioSource)
-	if err != nil {
-		logging.Fatalf("Failed to create AudioInPipe: %v", err)
-	}
-	logging.Infof("AudioInPipe created successfully")
+	// --- PortAudio sink ---
+	sink := NewPortAudioSink()
 
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
 
-	// Start AudioOutPipe (initializes internal TTSPipeline)
-	logging.Infof("Starting AudioOutPipe...")
-	if err := audioOutPipe.Start(ctx); err != nil {
-		logging.Fatalf("Failed to start AudioOutPipe: %v", err)
+	sinkFormat := AudioFormat{
+		SampleRate:      audio.InternalSampleRate,
+		Channels:        audio.InternalChannels,
+		FramesPerBuffer: 1024,
+	}
+	logging.Infof("Starting PortAudio sink...")
+	if err := sink.Start(ctx, sinkFormat); err != nil {
+		logging.Fatalf("Failed to start sink: %v", err)
+	}
+
+	// Wire TTS audio output to the sink.
+	ttsProc.OnAudio(func(data []byte) {
+		samples := audio.BytesToInt16LE(data)
+		if err := sink.WritePCM(samples); err != nil {
+			logging.Errorf("Sink write error: %v", err)
+		}
+	})
+
+	// Start TTSProcessor (ASRProcessor is started inside ASRStage).
+	logging.Infof("Starting TTSProcessor...")
+	if err := ttsProc.Start(ctx); err != nil {
+		logging.Fatalf("Failed to start TTSProcessor: %v", err)
 	}
 
 	// Build pipeline: ASR → Agent → TTS
 	logging.Infof("Building pipeline: ASR → Agent → TTS...")
 	sess := session.New(session.SessionMeta{Model: agentCfg.Model})
 	pl := pipeline.NewBuilder().
-		AddStage(pstages.NewASRStage(audioInPipe)).
+		AddStage(pstages.NewASRStage(asrProc, micSource)).
 		AddStage(pstages.NewAgentStage(agentInst, sess)).
-		AddStage(pstages.NewTTSStage(audioOutPipe)).
+		AddStage(pstages.NewTTSStage(ttsProc)).
 		SetObserver(pipeline.NewLoggingObserver(true)).
 		Build()
 
@@ -273,9 +322,14 @@ func main() {
 			logging.Errorf("Error stopping pipeline: %v", err)
 		}
 
-		logging.Infof("Stopping AudioOutPipe...")
-		if err := audioOutPipe.Stop(); err != nil {
-			logging.Errorf("Error stopping AudioOutPipe: %v", err)
+		logging.Infof("Stopping TTSProcessor...")
+		if err := ttsProc.Stop(); err != nil {
+			logging.Errorf("Error stopping TTSProcessor: %v", err)
+		}
+
+		logging.Infof("Stopping sink...")
+		if err := sink.Stop(); err != nil {
+			logging.Errorf("Error stopping sink: %v", err)
 		}
 
 		cancel()
@@ -286,7 +340,6 @@ func main() {
 	logging.Infof("     Press Ctrl+C to stop.             ")
 	logging.Infof("========================================")
 
-	// Wait for context cancellation (triggered by signal handler)
 	<-ctx.Done()
 
 	logging.Infof("\n========================================")
@@ -298,7 +351,6 @@ func main() {
 	logging.Sync()
 	// Raw _exit syscall bypasses C/C++ library cleanup to avoid
 	// PortAudio CoreAudio thread destructor crash on macOS.
-	// os.Exit() goes through C exit() which triggers C++ atexit handlers.
 	_, _, _ = syscall.Syscall(syscall.SYS_EXIT, 0, 0, 0)
 }
 
