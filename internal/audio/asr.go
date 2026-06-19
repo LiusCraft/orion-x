@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/liuscraft/orion-x/internal/audio/vad"
 	"github.com/liuscraft/orion-x/internal/logging"
@@ -74,6 +75,9 @@ type asrProcessor struct {
 	asrWG      sync.WaitGroup
 	mu         sync.Mutex
 	started    bool
+
+	speechMu    sync.Mutex
+	speechStart time.Time
 }
 
 func newASRProcessor(cfg *ASRConfig) (*asrProcessor, error) {
@@ -130,6 +134,13 @@ func (p *asrProcessor) Start(ctx context.Context) error {
 	p.ctx, p.cancel = context.WithCancel(ctx)
 
 	p.recognizer.OnResult(func(result asr.Result) {
+		logging.Infof("ASRProcessor: result received (final=%v, text_len=%d, usage_duration=%s, begin_ms=%d, end_ms=%s)",
+			result.IsFinal,
+			len([]rune(result.Text)),
+			formatOptionalInt(result.UsageDuration),
+			result.BeginTimeMs,
+			formatOptionalInt64(result.EndTimeMs),
+		)
 		p.mu.Lock()
 		fn := p.onResult
 		p.mu.Unlock()
@@ -227,6 +238,12 @@ func (p *asrProcessor) Write(data []byte) error {
 func (p *asrProcessor) processVAD(ctx context.Context, audio []byte) {
 	seg, started := p.segmenter.Process(audio)
 	if started {
+		now := time.Now()
+		p.speechMu.Lock()
+		p.speechStart = now
+		p.speechMu.Unlock()
+		logging.Infof("ASRProcessor: VAD speech started (frame_bytes=%d)", len(audio))
+
 		p.mu.Lock()
 		fn := p.onSpeech
 		p.mu.Unlock()
@@ -238,10 +255,26 @@ func (p *asrProcessor) processVAD(ctx context.Context, audio []byte) {
 		return
 	}
 
+	segmentReadyAt := time.Now()
+	p.speechMu.Lock()
+	speechStart := p.speechStart
+	p.speechStart = time.Time{}
+	p.speechMu.Unlock()
+	if speechStart.IsZero() {
+		logging.Infof("ASRProcessor: VAD segment ready (bytes=%d, frames=%d)", seg.Bytes, len(seg.Frames))
+	} else {
+		logging.Infof("ASRProcessor: VAD segment ready (bytes=%d, frames=%d, speech_duration=%v)",
+			seg.Bytes, len(seg.Frames), segmentReadyAt.Sub(speechStart))
+	}
+
 	p.asrWG.Add(1)
 	go func() {
 		defer p.asrWG.Done()
-		_ = p.recognizeSegment(ctx, *seg)
+		if err := p.recognizeSegment(ctx, *seg); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logging.Errorf("ASRProcessor: recognize segment error: %v", err)
+			}
+		}
 	}()
 }
 
@@ -250,9 +283,18 @@ func (p *asrProcessor) recognizeSegment(ctx context.Context, segment vad.Segment
 		ctx = context.Background()
 	}
 
+	totalStart := time.Now()
+	logging.Infof("ASRProcessor: ASR task starting (bytes=%d, frames=%d)", segment.Bytes, len(segment.Frames))
+
+	startAt := time.Now()
 	if err := p.recognizer.Start(ctx); err != nil {
 		return fmt.Errorf("start segment: %w", err)
 	}
+	logging.Infof("ASRProcessor: recognizer started in %v", time.Since(startAt))
+
+	sendStart := time.Now()
+	sentFrames := 0
+	sentBytes := 0
 	for _, frame := range segment.Frames {
 		select {
 		case <-ctx.Done():
@@ -265,6 +307,29 @@ func (p *asrProcessor) recognizeSegment(ctx context.Context, segment vad.Segment
 		if err := p.recognizer.SendAudio(ctx, frame); err != nil {
 			return fmt.Errorf("send segment audio: %w", err)
 		}
+		sentFrames++
+		sentBytes += len(frame)
 	}
-	return p.recognizer.Finish(ctx)
+	logging.Infof("ASRProcessor: sent segment audio in %v (bytes=%d, frames=%d)", time.Since(sendStart), sentBytes, sentFrames)
+
+	finishStart := time.Now()
+	if err := p.recognizer.Finish(ctx); err != nil {
+		return err
+	}
+	logging.Infof("ASRProcessor: recognizer finished in %v (total=%v)", time.Since(finishStart), time.Since(totalStart))
+	return nil
+}
+
+func formatOptionalInt(v *int) string {
+	if v == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%d", *v)
+}
+
+func formatOptionalInt64(v *int64) string {
+	if v == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%d", *v)
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/liuscraft/orion-x/internal/logging"
@@ -45,37 +46,49 @@ func (p *DashScopeProvider) Synthesize(ctx context.Context, text string, opts tt
 		return io.NopCloser(strings.NewReader("")), nil
 	}
 
+	totalStart := time.Now()
 	callCfg := p.cfg
 	if opts.Rate > 0 {
 		callCfg.Rate = opts.Rate
 	}
+	logging.Infof("AliyunTTS: synthesize start (text_len=%d, model=%s, voice=%s)",
+		len([]rune(text)), callCfg.Model, callCfg.Voice)
 
 	stream, err := p.newStream(ctx, callCfg, opts.Emotion)
 	if err != nil {
+		logging.Errorf("AliyunTTS: create stream failed after %v: %v", time.Since(totalStart), err)
 		return nil, err
 	}
 
 	if err := stream.writeTextChunk(ctx, text); err != nil {
 		_ = stream.closeStream(ctx)
+		logging.Errorf("AliyunTTS: write text failed after %v: %v", time.Since(totalStart), err)
 		return nil, err
 	}
 
 	if err := stream.closeStream(ctx); err != nil {
+		logging.Errorf("AliyunTTS: close stream failed after %v: %v", time.Since(totalStart), err)
 		return nil, err
 	}
 
+	logging.Infof("AliyunTTS: synthesize done (text_len=%d, total=%v)", len([]rune(text)), time.Since(totalStart))
 	return stream.audioBuf, nil
 }
 
 func (p *DashScopeProvider) newStream(ctx context.Context, cfg tts.Config, emotion string) (*dashScopeStream, error) {
+	streamStart := time.Now()
+	connectStart := time.Now()
 	conn, err := connectDashScope(ctx, cfg)
 	if err != nil {
+		logging.Errorf("AliyunTTS: websocket connect failed after %v: %v", time.Since(connectStart), err)
 		return nil, err
 	}
+	logging.Infof("AliyunTTS: websocket connected in %v", time.Since(connectStart))
 
 	audioBuf := newBufferedPipe(1024 * 1024)
 
 	stream := &dashScopeStream{
+		createdAt: streamStart,
 		cfg:       cfg,
 		emotion:   emotion,
 		conn:      conn,
@@ -88,22 +101,31 @@ func (p *DashScopeProvider) newStream(ctx context.Context, cfg tts.Config, emoti
 
 	stream.startReceiver()
 
+	runTaskStart := time.Now()
 	if err := stream.sendRunTask(ctx); err != nil {
 		_ = conn.Close()
 		_ = audioBuf.Close()
+		logging.Errorf("AliyunTTS: send run-task failed after %v: %v", time.Since(runTaskStart), err)
 		return nil, err
 	}
+	logging.Infof("AliyunTTS: run-task sent in %v", time.Since(runTaskStart))
 
+	waitStartedStart := time.Now()
 	if err := stream.waitStarted(ctx); err != nil {
 		_ = conn.Close()
 		_ = audioBuf.Close()
+		logging.Errorf("AliyunTTS: wait task-started failed after %v: %v", time.Since(waitStartedStart), err)
 		return nil, err
 	}
+	logging.Infof("AliyunTTS: task-started wait completed in %v (stream_ready=%v)",
+		time.Since(waitStartedStart), time.Since(streamStart))
 
 	return stream, nil
 }
 
 type dashScopeStream struct {
+	createdAt time.Time
+
 	cfg      tts.Config
 	emotion  string
 	conn     *websocket.Conn
@@ -118,6 +140,13 @@ type dashScopeStream struct {
 	startedOnce sync.Once
 	doneOnce    sync.Once
 	finishOnce  sync.Once
+
+	metricsMu      sync.Mutex
+	taskStartedAt  time.Time
+	taskFinishedAt time.Time
+	firstAudioAt   time.Time
+	audioBytes     int
+	audioFrames    int
 }
 
 // bufferedPipe is a thread-safe buffered pipe that doesn't block on write.
@@ -181,15 +210,24 @@ func (s *dashScopeStream) writeTextChunk(ctx context.Context, text string) error
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
+	waitStart := time.Now()
 	if err := s.waitStarted(ctx); err != nil {
 		return err
 	}
+	waitDuration := time.Since(waitStart)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
-	return s.sendContinueTask(ctx, text)
+	sendStart := time.Now()
+	if err := s.sendContinueTask(ctx, text); err != nil {
+		logging.Errorf("AliyunTTS: send continue-task failed after %v: %v", time.Since(sendStart), err)
+		return err
+	}
+	logging.Infof("AliyunTTS: continue-task sent in %v (wait_started=%v, text_len=%d)",
+		time.Since(sendStart), waitDuration, len([]rune(text)))
+	return nil
 }
 
 func (s *dashScopeStream) finish(ctx context.Context) error {
@@ -205,18 +243,39 @@ func (s *dashScopeStream) finish(ctx context.Context) error {
 
 // closeStream 发送 finish-task 并等待所有音频接收完毕，然后关闭连接。
 func (s *dashScopeStream) closeStream(ctx context.Context) error {
+	finishStart := time.Now()
 	if err := s.finish(ctx); err != nil {
+		logging.Errorf("AliyunTTS: finish-task failed after %v: %v", time.Since(finishStart), err)
 		return err
 	}
+	logging.Infof("AliyunTTS: finish-task sent in %v", time.Since(finishStart))
+
+	waitDoneStart := time.Now()
 	select {
 	case <-s.doneCh:
 		_ = s.conn.Close()
-		return s.streamErr()
+		err := s.streamErr()
+		audioBytes, audioFrames, firstAudioAt, taskStartedAt, taskFinishedAt := s.metricsSnapshot()
+		if err != nil {
+			logging.Errorf("AliyunTTS: task done with error after %v: %v", time.Since(waitDoneStart), err)
+			return err
+		}
+		logging.Infof("AliyunTTS: task done wait completed in %v (audio_bytes=%d, audio_frames=%d, first_audio_latency=%s, synthesis_window=%s, total_since_stream=%v)",
+			time.Since(waitDoneStart),
+			audioBytes,
+			audioFrames,
+			formatDurationSince(s.createdAt, firstAudioAt),
+			formatDurationBetween(taskStartedAt, taskFinishedAt),
+			time.Since(s.createdAt),
+		)
+		return nil
 	case err := <-s.errCh:
 		_ = s.conn.Close()
+		logging.Errorf("AliyunTTS: wait task done failed after %v: %v", time.Since(waitDoneStart), err)
 		return err
 	case <-ctx.Done():
 		_ = s.conn.Close()
+		logging.Errorf("AliyunTTS: wait task done canceled after %v: %v", time.Since(waitDoneStart), ctx.Err())
 		return ctx.Err()
 	}
 }
@@ -338,6 +397,7 @@ func (s *dashScopeStream) startReceiver() {
 					s.closeWithError(err)
 					return
 				}
+				s.recordAudioFrame(len(data))
 				continue
 			}
 
@@ -360,8 +420,10 @@ func (s *dashScopeStream) startReceiver() {
 func (s *dashScopeStream) handleEvent(event eventMessage) bool {
 	switch event.Header.Event {
 	case "task-started":
+		s.recordTaskStarted()
 		s.startedOnce.Do(func() { close(s.startedCh) })
 	case "task-finished":
+		s.recordTaskFinished()
 		s.markDone()
 		return true
 	case "task-failed":
@@ -372,6 +434,74 @@ func (s *dashScopeStream) handleEvent(event eventMessage) bool {
 		// normal event, no action needed
 	}
 	return false
+}
+
+func (s *dashScopeStream) recordTaskStarted() {
+	now := time.Now()
+	s.metricsMu.Lock()
+	s.taskStartedAt = now
+	s.metricsMu.Unlock()
+	logging.Infof("AliyunTTS: task-started event in %v", now.Sub(s.createdAt))
+}
+
+func (s *dashScopeStream) recordTaskFinished() {
+	now := time.Now()
+	s.metricsMu.Lock()
+	s.taskFinishedAt = now
+	audioBytes := s.audioBytes
+	audioFrames := s.audioFrames
+	firstAudioAt := s.firstAudioAt
+	taskStartedAt := s.taskStartedAt
+	s.metricsMu.Unlock()
+	logging.Infof("AliyunTTS: task-finished event in %v (audio_bytes=%d, audio_frames=%d, first_audio_latency=%s, synthesis_window=%s)",
+		now.Sub(s.createdAt),
+		audioBytes,
+		audioFrames,
+		formatDurationSince(s.createdAt, firstAudioAt),
+		formatDurationBetween(taskStartedAt, now),
+	)
+}
+
+func (s *dashScopeStream) recordAudioFrame(n int) {
+	now := time.Now()
+	firstFrame := false
+
+	s.metricsMu.Lock()
+	if s.firstAudioAt.IsZero() {
+		s.firstAudioAt = now
+		firstFrame = true
+	}
+	s.audioBytes += n
+	s.audioFrames++
+	totalBytes := s.audioBytes
+	totalFrames := s.audioFrames
+	s.metricsMu.Unlock()
+
+	if firstFrame {
+		logging.Infof("AliyunTTS: first audio frame received in %v (frame_bytes=%d)", now.Sub(s.createdAt), n)
+		return
+	}
+	logging.Debugf("AliyunTTS: audio frame received (frame_bytes=%d, total_bytes=%d, total_frames=%d)", n, totalBytes, totalFrames)
+}
+
+func (s *dashScopeStream) metricsSnapshot() (audioBytes int, audioFrames int, firstAudioAt time.Time, taskStartedAt time.Time, taskFinishedAt time.Time) {
+	s.metricsMu.Lock()
+	defer s.metricsMu.Unlock()
+	return s.audioBytes, s.audioFrames, s.firstAudioAt, s.taskStartedAt, s.taskFinishedAt
+}
+
+func formatDurationSince(start, end time.Time) string {
+	if start.IsZero() || end.IsZero() {
+		return "n/a"
+	}
+	return end.Sub(start).String()
+}
+
+func formatDurationBetween(start, end time.Time) string {
+	if start.IsZero() || end.IsZero() {
+		return "n/a"
+	}
+	return end.Sub(start).String()
 }
 
 func (s *dashScopeStream) closeWithError(err error) {

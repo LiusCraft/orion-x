@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/liuscraft/orion-x/internal/logging"
@@ -154,17 +155,21 @@ func (s *sentenceSplitter) reset() {
 // --- 内部类型 ---
 
 type sentenceItem struct {
-	text  string
-	opts  tts.SynthesisOptions
-	seq   int64
-	epoch int64
+	text     string
+	opts     tts.SynthesisOptions
+	seq      int64
+	epoch    int64
+	queuedAt time.Time
 }
 
 type synthResult struct {
-	seq   int64
-	epoch int64
-	text  string
-	audio []byte // nil 表示合成失败，orderer 会跳过但推进序号
+	seq            int64
+	epoch          int64
+	text           string
+	audio          []byte // nil 表示合成失败，orderer 会跳过但推进序号
+	queuedAt       time.Time
+	synthStartedAt time.Time
+	synthDoneAt    time.Time
 }
 
 // --- ttsProcessor ---
@@ -173,9 +178,9 @@ type ttsProcessor struct {
 	cfg *TTSConfig
 
 	// mu 保护：onChunk、started、splitter、seqNext
-	mu      sync.Mutex
-	onChunk func(TTSChunk)
-	started bool
+	mu       sync.Mutex
+	onChunk  func(TTSChunk)
+	started  bool
 	splitter *sentenceSplitter
 	seqNext  int64
 
@@ -327,8 +332,17 @@ func (p *ttsProcessor) enqueue(ctx context.Context, text string, opts tts.Synthe
 	epoch := p.epoch
 	p.epochMu.Unlock()
 
+	item := sentenceItem{
+		text:     text,
+		opts:     opts,
+		seq:      seq,
+		epoch:    epoch,
+		queuedAt: time.Now(),
+	}
 	select {
-	case p.sentenceCh <- sentenceItem{text: text, opts: opts, seq: seq, epoch: epoch}:
+	case p.sentenceCh <- item:
+		logging.Infof("TTSProcessor: sentence enqueued (seq=%d, epoch=%d, text_len=%d, text=%q)",
+			item.seq, item.epoch, len([]rune(item.text)), truncate(item.text, 30))
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -368,26 +382,58 @@ func (p *ttsProcessor) worker(item sentenceItem) {
 	synthCtx := p.synthCtx
 	p.synthMu.Unlock()
 
+	synthStart := time.Now()
+	logging.Infof("TTSProcessor: synth start (seq=%d, epoch=%d, queued_for=%v, text_len=%d, text=%q)",
+		item.seq, item.epoch, synthStart.Sub(item.queuedAt), len([]rune(item.text)), truncate(item.text, 30))
+
 	reader, err := p.cfg.Provider.Synthesize(synthCtx, item.text, item.opts)
+	synthReturnedAt := time.Now()
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
-			logging.Errorf("TTSProcessor: synthesize %q: %v", truncate(item.text, 20), err)
+			logging.Errorf("TTSProcessor: synthesize %q failed after %v: %v", truncate(item.text, 20), synthReturnedAt.Sub(synthStart), err)
 		}
-		p.sendResult(synthResult{seq: item.seq, epoch: item.epoch, text: item.text})
+		p.sendResult(synthResult{
+			seq:            item.seq,
+			epoch:          item.epoch,
+			text:           item.text,
+			queuedAt:       item.queuedAt,
+			synthStartedAt: synthStart,
+			synthDoneAt:    synthReturnedAt,
+		})
 		return
 	}
 	defer func() { _ = reader.Close() }()
 
+	readStart := time.Now()
 	audio, err := io.ReadAll(reader)
+	readDone := time.Now()
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
-			logging.Errorf("TTSProcessor: read audio %q: %v", truncate(item.text, 20), err)
+			logging.Errorf("TTSProcessor: read audio %q failed after %v: %v", truncate(item.text, 20), readDone.Sub(readStart), err)
 		}
-		p.sendResult(synthResult{seq: item.seq, epoch: item.epoch, text: item.text})
+		p.sendResult(synthResult{
+			seq:            item.seq,
+			epoch:          item.epoch,
+			text:           item.text,
+			queuedAt:       item.queuedAt,
+			synthStartedAt: synthStart,
+			synthDoneAt:    readDone,
+		})
 		return
 	}
 
-	p.sendResult(synthResult{seq: item.seq, epoch: item.epoch, text: item.text, audio: audio})
+	logging.Infof("TTSProcessor: synth done (seq=%d, epoch=%d, provider_time=%v, read_time=%v, audio_bytes=%d, total_since_enqueue=%v)",
+		item.seq, item.epoch, synthReturnedAt.Sub(synthStart), readDone.Sub(readStart), len(audio), readDone.Sub(item.queuedAt))
+
+	p.sendResult(synthResult{
+		seq:            item.seq,
+		epoch:          item.epoch,
+		text:           item.text,
+		audio:          audio,
+		queuedAt:       item.queuedAt,
+		synthStartedAt: synthStart,
+		synthDoneAt:    readDone,
+	})
 }
 
 func (p *ttsProcessor) sendResult(r synthResult) {
@@ -452,6 +498,8 @@ func (p *ttsProcessor) orderer() {
 
 				select {
 				case p.playbackCh <- TTSChunk{Text: r.text, Audio: r.audio}:
+					logging.Infof("TTSProcessor: playback queued (seq=%d, epoch=%d, synth_to_playback_queue=%v, total_since_enqueue=%v, audio_bytes=%d)",
+						r.seq, r.epoch, time.Since(r.synthDoneAt), time.Since(r.queuedAt), len(r.audio))
 				case <-synthCtx.Done():
 					// Interrupt：清空 pending，不再向 playbackCh 写入
 					pending = make(map[int64]synthResult)
@@ -476,12 +524,16 @@ func (p *ttsProcessor) playbackLoop() {
 			if !ok {
 				return
 			}
+			playStart := time.Now()
+			logging.Infof("TTSProcessor: playback callback start (text_len=%d, audio_bytes=%d, text=%q)",
+				len([]rune(chunk.Text)), len(chunk.Audio), truncate(chunk.Text, 30))
 			p.mu.Lock()
 			fn := p.onChunk
 			p.mu.Unlock()
 			if fn != nil {
 				fn(chunk)
 			}
+			logging.Infof("TTSProcessor: playback callback done in %v (audio_bytes=%d)", time.Since(playStart), len(chunk.Audio))
 		}
 	}
 }
