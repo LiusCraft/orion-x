@@ -128,6 +128,8 @@ func (s *mockSegmenter) Close() error {
 	return nil
 }
 
+func (s *mockSegmenter) Reset() {}
+
 // --- helpers ---
 
 func newTestASRConfig(r *mockRecognizer) *ASRConfig {

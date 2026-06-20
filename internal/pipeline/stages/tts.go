@@ -12,8 +12,7 @@ import (
 // TTSStage wraps a TTSProcessor as a pipeline sink stage.
 type TTSStage struct {
 	*pipeline.BaseStage
-	proc        audio.TTSProcessor
-	lastEmotion string
+	proc audio.TTSProcessor
 }
 
 // NewTTSStage creates a TTSStage. The proc must be started externally before
@@ -57,11 +56,9 @@ func (s *TTSStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 					if err := s.proc.Flush(opts); err != nil {
 						logging.Errorf("TTSStage: flush TTS error: %v", err)
 					}
-					s.lastEmotion = ""
 
 				case pipeline.MessageTypeInterrupt:
 					_ = s.proc.Interrupt()
-					s.lastEmotion = ""
 				}
 
 				select {
@@ -82,19 +79,9 @@ func (s *TTSStage) handleTextChunk(msg pipeline.Message) error {
 		return nil
 	}
 
-	emotion := msg.Metadata.Emotion
-	if emotion == "" {
-		emotion = "default"
-	}
-	s.lastEmotion = emotion
-
-	return s.proc.Write(text, tts.SynthesisOptions{Emotion: emotion})
+	return s.proc.Write(text, tts.SynthesisOptions{})
 }
 
 func (s *TTSStage) currentOpts() tts.SynthesisOptions {
-	emotion := s.lastEmotion
-	if emotion == "" {
-		emotion = "default"
-	}
-	return tts.SynthesisOptions{Emotion: emotion}
+	return tts.SynthesisOptions{}
 }

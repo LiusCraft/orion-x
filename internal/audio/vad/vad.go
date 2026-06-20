@@ -17,6 +17,8 @@ type Detector interface {
 	// Detect processes audio and returns true if speech is detected
 	// audio is int16 PCM (little-endian)
 	Detect(audio []byte) (bool, error)
+	// Reset clears internal RNN state to prevent state drift over time.
+	Reset()
 	// Close releases resources
 	Close() error
 }
@@ -25,6 +27,7 @@ type Detector interface {
 type noopVAD struct{}
 
 func (v *noopVAD) Detect([]byte) (bool, error) { return false, nil }
+func (v *noopVAD) Reset()                      {}
 func (v *noopVAD) Close() error                { return nil }
 
 // ErrModelNotFound is returned when the VAD model file is not found

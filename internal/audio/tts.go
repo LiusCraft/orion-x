@@ -158,12 +158,13 @@ type sentenceItem struct {
 type ttsProcessor struct {
 	cfg *TTSConfig
 
-	// mu 保护：onChunk、started、splitter、turnStarted
-	mu          sync.Mutex
-	onChunk     func(TTSChunk)
-	started     bool
-	splitter    *sentenceSplitter
-	turnStarted bool // 本轮第一次 Write 后置 true，Interrupt 后复位
+	// mu 保护：onChunk、started、splitter、turnStarted、currentEmotion
+	mu             sync.Mutex
+	onChunk        func(TTSChunk)
+	started        bool
+	splitter       *sentenceSplitter
+	turnStarted    bool   // 本轮第一次 Write 后置 true，Interrupt 后复位
+	currentEmotion string // 当前情绪 emoji，由文本中首 emoji 驱动，Interrupt 复位
 
 	// provider 能力，Start() 时缓存，生命周期内不变
 	streamingProv tts.StreamingProvider
@@ -278,12 +279,18 @@ func (p *ttsProcessor) Write(text string, opts tts.SynthesisOptions) error {
 	}
 
 	for _, s := range sentences {
+		if emo, stripped := extractLeadingEmoji(s); emo != "" {
+			p.currentEmotion = emo
+			s = stripped
+		}
 		if !hasSpeakableText(s) {
 			continue
 		}
+		itemOpts := opts
+		itemOpts.Emotion = p.currentEmotion
 		select {
-		case p.sentenceCh <- sentenceItem{text: s, opts: opts}:
-			logging.Infof("TTSProcessor: sentence enqueued (text=%q)", truncate(s, 30))
+		case p.sentenceCh <- sentenceItem{text: s, opts: itemOpts}:
+			logging.Infof("TTSProcessor: sentence enqueued (text=%q, emotion=%s)", truncate(s, 30), p.currentEmotion)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -301,10 +308,18 @@ func (p *ttsProcessor) Flush(opts tts.SynthesisOptions) error {
 	seg := p.splitter.flush()
 	p.mu.Unlock()
 
+	if seg != "" {
+		if emo, stripped := extractLeadingEmoji(seg); emo != "" {
+			p.currentEmotion = emo
+			seg = stripped
+		}
+	}
 	if seg != "" && hasSpeakableText(seg) {
+		itemOpts := opts
+		itemOpts.Emotion = p.currentEmotion
 		select {
-		case p.sentenceCh <- sentenceItem{text: seg, opts: opts}:
-			logging.Infof("TTSProcessor: sentence enqueued (flush, text=%q)", truncate(seg, 30))
+		case p.sentenceCh <- sentenceItem{text: seg, opts: itemOpts}:
+			logging.Infof("TTSProcessor: sentence enqueued (flush, text=%q, emotion=%s)", truncate(seg, 30), p.currentEmotion)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -344,10 +359,11 @@ func (p *ttsProcessor) Interrupt() error {
 	// 4. 清空句子队列
 	drainSentenceCh(p.sentenceCh)
 
-	// 5. 重置分句器和 turn 状态
+	// 5. 重置分句器、turn 状态和情绪
 	p.mu.Lock()
 	p.splitter.reset()
 	p.turnStarted = false
+	p.currentEmotion = ""
 	p.mu.Unlock()
 
 	logging.Infof("TTSProcessor: interrupted")
@@ -526,6 +542,38 @@ func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCt
 }
 
 // --- 工具 ---
+
+// extractLeadingEmoji 返回文本开头的 emoji（含 skin-tone 修饰符）和剩余文本。
+// 若首字符不是 emoji 则返回 ("", original)。
+func extractLeadingEmoji(s string) (emoji, remaining string) {
+	if s == "" {
+		return "", ""
+	}
+	runes := []rune(s)
+	if !isEmoji(runes[0]) {
+		return "", s
+	}
+	end := 1
+	// 接受 skin-tone modifier (U+1F3FB..U+1F3FF)
+	if len(runes) > 1 && runes[1] >= 0x1F3FB && runes[1] <= 0x1F3FF {
+		end = 2
+	}
+	return string(runes[:end]), string(runes[end:])
+}
+
+func isEmoji(r rune) bool {
+	switch {
+	case r >= 0x1F600 && r <= 0x1F64F, // Emoticons
+		r >= 0x1F300 && r <= 0x1F5FF, // Misc Symbols and Pictographs
+		r >= 0x1F680 && r <= 0x1F6FF, // Transport and Map
+		r >= 0x1F900 && r <= 0x1F9FF, // Supplemental Symbols
+		r >= 0x2600 && r <= 0x26FF,   // Misc symbols
+		r >= 0x2700 && r <= 0x27BF,   // Dingbats
+		r >= 0x1F1E0 && r <= 0x1F1FF: // Flags (regional indicators)
+		return true
+	}
+	return false
+}
 
 func hasSpeakableText(s string) bool {
 	for _, r := range s {

@@ -355,7 +355,7 @@ func (s *dashScopeStream) sendRunTask(_ context.Context) error {
 	// emotion 映射：系统内部 emotion → 该 voice 下可用的 emotion 参数
 	// 具体映射值由 voice 决定，后续按 voice 完善
 	if mapped := mapEmotion(s.cfg.Voice, s.emotion); mapped != "" {
-		params["emotion"] = mapped
+		params["instruction"] = fmt.Sprintf("请用情绪%s说话", mapped)
 	}
 
 	payload := runTaskMessage{
@@ -579,12 +579,24 @@ func (s *dashScopeStream) streamErr() error {
 	}
 }
 
-// mapEmotion 将系统内部 emotion 值映射到指定 voice 支持的 emotion 参数。
-// 不同 voice 支持的 emotion 不同，返回空字符串表示不传 emotion 参数。
+// mapEmotion 将系统 emotion 值（emoji 或标签名）映射到指定 voice 支持的 emotion 参数。
+// 返回空字符串表示不传 emotion 参数。
 func mapEmotion(voice, emotion string) string {
-	// TODO: 根据实际 voice 的支持情况完善映射表
 	_ = voice
-	_ = emotion
+	emojiMap := map[string]string{
+		"😊": "happy", "😄": "happy", "😃": "happy", "😁": "happy",
+		"😢": "sad", "😭": "sad", "😥": "sad",
+		"😡": "angry", "🤬": "angry", "😠": "angry",
+		"😌": "calm",
+		"🎉": "excited", "🥳": "excited",
+	}
+	if v, ok := emojiMap[emotion]; ok {
+		return v
+	}
+	switch emotion {
+	case "happy", "sad", "angry", "calm", "excited":
+		return emotion
+	}
 	return ""
 }
 

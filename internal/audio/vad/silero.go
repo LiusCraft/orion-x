@@ -87,3 +87,10 @@ func (v *sileroVAD) Detect(audio []byte) (bool, error) {
 func (v *sileroVAD) Close() error {
 	return v.inner.Destroy()
 }
+
+func (v *sileroVAD) Reset() {
+	v.currSample = 0
+	v.triggered = false
+	v.tempEnd = 0
+	v.inner.Reset()
+}

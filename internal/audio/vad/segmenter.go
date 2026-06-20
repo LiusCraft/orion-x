@@ -18,6 +18,8 @@ type Segmenter interface {
 	Process(audio []byte) (seg *Segment, started bool)
 	// Flush 强制结束当前语音段并返回（用于停止前清理）
 	Flush() *Segment
+	// Reset 重置 VAD 检测器的 RNN 状态和预语音缓冲。
+	Reset()
 	// Close 释放底层 VAD 检测器资源
 	Close() error
 }
@@ -113,6 +115,14 @@ func (s *segmenter) Close() error {
 		return s.detector.Close()
 	}
 	return nil
+}
+
+func (s *segmenter) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.detector.Reset()
+	s.preSpeechFrames = nil
+	s.preSpeechBytes = 0
 }
 
 func (s *segmenter) appendFrameLocked(audio []byte) {
