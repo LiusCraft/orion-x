@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -23,6 +24,9 @@ const defaultDashScopeEndpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inferen
 // DashScopeProvider 是有状态的 TTS Provider，基础配置在创建时注入。
 type DashScopeProvider struct {
 	cfg tts.Config // 已经 normalize 过
+
+	// warming 防止并发预热（同时只允许一个 Warm 在运行）
+	warming atomic.Bool
 }
 
 func init() {
@@ -37,6 +41,30 @@ func NewDashScopeProvider(cfg tts.Config) (*DashScopeProvider, error) {
 		return nil, err
 	}
 	return &DashScopeProvider{cfg: normalized}, nil
+}
+
+// Warm 同步建立 WebSocket 连接并完成 task-started 握手，返回就绪的 stream。
+// ctx 取消时返回 nil。同时只允许一个 Warm 运行，重复调用直接返回 nil。
+// 实现 tts.WarmableProvider 接口，调用方应在 goroutine 里调用。
+func (p *DashScopeProvider) Warm(ctx context.Context, opts tts.SynthesisOptions) tts.SynthesisStream {
+	if !p.warming.CompareAndSwap(false, true) {
+		return nil
+	}
+	defer p.warming.Store(false)
+
+	callCfg := p.cfg
+	if opts.Rate > 0 {
+		callCfg.Rate = opts.Rate
+	}
+	stream, err := p.newStream(ctx, callCfg, opts.Emotion)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			logging.Warnf("AliyunTTS: warm failed: %v", err)
+		}
+		return nil
+	}
+	logging.Infof("AliyunTTS: warm stream ready")
+	return stream
 }
 
 // Synthesize 合成一段文本，返回 PCM 音频 reader。
@@ -60,7 +88,7 @@ func (p *DashScopeProvider) Synthesize(ctx context.Context, text string, opts tt
 		return nil, err
 	}
 
-	if err := stream.writeTextChunk(ctx, text); err != nil {
+	if err := stream.WriteTextChunk(ctx, text); err != nil {
 		_ = stream.closeStream(ctx)
 		logging.Errorf("AliyunTTS: write text failed after %v: %v", time.Since(totalStart), err)
 		return nil, err
@@ -73,6 +101,16 @@ func (p *DashScopeProvider) Synthesize(ctx context.Context, text string, opts tt
 
 	logging.Infof("AliyunTTS: synthesize done (text_len=%d, total=%v)", len([]rune(text)), time.Since(totalStart))
 	return stream.audioBuf, nil
+}
+
+// StartSynthesis 建立 WebSocket 连接并等待 task-started，返回可立即写文本的 stream。
+// 实现 tts.StreamingProvider 接口，供 TTSProcessor 走流式播放路径。
+func (p *DashScopeProvider) StartSynthesis(ctx context.Context, opts tts.SynthesisOptions) (tts.SynthesisStream, error) {
+	callCfg := p.cfg
+	if opts.Rate > 0 {
+		callCfg.Rate = opts.Rate
+	}
+	return p.newStream(ctx, callCfg, opts.Emotion)
 }
 
 func (p *DashScopeProvider) newStream(ctx context.Context, cfg tts.Config, emotion string) (*dashScopeStream, error) {
@@ -206,7 +244,45 @@ func (bp *bufferedPipe) Close() error {
 	return nil
 }
 
-func (s *dashScopeStream) writeTextChunk(ctx context.Context, text string) error {
+// closeStream 发送 finish-task 并等待所有音频接收完毕。conn 由 markDone 统一关闭。
+func (s *dashScopeStream) closeStream(ctx context.Context) error {
+	finishStart := time.Now()
+	if err := s.Finish(ctx); err != nil {
+		logging.Errorf("AliyunTTS: finish-task failed after %v: %v", time.Since(finishStart), err)
+		return err
+	}
+	logging.Infof("AliyunTTS: finish-task sent in %v", time.Since(finishStart))
+
+	waitDoneStart := time.Now()
+	select {
+	case <-s.doneCh:
+		err := s.streamErr()
+		audioBytes, audioFrames, firstAudioAt, taskStartedAt, taskFinishedAt := s.metricsSnapshot()
+		if err != nil {
+			logging.Errorf("AliyunTTS: task done with error after %v: %v", time.Since(waitDoneStart), err)
+			return err
+		}
+		logging.Infof("AliyunTTS: task done wait completed in %v (audio_bytes=%d, audio_frames=%d, first_audio_latency=%s, synthesis_window=%s, total_since_stream=%v)",
+			time.Since(waitDoneStart),
+			audioBytes,
+			audioFrames,
+			formatDuration(s.createdAt, firstAudioAt),
+			formatDuration(taskStartedAt, taskFinishedAt),
+			time.Since(s.createdAt),
+		)
+		return nil
+	case err := <-s.errCh:
+		logging.Errorf("AliyunTTS: wait task done failed after %v: %v", time.Since(waitDoneStart), err)
+		return err
+	case <-ctx.Done():
+		s.closeWithError(ctx.Err())
+		logging.Errorf("AliyunTTS: wait task done canceled after %v: %v", time.Since(waitDoneStart), ctx.Err())
+		return ctx.Err()
+	}
+}
+
+// WriteTextChunk 实现 tts.SynthesisStream，委托内部小写方法。
+func (s *dashScopeStream) WriteTextChunk(ctx context.Context, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -230,7 +306,9 @@ func (s *dashScopeStream) writeTextChunk(ctx context.Context, text string) error
 	return nil
 }
 
-func (s *dashScopeStream) finish(ctx context.Context) error {
+// Finish 发送 finish-task，立即返回，不等 task-finished。
+// receiver goroutine 在 task-finished 后通过 markDone 关闭 audioBuf 和 conn。
+func (s *dashScopeStream) Finish(ctx context.Context) error {
 	var err error
 	s.finishOnce.Do(func() {
 		err = s.sendFinishTask(ctx)
@@ -241,43 +319,15 @@ func (s *dashScopeStream) finish(ctx context.Context) error {
 	return err
 }
 
-// closeStream 发送 finish-task 并等待所有音频接收完毕，然后关闭连接。
-func (s *dashScopeStream) closeStream(ctx context.Context) error {
-	finishStart := time.Now()
-	if err := s.finish(ctx); err != nil {
-		logging.Errorf("AliyunTTS: finish-task failed after %v: %v", time.Since(finishStart), err)
-		return err
-	}
-	logging.Infof("AliyunTTS: finish-task sent in %v", time.Since(finishStart))
+// AudioReader 返回流式音频 reader，可在 Finish 前开始读；task-finished 后 EOF。
+func (s *dashScopeStream) AudioReader() io.ReadCloser {
+	return s.audioBuf
+}
 
-	waitDoneStart := time.Now()
-	select {
-	case <-s.doneCh:
-		_ = s.conn.Close()
-		err := s.streamErr()
-		audioBytes, audioFrames, firstAudioAt, taskStartedAt, taskFinishedAt := s.metricsSnapshot()
-		if err != nil {
-			logging.Errorf("AliyunTTS: task done with error after %v: %v", time.Since(waitDoneStart), err)
-			return err
-		}
-		logging.Infof("AliyunTTS: task done wait completed in %v (audio_bytes=%d, audio_frames=%d, first_audio_latency=%s, synthesis_window=%s, total_since_stream=%v)",
-			time.Since(waitDoneStart),
-			audioBytes,
-			audioFrames,
-			formatDurationSince(s.createdAt, firstAudioAt),
-			formatDurationBetween(taskStartedAt, taskFinishedAt),
-			time.Since(s.createdAt),
-		)
-		return nil
-	case err := <-s.errCh:
-		_ = s.conn.Close()
-		logging.Errorf("AliyunTTS: wait task done failed after %v: %v", time.Since(waitDoneStart), err)
-		return err
-	case <-ctx.Done():
-		_ = s.conn.Close()
-		logging.Errorf("AliyunTTS: wait task done canceled after %v: %v", time.Since(waitDoneStart), ctx.Err())
-		return ctx.Err()
-	}
+// Abort 立即中止 stream，用于打断场景。
+func (s *dashScopeStream) Abort() {
+	s.setErr(context.Canceled)
+	s.markDone()
 }
 
 func (s *dashScopeStream) waitStarted(ctx context.Context) error {
@@ -457,8 +507,8 @@ func (s *dashScopeStream) recordTaskFinished() {
 		now.Sub(s.createdAt),
 		audioBytes,
 		audioFrames,
-		formatDurationSince(s.createdAt, firstAudioAt),
-		formatDurationBetween(taskStartedAt, now),
+		formatDuration(s.createdAt, firstAudioAt),
+		formatDuration(taskStartedAt, now),
 	)
 }
 
@@ -490,18 +540,11 @@ func (s *dashScopeStream) metricsSnapshot() (audioBytes int, audioFrames int, fi
 	return s.audioBytes, s.audioFrames, s.firstAudioAt, s.taskStartedAt, s.taskFinishedAt
 }
 
-func formatDurationSince(start, end time.Time) string {
-	if start.IsZero() || end.IsZero() {
+func formatDuration(from, to time.Time) string {
+	if from.IsZero() || to.IsZero() {
 		return "n/a"
 	}
-	return end.Sub(start).String()
-}
-
-func formatDurationBetween(start, end time.Time) string {
-	if start.IsZero() || end.IsZero() {
-		return "n/a"
-	}
-	return end.Sub(start).String()
+	return to.Sub(from).String()
 }
 
 func (s *dashScopeStream) closeWithError(err error) {
@@ -522,6 +565,7 @@ func (s *dashScopeStream) setErr(err error) {
 func (s *dashScopeStream) markDone() {
 	s.doneOnce.Do(func() {
 		_ = s.audioBuf.Close()
+		_ = s.conn.Close()
 		close(s.doneCh)
 	})
 }
@@ -555,13 +599,13 @@ func normalizeConfig(cfg tts.Config) (tts.Config, error) {
 		cfg.Model = "cosyvoice-v3-flash"
 	}
 	if cfg.Voice == "" {
-		cfg.Voice = "longanyang"
+		cfg.Voice = "longanhuan_v3"
 	}
 	if cfg.Format == "" {
-		cfg.Format = "mp3"
+		cfg.Format = "pcm"
 	}
 	if cfg.SampleRate == 0 {
-		cfg.SampleRate = 22050
+		cfg.SampleRate = 16000
 	}
 	if cfg.Volume == 0 {
 		cfg.Volume = 50

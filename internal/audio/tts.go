@@ -24,9 +24,6 @@ type TTSChunk struct {
 type TTSConfig struct {
 	// Provider 是 TTS 后端。必填。
 	Provider tts.Provider
-	// MaxConcurrent 是并发合成的最大句数，默认 2。
-	// 合成完的结果由 orderer 按原始顺序排列后送入播放队列。
-	MaxConcurrent int
 	// QueueSize 是待合成句子队列的大小，默认 100。
 	QueueSize int
 	// MaxRunes 是单句最大字符数（超过则强制切句），默认 100。
@@ -36,20 +33,22 @@ type TTSConfig struct {
 // DefaultTTSConfig 返回合理的默认配置，Provider 必须由调用方设置。
 func DefaultTTSConfig() *TTSConfig {
 	return &TTSConfig{
-		MaxConcurrent: 2,
-		QueueSize:     100,
-		MaxRunes:      100,
+		QueueSize: 100,
+		MaxRunes:  100,
 	}
 }
 
-// TTSProcessor 接收 LLM 流式文本，内部分句后并发合成音频，
-// 以句为单位通过 OnChunk 按原始顺序回调文本+音频配对。
+// TTSProcessor 接收 LLM 流式文本，内部分句后合成音频，
+// 以音频帧为单位通过 OnChunk 回调。
 //
-// 流水线：
+// StreamingProvider 路径（per-turn stream）：
 //
-//	sentenceCh → [worker×MaxConcurrent] → resultCh → [orderer] → playbackCh → [playback]
+//	Write → splitter → sentenceCh → [dispatcher] → WriteTextChunk → currentStream → AudioReader → onChunk
+//	Flush → currentStream.Finish()
 //
-// 合成并发数与播放独立控制，playbackCh 容量=1，合成最多比播放提前 1 句。
+// 非 StreamingProvider 路径（fallback，串行）：
+//
+//	Write → splitter → sentenceCh → [dispatcher] → Synthesize → onChunk
 type TTSProcessor interface {
 	Write(text string, opts tts.SynthesisOptions) error
 	Flush(opts tts.SynthesisOptions) error
@@ -67,10 +66,6 @@ func NewTTSProcessor(cfg *TTSConfig) (TTSProcessor, error) {
 	if cfg.Provider == nil {
 		return nil, errorf("TTSProcessor: Provider is required")
 	}
-	maxC := cfg.MaxConcurrent
-	if maxC <= 0 {
-		maxC = 2
-	}
 	qs := cfg.QueueSize
 	if qs <= 0 {
 		qs = 100
@@ -80,12 +75,10 @@ func NewTTSProcessor(cfg *TTSConfig) (TTSProcessor, error) {
 		mr = 100
 	}
 	return &ttsProcessor{
-		cfg:        cfg,
-		splitter:   newSentenceSplitter(mr),
-		sentenceCh: make(chan sentenceItem, qs),
-		resultCh:   make(chan synthResult, maxC),
-		playbackCh: make(chan TTSChunk, 1),
-		sem:        make(chan struct{}, maxC),
+		cfg:          cfg,
+		splitter:     newSentenceSplitter(mr),
+		sentenceCh:   make(chan sentenceItem, qs),
+		warmResultCh: make(chan tts.SynthesisStream, 1),
 	}, nil
 }
 
@@ -155,21 +148,9 @@ func (s *sentenceSplitter) reset() {
 // --- 内部类型 ---
 
 type sentenceItem struct {
-	text     string
-	opts     tts.SynthesisOptions
-	seq      int64
-	epoch    int64
-	queuedAt time.Time
-}
-
-type synthResult struct {
-	seq            int64
-	epoch          int64
-	text           string
-	audio          []byte // nil 表示合成失败，orderer 会跳过但推进序号
-	queuedAt       time.Time
-	synthStartedAt time.Time
-	synthDoneAt    time.Time
+	text  string
+	opts  tts.SynthesisOptions
+	flush bool // true 表示 Flush 信号，dispatcher 需调 currentStream.Finish()
 }
 
 // --- ttsProcessor ---
@@ -177,27 +158,31 @@ type synthResult struct {
 type ttsProcessor struct {
 	cfg *TTSConfig
 
-	// mu 保护：onChunk、started、splitter、seqNext
-	mu       sync.Mutex
-	onChunk  func(TTSChunk)
-	started  bool
-	splitter *sentenceSplitter
-	seqNext  int64
+	// mu 保护：onChunk、started、splitter、turnStarted
+	mu          sync.Mutex
+	onChunk     func(TTSChunk)
+	started     bool
+	splitter    *sentenceSplitter
+	turnStarted bool // 本轮第一次 Write 后置 true，Interrupt 后复位
 
-	// epochMu 保护 epoch
-	epochMu sync.Mutex
-	epoch   int64
+	// provider 能力，Start() 时缓存，生命周期内不变
+	streamingProv tts.StreamingProvider
+	warmableProv  tts.WarmableProvider
 
-	// 流水线 channels
-	sentenceCh chan sentenceItem // 待合成
-	resultCh   chan synthResult  // 合成结果（无序）
-	playbackCh chan TTSChunk     // 排序后待播放（容量1）
-	sem        chan struct{}     // 并发合成控制
+	// sentenceCh：Write → dispatcher 的句子队列
+	sentenceCh chan sentenceItem
 
-	// synthCtx：Interrupt 时独立取消合成和 orderer 的 playbackCh 写入
+	// synthCtx：Interrupt 时取消，中断合成和音频读取
 	synthMu     sync.Mutex
 	synthCtx    context.Context
 	synthCancel context.CancelFunc
+
+	// currentStream：per-turn stream（StreamingProvider 路径），turn 结束（Flush）后置 nil
+	streamMu      sync.Mutex
+	currentStream tts.SynthesisStream
+
+	// warmResultCh：Warm goroutine 完成后把就绪 stream 送到这里（容量1）
+	warmResultCh chan tts.SynthesisStream
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -221,13 +206,13 @@ func (p *ttsProcessor) Start(ctx context.Context) error {
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.synthCtx, p.synthCancel = context.WithCancel(p.ctx)
 	p.started = true
+	p.streamingProv, _ = p.cfg.Provider.(tts.StreamingProvider)
+	p.warmableProv, _ = p.cfg.Provider.(tts.WarmableProvider)
 
-	p.wg.Add(3) // dispatcher, orderer, playbackLoop
+	p.wg.Add(1)
 	go p.dispatcher()
-	go p.orderer()
-	go p.playbackLoop()
 
-	logging.Infof("TTSProcessor: started (maxConcurrent=%d)", cap(p.sem))
+	logging.Infof("TTSProcessor: started")
 	return nil
 }
 
@@ -240,6 +225,14 @@ func (p *ttsProcessor) Stop() error {
 	cancel := p.cancel
 	p.started = false
 	p.mu.Unlock()
+
+	// 关闭当前 stream 让 streamAudio goroutine 退出
+	p.streamMu.Lock()
+	if p.currentStream != nil {
+		p.currentStream.Abort()
+		p.currentStream = nil
+	}
+	p.streamMu.Unlock()
 
 	cancel()
 	p.wg.Wait()
@@ -255,12 +248,44 @@ func (p *ttsProcessor) Write(text string, opts tts.SynthesisOptions) error {
 		return errorf("TTSProcessor: not started")
 	}
 	ctx := p.ctx
+	firstWrite := !p.turnStarted
+	if firstWrite {
+		p.turnStarted = true
+	}
 	sentences := p.splitter.feed(text)
 	p.mu.Unlock()
 
+	// 本轮第一次 Write：在 goroutine 里预热连接，结果送 warmResultCh 给 dispatcher 消费。
+	if firstWrite && p.warmableProv != nil {
+		p.synthMu.Lock()
+		synthCtx := p.synthCtx
+		p.synthMu.Unlock()
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			stream := p.warmableProv.Warm(synthCtx, opts)
+			if stream == nil {
+				return
+			}
+			select {
+			case p.warmResultCh <- stream:
+			case <-synthCtx.Done():
+				stream.Abort()
+			case <-p.ctx.Done():
+				stream.Abort()
+			}
+		}()
+	}
+
 	for _, s := range sentences {
-		if err := p.enqueue(ctx, s, opts); err != nil {
-			return err
+		if !hasSpeakableText(s) {
+			continue
+		}
+		select {
+		case p.sentenceCh <- sentenceItem{text: s, opts: opts}:
+			logging.Infof("TTSProcessor: sentence enqueued (text=%q)", truncate(s, 30))
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 	return nil
@@ -276,40 +301,60 @@ func (p *ttsProcessor) Flush(opts tts.SynthesisOptions) error {
 	seg := p.splitter.flush()
 	p.mu.Unlock()
 
-	if seg != "" {
-		return p.enqueue(ctx, seg, opts)
+	if seg != "" && hasSpeakableText(seg) {
+		select {
+		case p.sentenceCh <- sentenceItem{text: seg, opts: opts}:
+			logging.Infof("TTSProcessor: sentence enqueued (flush, text=%q)", truncate(seg, 30))
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	// flush 信号：dispatcher 收到后调 currentStream.Finish()
+	select {
+	case p.sentenceCh <- sentenceItem{flush: true, opts: opts}:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	return nil
 }
 
 func (p *ttsProcessor) Interrupt() error {
-	// 1. 递增 epoch（使旧 epoch 的合成结果被 orderer 丢弃）
-	p.epochMu.Lock()
-	p.epoch++
-	p.epochMu.Unlock()
-
-	// 2. 取消当前合成 + orderer 等待写 playbackCh，重建 synthCtx
+	// 1. 取消当前合成和音频读取，重建 synthCtx
 	p.synthMu.Lock()
 	p.synthCancel()
 	p.synthCtx, p.synthCancel = context.WithCancel(p.ctx)
 	p.synthMu.Unlock()
 
-	// 3. 清空各队列
-	drainCh(p.sentenceCh)
-	drainCh(p.resultCh)
-	drainCh(p.playbackCh)
+	// 2. drain warmResultCh，Abort 尚未被消费的预热 stream
+	select {
+	case s := <-p.warmResultCh:
+		s.Abort()
+	default:
+	}
 
-	// 4. 重置分句器和序号
+	// 3. 中止当前 stream（关闭 audioBuf 让 streamAudio goroutine 退出）
+	p.streamMu.Lock()
+	if p.currentStream != nil {
+		p.currentStream.Abort()
+		p.currentStream = nil
+	}
+	p.streamMu.Unlock()
+
+	// 4. 清空句子队列
+	drainSentenceCh(p.sentenceCh)
+
+	// 5. 重置分句器和 turn 状态
 	p.mu.Lock()
-	p.seqNext = 0
 	p.splitter.reset()
+	p.turnStarted = false
 	p.mu.Unlock()
 
 	logging.Infof("TTSProcessor: interrupted")
 	return nil
 }
 
-func drainCh[T any](ch chan T) {
+func drainSentenceCh(ch chan sentenceItem) {
 	for {
 		select {
 		case <-ch:
@@ -319,37 +364,7 @@ func drainCh[T any](ch chan T) {
 	}
 }
 
-func (p *ttsProcessor) enqueue(ctx context.Context, text string, opts tts.SynthesisOptions) error {
-	if !hasSpeakableText(text) {
-		return nil
-	}
-	p.mu.Lock()
-	seq := p.seqNext
-	p.seqNext++
-	p.mu.Unlock()
-
-	p.epochMu.Lock()
-	epoch := p.epoch
-	p.epochMu.Unlock()
-
-	item := sentenceItem{
-		text:     text,
-		opts:     opts,
-		seq:      seq,
-		epoch:    epoch,
-		queuedAt: time.Now(),
-	}
-	select {
-	case p.sentenceCh <- item:
-		logging.Infof("TTSProcessor: sentence enqueued (seq=%d, epoch=%d, text_len=%d, text=%q)",
-			item.seq, item.epoch, len([]rune(item.text)), truncate(item.text, 30))
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// --- dispatcher：从 sentenceCh 取句子，并发启动 worker ---
+// --- dispatcher：从 sentenceCh 串行处理句子 ---
 
 func (p *ttsProcessor) dispatcher() {
 	defer p.wg.Done()
@@ -361,181 +376,153 @@ func (p *ttsProcessor) dispatcher() {
 			if !ok {
 				return
 			}
-			select {
-			case p.sem <- struct{}{}:
-			case <-p.ctx.Done():
-				return
+
+			p.synthMu.Lock()
+			synthCtx := p.synthCtx
+			p.synthMu.Unlock()
+
+			if item.flush {
+				p.handleFlush(synthCtx)
+				continue
 			}
-			p.wg.Add(1)
-			go p.worker(item)
+
+			if p.streamingProv != nil {
+				p.dispatchStreaming(item, synthCtx)
+			} else {
+				p.dispatchBatch(item, synthCtx)
+			}
 		}
 	}
 }
 
-// --- worker：合成单句，结果放入 resultCh ---
+// handleFlush 在 dispatcher 里处理 Flush 信号：向 currentStream 发 finish-task，重置 stream。
+func (p *ttsProcessor) handleFlush(synthCtx context.Context) {
+	p.streamMu.Lock()
+	stream := p.currentStream
+	p.currentStream = nil
+	p.streamMu.Unlock()
 
-func (p *ttsProcessor) worker(item sentenceItem) {
-	defer p.wg.Done()
-	defer func() { <-p.sem }()
+	if stream == nil {
+		return
+	}
+	if err := stream.Finish(synthCtx); err != nil && !errors.Is(err, context.Canceled) {
+		logging.Errorf("TTSProcessor: Finish failed: %v", err)
+	}
+}
 
-	p.synthMu.Lock()
-	synthCtx := p.synthCtx
-	p.synthMu.Unlock()
+// dispatchStreaming 走 per-turn stream 路径：复用 currentStream，WriteTextChunk。
+func (p *ttsProcessor) dispatchStreaming(item sentenceItem, synthCtx context.Context) {
+	p.streamMu.Lock()
+	stream := p.currentStream
+	p.streamMu.Unlock()
 
-	synthStart := time.Now()
-	logging.Infof("TTSProcessor: synth start (seq=%d, epoch=%d, queued_for=%v, text_len=%d, text=%q)",
-		item.seq, item.epoch, synthStart.Sub(item.queuedAt), len([]rune(item.text)), truncate(item.text, 30))
+	if stream == nil {
+		// 优先等 warm stream（由 Write() goroutine 建立）。
+		// warm 在第一个 token 时已触发，通常只需等几十毫秒；超时（300ms）则新建连接。
+		waitCtx, cancel := context.WithTimeout(synthCtx, 300*time.Millisecond)
+		select {
+		case s := <-p.warmResultCh:
+			stream = s
+			logging.Infof("TTSProcessor: warm stream consumed")
+		case <-waitCtx.Done():
+		}
+		cancel()
 
+		if stream == nil {
+			var err error
+			stream, err = p.streamingProv.StartSynthesis(synthCtx, item.opts)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					logging.Errorf("TTSProcessor: StartSynthesis failed: %v", err)
+				}
+				return
+			}
+		}
+		p.streamMu.Lock()
+		p.currentStream = stream
+		p.streamMu.Unlock()
+
+		reader := stream.AudioReader()
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			p.playAudio(reader, "", synthCtx)
+		}()
+	}
+
+	start := time.Now()
+	if err := stream.WriteTextChunk(synthCtx, item.text); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			logging.Errorf("TTSProcessor: WriteTextChunk %q failed after %v: %v", truncate(item.text, 20), time.Since(start), err)
+		}
+		p.streamMu.Lock()
+		if p.currentStream == stream {
+			p.currentStream = nil
+		}
+		p.streamMu.Unlock()
+		stream.Abort()
+		return
+	}
+	logging.Infof("TTSProcessor: WriteTextChunk sent (elapsed=%v, text=%q)", time.Since(start), truncate(item.text, 30))
+}
+
+// dispatchBatch 走非流式 fallback 路径：串行 Synthesize，直接在 dispatcher goroutine 里播放。
+func (p *ttsProcessor) dispatchBatch(item sentenceItem, synthCtx context.Context) {
+	start := time.Now()
 	reader, err := p.cfg.Provider.Synthesize(synthCtx, item.text, item.opts)
-	synthReturnedAt := time.Now()
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
-			logging.Errorf("TTSProcessor: synthesize %q failed after %v: %v", truncate(item.text, 20), synthReturnedAt.Sub(synthStart), err)
+			logging.Errorf("TTSProcessor: Synthesize %q failed after %v: %v", truncate(item.text, 20), time.Since(start), err)
 		}
-		p.sendResult(synthResult{
-			seq:            item.seq,
-			epoch:          item.epoch,
-			text:           item.text,
-			queuedAt:       item.queuedAt,
-			synthStartedAt: synthStart,
-			synthDoneAt:    synthReturnedAt,
-		})
 		return
 	}
-	defer func() { _ = reader.Close() }()
-
-	readStart := time.Now()
-	audio, err := io.ReadAll(reader)
-	readDone := time.Now()
-	if err != nil {
-		if !errors.Is(err, context.Canceled) {
-			logging.Errorf("TTSProcessor: read audio %q failed after %v: %v", truncate(item.text, 20), readDone.Sub(readStart), err)
-		}
-		p.sendResult(synthResult{
-			seq:            item.seq,
-			epoch:          item.epoch,
-			text:           item.text,
-			queuedAt:       item.queuedAt,
-			synthStartedAt: synthStart,
-			synthDoneAt:    readDone,
-		})
-		return
-	}
-
-	logging.Infof("TTSProcessor: synth done (seq=%d, epoch=%d, provider_time=%v, read_time=%v, audio_bytes=%d, total_since_enqueue=%v)",
-		item.seq, item.epoch, synthReturnedAt.Sub(synthStart), readDone.Sub(readStart), len(audio), readDone.Sub(item.queuedAt))
-
-	p.sendResult(synthResult{
-		seq:            item.seq,
-		epoch:          item.epoch,
-		text:           item.text,
-		audio:          audio,
-		queuedAt:       item.queuedAt,
-		synthStartedAt: synthStart,
-		synthDoneAt:    readDone,
-	})
+	logging.Infof("TTSProcessor: Synthesize done (elapsed=%v, text=%q)", time.Since(start), truncate(item.text, 30))
+	p.playAudio(reader, item.text, synthCtx)
 }
 
-func (p *ttsProcessor) sendResult(r synthResult) {
-	p.synthMu.Lock()
-	synthCtx := p.synthCtx
-	p.synthMu.Unlock()
+// playAudio 从 reader 流式读 PCM，每帧调 onChunk。firstText 只在首帧附加。
+func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCtx context.Context) {
+	defer reader.Close()
 
-	select {
-	case p.resultCh <- r:
-	case <-synthCtx.Done():
-	case <-p.ctx.Done():
-	}
-}
+	p.mu.Lock()
+	fn := p.onChunk
+	p.mu.Unlock()
 
-// --- orderer：按 seqNum 排序，顺序放入 playbackCh ---
-
-func (p *ttsProcessor) orderer() {
-	defer p.wg.Done()
-
-	pending := make(map[int64]synthResult)
-	var seqPlay int64
-	var curEpoch int64
+	buf := make([]byte, 4096)
+	first := true
+	playStart := time.Now()
+	totalBytes := 0
 
 	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		case result, ok := <-p.resultCh:
-			if !ok {
-				return
+		n, err := reader.Read(buf)
+		if n > 0 {
+			totalBytes += n
+
+			text := ""
+			if first {
+				text = firstText
+				first = false
+				logging.Infof("TTSProcessor: playback first frame (elapsed=%v, frame_bytes=%d)", time.Since(playStart), n)
 			}
 
-			if result.epoch < curEpoch {
-				continue // 旧 epoch，丢弃
-			}
-			if result.epoch > curEpoch {
-				// 新 epoch（Interrupt 后），重置排序状态
-				pending = make(map[int64]synthResult)
-				seqPlay = 0
-				curEpoch = result.epoch
-			}
-
-			pending[result.seq] = result
-
-			// 按序号顺序推送到 playbackCh
-			interrupted := false
-			for !interrupted {
-				r, ok := pending[seqPlay]
-				if !ok {
-					break
-				}
-				delete(pending, seqPlay)
-				seqPlay++
-
-				if len(r.audio) == 0 {
-					continue // 合成失败的句子跳过，但序号继续推进
-				}
-
-				p.synthMu.Lock()
-				synthCtx := p.synthCtx
-				p.synthMu.Unlock()
-
-				select {
-				case p.playbackCh <- TTSChunk{Text: r.text, Audio: r.audio}:
-					logging.Infof("TTSProcessor: playback queued (seq=%d, epoch=%d, synth_to_playback_queue=%v, total_since_enqueue=%v, audio_bytes=%d)",
-						r.seq, r.epoch, time.Since(r.synthDoneAt), time.Since(r.queuedAt), len(r.audio))
-				case <-synthCtx.Done():
-					// Interrupt：清空 pending，不再向 playbackCh 写入
-					pending = make(map[int64]synthResult)
-					interrupted = true
-				case <-p.ctx.Done():
-					return
-				}
-			}
-		}
-	}
-}
-
-// --- playbackLoop：顺序播放 ---
-
-func (p *ttsProcessor) playbackLoop() {
-	defer p.wg.Done()
-	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		case chunk, ok := <-p.playbackCh:
-			if !ok {
-				return
-			}
-			playStart := time.Now()
-			logging.Infof("TTSProcessor: playback callback start (text_len=%d, audio_bytes=%d, text=%q)",
-				len([]rune(chunk.Text)), len(chunk.Audio), truncate(chunk.Text, 30))
-			p.mu.Lock()
-			fn := p.onChunk
-			p.mu.Unlock()
 			if fn != nil {
-				fn(chunk)
+				fn(TTSChunk{Text: text, Audio: buf[:n]})
 			}
-			logging.Infof("TTSProcessor: playback callback done in %v (audio_bytes=%d)", time.Since(playStart), len(chunk.Audio))
+		}
+		if err != nil {
+			break
+		}
+
+		select {
+		case <-synthCtx.Done():
+			return
+		case <-p.ctx.Done():
+			return
+		default:
 		}
 	}
+
+	logging.Infof("TTSProcessor: playback done (elapsed=%v, total_bytes=%d)", time.Since(playStart), totalBytes)
 }
 
 // --- 工具 ---

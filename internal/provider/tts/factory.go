@@ -40,6 +40,34 @@ type Provider interface {
 	Synthesize(ctx context.Context, text string, opts SynthesisOptions) (io.ReadCloser, error)
 }
 
+// SynthesisStream 是一次 TTS 会话的流式接口。
+// 调用方顺序：WriteTextChunk → Finish → 读取 AudioReader()。
+type SynthesisStream interface {
+	WriteTextChunk(ctx context.Context, text string) error
+	// Finish 发送 finish-task，立即返回，不等 task-finished。
+	// receiver goroutine 负责在 task-finished 后关闭 audioBuf 和 conn。
+	Finish(ctx context.Context) error
+	// AudioReader 返回流式音频 reader，可在 Finish 前开始读；task-finished 后 EOF。
+	AudioReader() io.ReadCloser
+	// Abort 中止 stream，关闭连接和 audioBuf（打断场景）。
+	Abort()
+}
+
+// StreamingProvider 是支持流式合成的 Provider 扩展接口。
+// ttsProcessor 通过类型断言检测并使用此接口；不实现则回退到 Synthesize。
+type StreamingProvider interface {
+	Provider
+	StartSynthesis(ctx context.Context, opts SynthesisOptions) (SynthesisStream, error)
+}
+
+// WarmableProvider 是支持预连接预热的 Provider 扩展接口。
+// Warm 由 TTSProcessor 在每轮第一个 token 到达时在 goroutine 里调用，
+// 阻塞直到连接就绪（或 ctx 取消），返回可立即写文本的 stream。
+// 取消预热只需取消传入的 ctx，无需额外接口。
+type WarmableProvider interface {
+	Warm(ctx context.Context, opts SynthesisOptions) SynthesisStream
+}
+
 var (
 	ErrTransient  = errors.New("tts transient error")
 	ErrAuth       = errors.New("tts auth error")

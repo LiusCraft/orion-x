@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/gordonklaus/portaudio"
 	"github.com/liuscraft/orion-x/internal/agent"
@@ -198,7 +197,6 @@ func main() {
 
 	processorCfg := audio.DefaultTTSConfig()
 	processorCfg.Provider = ttsProvider
-	processorCfg.MaxConcurrent = maxConcurrent
 	processorCfg.QueueSize = queueSize
 
 	ttsProc, err := audio.NewTTSProcessor(processorCfg)
@@ -265,16 +263,11 @@ func main() {
 
 	// Wire TTS audio output to the sink.
 	ttsProc.OnChunk(func(chunk audio.TTSChunk) {
-		start := time.Now()
 		samples := audio.BytesToInt16LE(chunk.Audio)
-		logging.Infof("VoiceBot: sink write start (text_len=%d, audio_bytes=%d, samples=%d)",
-			len([]rune(chunk.Text)), len(chunk.Audio), len(samples))
 		if err := sink.WritePCM(samples); err != nil {
 			logging.Errorf("Sink write error: %v", err)
 			return
 		}
-		logging.Infof("VoiceBot: sink write done in %v (audio_bytes=%d, samples=%d)",
-			time.Since(start), len(chunk.Audio), len(samples))
 	})
 
 	// Start TTSProcessor (ASRProcessor is started inside ASRStage).
