@@ -283,7 +283,7 @@ func main() {
 		AddStage(pstages.NewASRStage(asrProc, micSource)).
 		AddStage(pstages.NewAgentStage(agentInst, sess)).
 		AddStage(pstages.NewTTSStage(ttsProc)).
-		SetObserver(pipeline.NewLoggingObserver(true)).
+		SetObserver(pipeline.NewLoggingObserver(false)).
 		Build()
 
 	logging.Infof("Starting pipeline...")
