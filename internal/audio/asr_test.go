@@ -80,18 +80,6 @@ func (r *mockRecognizer) emitResult(result asr.Result) {
 	}
 }
 
-func (r *mockRecognizer) getStartCalls() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.startCalls
-}
-
-func (r *mockRecognizer) getFinishCalls() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.finishCalls
-}
-
 func (r *mockRecognizer) getSendAudioCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()

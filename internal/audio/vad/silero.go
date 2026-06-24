@@ -92,5 +92,5 @@ func (v *sileroVAD) Reset() {
 	v.currSample = 0
 	v.triggered = false
 	v.tempEnd = 0
-	v.inner.Reset()
+	_ = v.inner.Reset()
 }

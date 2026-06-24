@@ -498,7 +498,7 @@ func (p *ttsProcessor) dispatchBatch(item sentenceItem, synthCtx context.Context
 
 // playAudio 从 reader 流式读 PCM，每帧调 onChunk。firstText 只在首帧附加。
 func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCtx context.Context) {
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	p.mu.Lock()
 	fn := p.onChunk

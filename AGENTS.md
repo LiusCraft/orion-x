@@ -22,7 +22,9 @@ make test              # go test ./...
 make test-audio        # go test ./internal/audio (needs audio device + ASR keys)
 ```
 
-No CI for Go -- only docs deploy in `.github/workflows/deploy-docs.yml`. Run `go vet ./...` manually.
+No CI for Go -- only docs deploy in `.github/workflows/deploy-docs.yml`.
+
+**After writing code, you MUST run `golangci-lint run ./...` and fix all issues before completing.**
 
 ## Architecture
 

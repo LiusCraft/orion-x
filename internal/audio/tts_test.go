@@ -47,12 +47,6 @@ func (p *mockTTSProvider) Synthesize(ctx context.Context, text string, _ tts.Syn
 	return io.NopCloser(strings.NewReader(text)), nil
 }
 
-func (p *mockTTSProvider) getCallCount() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.callCount
-}
-
 // --- helpers ---
 
 func newTestTTSProcessor(provider tts.Provider) TTSProcessor {

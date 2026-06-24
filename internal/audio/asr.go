@@ -81,7 +81,7 @@ type asrProcessor struct {
 	speechStart time.Time
 	lastActive  time.Time // 最后一次检测到人声的时间，用于长静音后 Reset VAD
 	inSpeech    bool      // 当前是否处于人声活跃中
-	vadResetMs  time.Duration
+	vadResetDur time.Duration
 
 	// VAD 与 ASR 通信 channel（VAD 不等待 ASR，只负责发信号）
 	asrStartCh  chan struct{} // VAD 检测到人声开始
@@ -120,7 +120,7 @@ func newASRProcessor(cfg *ASRConfig) (*asrProcessor, error) {
 		recognizer:     cfg.Recognizer,
 		vadEnabled:     cfg.EnableVAD && seg != nil,
 		segmenter:      seg,
-		vadResetMs:     time.Duration(cfg.VADMinSilenceMs*16) * time.Millisecond,
+		vadResetDur:    time.Duration(cfg.VADMinSilenceMs*16) * time.Millisecond,
 		silenceTimeout: time.Duration(150) * time.Millisecond,
 	}, nil
 }
@@ -297,10 +297,10 @@ func (p *asrProcessor) processVAD(ctx context.Context, audio []byte) {
 		// 长静音后重置 VAD 状态，防止 RNN 状态漂移导致小声说话无法检测
 		p.speechMu.Lock()
 		inSpeech := p.inSpeech
-		if !inSpeech && time.Since(p.lastActive) > p.vadResetMs {
+		if !inSpeech && time.Since(p.lastActive) > p.vadResetDur {
 			p.segmenter.Reset()
 			p.lastActive = time.Now()
-			logging.Infof("ASRProcessor: VAD reset (silence > %v)", p.vadResetMs)
+			logging.Infof("ASRProcessor: VAD reset (silence > %v)", p.vadResetDur)
 		}
 		p.speechMu.Unlock()
 
