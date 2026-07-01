@@ -228,14 +228,14 @@ func TestASRProcessorOnResult_VAD(t *testing.T) {
 	r := newMockRecognizer()
 	r.emitOnFinish = true
 
-	var once sync.Once
+	var calls int
 	seg := &mockSegmenter{
 		processFunc: func(audio []byte) (*vad.Segment, bool) {
-			var s *vad.Segment
-			once.Do(func() {
-				s = &vad.Segment{Frames: [][]byte{audio}, Bytes: len(audio)}
-			})
-			return s, false
+			calls++
+			if calls == 1 {
+				return nil, true // signal speech start (wakes asrStartCh)
+			}
+			return &vad.Segment{Frames: [][]byte{audio}, Bytes: len(audio)}, false
 		},
 	}
 
@@ -255,7 +255,10 @@ func TestASRProcessorOnResult_VAD(t *testing.T) {
 	defer func() { _ = proc.Stop() }()
 
 	if err := proc.Write(make([]byte, 320)); err != nil {
-		t.Fatalf("Write failed: %v", err)
+		t.Fatalf("first Write failed: %v", err)
+	}
+	if err := proc.Write(make([]byte, 320)); err != nil {
+		t.Fatalf("second Write failed: %v", err)
 	}
 
 	select {

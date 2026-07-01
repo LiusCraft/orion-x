@@ -201,6 +201,23 @@ func (p *asrProcessor) Stop() error {
 	logging.Infof("ASRProcessor: stopping...")
 
 	if vadEnabled {
+		if segmenter != nil {
+			if seg := segmenter.Flush(); seg != nil && seg.Bytes > 0 {
+				p.recognizer.OnResult(func(result asr.Result) {
+					if result.IsFinal && result.Text != "" {
+						p.emitResult(result.Text)
+					}
+				})
+				if err := p.recognizer.Start(ctx); err == nil {
+					for _, frame := range seg.Frames {
+						if len(frame) > 0 {
+							_ = p.recognizer.SendAudio(ctx, frame)
+						}
+					}
+					_ = p.recognizer.Finish(ctx)
+				}
+			}
+		}
 		if cancel != nil {
 			cancel()
 		}
