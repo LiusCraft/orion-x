@@ -110,6 +110,120 @@ func TestDashScopeRecognizerReusesConnectionAcrossTasks(t *testing.T) {
 	}
 }
 
+func TestDashScopeRecognizerReconnectsAfterServerClosesIdleConnection(t *testing.T) {
+	var upgrader websocket.Upgrader
+	var mu sync.Mutex
+	connections := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade failed: %v", err)
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		mu.Lock()
+		connIdx := connections
+		connections++
+		mu.Unlock()
+
+		for {
+			msgType, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			if msgType != websocket.TextMessage {
+				continue
+			}
+
+			var msg struct {
+				Header taskHeader `json:"header"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil {
+				t.Errorf("unmarshal message failed: %v", err)
+				return
+			}
+
+			switch msg.Header.Action {
+			case "run-task":
+				_ = conn.WriteJSON(eventMessage{Header: taskHeader{Event: "task-started"}})
+			case "finish-task":
+				_ = conn.WriteJSON(eventMessage{
+					Header: taskHeader{Event: "result-generated"},
+					Payload: taskPayload{
+						Output: &taskOutput{
+							Sentence: &taskSentence{
+								Text:        "hello",
+								SentenceEnd: true,
+							},
+						},
+					},
+				})
+				_ = conn.WriteJSON(eventMessage{Header: taskHeader{Event: "task-finished"}})
+				if connIdx == 0 {
+					// 模拟服务端在空闲期主动断开连接（如长时间静音后的 idle 超时）。
+					// 延迟发送以避开 task-finished 的 doneCh/errCh 竞态窗口，
+					// 让 Finish() 先正常返回，就像真实场景里断连发生在
+					// 一段静默期之后，而不是紧跟在任务结束之后。
+					// 客户端 gorilla/websocket 收到这个 Close 帧后会自动回复一个
+					// Close 帧，之后连接进入 "close sent" 状态，复现线上错误。
+					go func() {
+						time.Sleep(50 * time.Millisecond)
+						_ = conn.WriteControl(websocket.CloseMessage,
+							websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+							time.Now().Add(time.Second))
+					}()
+				}
+			}
+		}
+	}))
+	defer server.Close()
+
+	recognizer, err := NewDashScopeRecognizer(asr.Config{
+		APIKey:   "test-key",
+		Endpoint: "ws" + server.URL[len("http"):],
+	})
+	if err != nil {
+		t.Fatalf("new recognizer failed: %v", err)
+	}
+	defer func() { _ = recognizer.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := recognizer.Start(ctx); err != nil {
+		t.Fatalf("start task 1 failed: %v", err)
+	}
+	if err := recognizer.SendAudio(ctx, []byte{0, 1, 2, 3}); err != nil {
+		t.Fatalf("send audio task 1 failed: %v", err)
+	}
+	if err := recognizer.Finish(ctx); err != nil {
+		t.Fatalf("finish task 1 failed: %v", err)
+	}
+
+	// 等待 receiver goroutine 观察到服务端发来的 Close 帧并标记连接失效，
+	// 模拟"长时间静音"这段空档期。
+	time.Sleep(200 * time.Millisecond)
+
+	// 新一轮语音应当能自动重连，而不是对着已失效连接写入并报 "websocket: close sent"。
+	if err := recognizer.Start(ctx); err != nil {
+		t.Fatalf("start task 2 failed (expected automatic reconnect): %v", err)
+	}
+	if err := recognizer.SendAudio(ctx, []byte{4, 5, 6, 7}); err != nil {
+		t.Fatalf("send audio task 2 failed: %v", err)
+	}
+	if err := recognizer.Finish(ctx); err != nil {
+		t.Fatalf("finish task 2 failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if connections != 2 {
+		t.Fatalf("expected reconnect to open a second websocket connection, got %d", connections)
+	}
+}
+
 func TestDashScopeRecognizerRejectsOverlappingTasks(t *testing.T) {
 	var upgrader websocket.Upgrader
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -289,12 +289,14 @@ func (r *DashScopeRecognizer) startReceiver(conn *websocket.Conn) {
 		for {
 			_, data, err := conn.ReadMessage()
 			if err != nil {
+				r.markFailed()
 				r.setErr(err)
 				r.markDone()
 				return
 			}
 			var event eventMessage
 			if err := json.Unmarshal(data, &event); err != nil {
+				r.markFailed()
 				r.setErr(err)
 				r.markDone()
 				return
