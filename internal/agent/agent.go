@@ -38,13 +38,18 @@ func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc memory.S
 		return nil, err
 	}
 
+	return newWithClient(client, mgr.Registry(), normalized.Model, memorySvc), nil
+}
+
+// newWithClient 使用已构造好的 llm.Client 组装 Agent，供测试注入 fake client。
+func newWithClient(client llm.Client, registry *tools.Registry, model string, memorySvc memory.Service) *Agent {
 	return &Agent{
 		client:    client,
-		registry:  mgr.Registry(),
-		model:     normalized.Model,
+		registry:  registry,
+		model:     model,
 		memorySvc: memorySvc,
 		maxSteps:  10,
-	}, nil
+	}
 }
 
 func (a *Agent) SetMaxSteps(n int) {

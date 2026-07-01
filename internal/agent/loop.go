@@ -2,9 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/llm"
@@ -12,178 +11,93 @@ import (
 	"github.com/liuscraft/orion-x/internal/session"
 )
 
+// Run 启动一次 Agent 循环：构建上下文 → 调用 LLM → （如需要）执行工具 → 重复，
+// 直至模型给出无工具调用的最终回复、达到 maxSteps，或 ctx 被取消。
 func (a *Agent) Run(ctx context.Context, sess *session.Session) (<-chan AgentEvent, error) {
-	maxSteps := a.maxSteps
-
 	eventChan := make(chan AgentEvent)
 
 	go func() {
 		defer close(eventChan)
-		processStart := time.Now()
-
-		for step := 0; step < maxSteps; step++ {
+		emit := func(e AgentEvent) bool {
 			select {
+			case eventChan <- e:
+				return true
 			case <-ctx.Done():
-				return
-			default:
-			}
-
-			logging.Infof("Agent: step %d/%d", step+1, maxSteps)
-
-			messages := a.buildSessionMessages(ctx, sess)
-
-			streamStart := time.Now()
-			stream, err := a.client.Chat(ctx, llm.Request{
-				Messages: messages,
-				Tools:    a.registry.Definitions(),
-			})
-			if err != nil {
-				logging.Errorf("Agent: LLM stream error: %v", err)
-				select {
-				case eventChan <- &FinishedEvent{Error: err}:
-				case <-ctx.Done():
-				}
-				return
-			}
-			logging.Infof("Agent: LLM stream established in %v", time.Since(streamStart))
-
-			fullText := ""
-			bufferedContent := ""
-			lastFilteredLength := 0
-			firstChunkLogged := false
-			var toolCalls []llm.ToolCall
-
-			for {
-				msg, err := stream.Recv()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					logging.Errorf("Agent: stream receive error: %v", err)
-					select {
-					case eventChan <- &FinishedEvent{Error: err}:
-					case <-ctx.Done():
-					}
-					stream.Close()
-					return
-				}
-
-				if msg.Content != "" {
-					bufferedContent += msg.Content
-					newContent, nextLength := deltaFromBufferedContent(bufferedContent, lastFilteredLength)
-					if newContent != "" {
-						if !firstChunkLogged {
-							firstChunkLogged = true
-							logging.Infof("Agent: first chunk in %v", time.Since(streamStart))
-						}
-						select {
-						case eventChan <- &TextChunkEvent{Chunk: newContent}:
-						case <-ctx.Done():
-							return
-						}
-						fullText += newContent
-					}
-					lastFilteredLength = nextLength
-				}
-
-				if len(msg.ToolCalls) > 0 {
-					toolCalls = msg.ToolCalls
-				}
-			}
-			stream.Close()
-
-			if len(toolCalls) == 0 {
-				sess.Add(session.Message{Role: session.RoleAssistant, Content: fullText})
-				logging.Infof("Agent: done (no tool calls), total time=%v", time.Since(processStart))
-				select {
-				case eventChan <- &FinishedEvent{Error: nil}:
-				case <-ctx.Done():
-				}
-				return
-			}
-
-			sessionToolCalls := make([]session.ToolCall, len(toolCalls))
-			for i, tc := range toolCalls {
-				sessionToolCalls[i] = session.ToolCall{
-					ID:        tc.ID,
-					Name:      tc.Name,
-					Arguments: tc.Arguments,
-				}
-			}
-			sess.Add(session.Message{Role: session.RoleAssistant, Content: fullText, ToolCalls: sessionToolCalls})
-
-			for _, call := range toolCalls {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				if !a.registry.CanExecute(call.Name) {
-					err := fmt.Errorf("unknown tool: %s", call.Name)
-					logging.Errorf("Agent: %v", err)
-					select {
-					case eventChan <- &FinishedEvent{Error: err}:
-					case <-ctx.Done():
-					}
-					return
-				}
-
-				logging.Infof("Agent: executing tool: %s", call.Name)
-				rawArgs := json.RawMessage(call.Arguments)
-				result, err := a.registry.Execute(ctx, call.Name, rawArgs)
-				if err != nil {
-					logging.Errorf("Agent: tool exec error: %v", err)
-					select {
-					case eventChan <- &FinishedEvent{Error: err}:
-					case <-ctx.Done():
-					}
-					return
-				}
-
-				if result.Error != nil {
-					logging.Errorf("Agent: tool error: %v", result.Error)
-				}
-
-				sess.Add(session.Message{
-					Role:       session.RoleTool,
-					ToolCallID: call.ID,
-					Content:    result.Output,
-				})
+				return false
 			}
 		}
-
-		logging.Infof("Agent: reached max steps (%d)", maxSteps)
-		select {
-		case eventChan <- &FinishedEvent{Error: fmt.Errorf("reached max steps (%d)", maxSteps)}:
-		case <-ctx.Done():
-		}
+		a.runLoop(ctx, sess, emit)
 	}()
 
 	return eventChan, nil
 }
 
-func (a *Agent) buildSessionMessages(ctx context.Context, sess *session.Session) []llm.Message {
-	msgs := sess.ToLLMMessages()
+// runLoop 是循环编排骨架：驱动每一步的上下文构建、LLM 调用与工具执行，并裁决何时终止。
+func (a *Agent) runLoop(ctx context.Context, sess *session.Session, emit func(AgentEvent) bool) {
+	processStart := time.Now()
 
-	if a.memorySvc != nil {
-		memMsgs, err := a.memorySvc.BuildContextMessages(ctx, "")
+	for step := 0; step < a.maxSteps; step++ {
+		if ctx.Err() != nil {
+			return
+		}
+		logging.Infof("Agent: step %d/%d", step+1, a.maxSteps)
+
+		messages := a.buildContextMessages(ctx, sess)
+
+		result, err := a.runStep(ctx, messages, emit)
 		if err != nil {
-			logging.Warnf("Agent: build memory context failed: %v", err)
-		} else {
-			result := make([]llm.Message, 0, len(memMsgs)+len(msgs))
-			for _, m := range memMsgs {
-				if m.Role == "system" {
-					result = append(result, llm.Message{Role: string(m.Role), Content: m.Content})
-				}
+			if isContextErr(err) {
+				return
 			}
-			result = append(result, msgs...)
-			return result
+			logging.Errorf("Agent: step error: %v", err)
+			emit(&FinishedEvent{Error: err})
+			return
+		}
+
+		sess.Add(session.Message{
+			Role:      session.RoleAssistant,
+			Content:   result.text,
+			ToolCalls: toSessionToolCalls(result.toolCalls),
+		})
+
+		if len(result.toolCalls) == 0 {
+			logging.Infof("Agent: done (no tool calls), total time=%v", time.Since(processStart))
+			emit(&FinishedEvent{Error: nil})
+			return
+		}
+
+		toolMessages, fatalErr := a.executeToolCalls(ctx, result.toolCalls)
+		for _, msg := range toolMessages {
+			sess.Add(msg)
+		}
+		if fatalErr != nil {
+			if isContextErr(fatalErr) {
+				return
+			}
+			logging.Errorf("Agent: tool exec error: %v", fatalErr)
+			emit(&FinishedEvent{Error: fatalErr})
+			return
 		}
 	}
 
-	result := make([]llm.Message, 0, len(msgs)+1)
-	result = append(result, llm.Message{Role: "system", Content: defaultSystemPrompt})
-	result = append(result, msgs...)
+	logging.Infof("Agent: reached max steps (%d)", a.maxSteps)
+	emit(&FinishedEvent{Error: fmt.Errorf("reached max steps (%d)", a.maxSteps)})
+}
+
+// isContextErr 判断错误是否源自 ctx 取消/超时——这类错误不应产生 FinishedEvent，
+// 因为 channel 消费方已经不再监听。
+func isContextErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// toSessionToolCalls 将 LLM 工具调用转换为 session 存储格式。
+func toSessionToolCalls(calls []llm.ToolCall) []session.ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	result := make([]session.ToolCall, len(calls))
+	for i, tc := range calls {
+		result[i] = session.ToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}
+	}
 	return result
 }

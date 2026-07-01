@@ -61,6 +61,12 @@ func (r *Registry) CanExecute(name string) bool {
 	return ok
 }
 
+// IsParallelSafe 返回该工具是否可与同轮其它工具并发执行。未注册的工具返回 false。
+func (r *Registry) IsParallelSafe(name string) bool {
+	spec, ok := r.specs[name]
+	return ok && spec.ParallelSafe
+}
+
 func (r *Registry) Execute(ctx context.Context, name string, arguments json.RawMessage) (Result, error) {
 	spec, ok := r.specs[name]
 	if !ok {
