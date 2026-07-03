@@ -7,7 +7,7 @@ endif
 
 GO := GOTOOLCHAIN=$(GO_TOOLCHAIN) $(CGO_FLAGS) go
 
-.PHONY: all build build-voicebot run-voicebot build-wsserver run-wsserver test test-audio clean
+.PHONY: all build build-voicebot run-voicebot build-wsserver run-wsserver test test-audio lint clean
 
 all: build
 
@@ -34,6 +34,9 @@ test:
 
 test-audio:
 	$(GO) test ./internal/audio
+
+lint:
+	$(CGO_FLAGS) golangci-lint run ./...
 
 clean:
 	rm -rf bin
