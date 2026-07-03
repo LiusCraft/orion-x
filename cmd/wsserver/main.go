@@ -13,70 +13,68 @@ import (
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/agent"
-	"github.com/liuscraft/orion-x/internal/config"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
 	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
 	"github.com/liuscraft/orion-x/internal/tools"
+	"github.com/liuscraft/orion-x/internal/config"
 )
 
-// shutdownTimeout bounds how long in-flight connections get to wind down
-// once a shutdown signal is received.
 const shutdownTimeout = 10 * time.Second
 
 func main() {
-	configPath := flag.String("config", config.DefaultPath, "config file path")
-	addr := flag.String("addr", ":8080", "HTTP listen address")
-	wsPath := flag.String("path", "/ws", "WebSocket endpoint path")
+	configPath := flag.String("config", defaultWsserverConfigPath, "config file path")
 	flag.Parse()
 
-	appConfig, err := config.Load(*configPath)
+	cfg, err := loadWsserverConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
-	if err := appConfig.ValidateKeys(true, true, true); err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid config: %v\n", err)
-		os.Exit(1)
-	}
-	llmCfg := appConfig.Provider.LLM.OpenAI
 
 	if err := logging.Init(logging.Config{
-		Level:  appConfig.Logging.Level,
-		Format: appConfig.Logging.Format,
+		Level:  cfg.Logging.Level,
+		Format: cfg.Logging.Format,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to init logger: %v\n", err)
 		os.Exit(1)
 	}
 	defer logging.Sync()
 
+	managerURL := strings.TrimSpace(cfg.Manager.URL)
+	if managerURL == "" {
+		logging.Fatalf("manager.url is required — all device configs are loaded from manager")
+	}
+
 	logging.SetTraceID(logging.NewTraceID())
 	logging.Infof("========================================")
 	logging.Infof("        WS VoiceBot Server Starting... ")
 	logging.Infof("========================================")
-	logging.Infof("Config loaded successfully")
 
 	baseCtx := context.Background()
 
-	// --- process-level shared resources: Memory / ToolManager / Agent ---
-	// These are safe to share across concurrent connections (see Server's
-	// doc comment). Each connection still gets its own Session, so
-	// per-connection state never touches these.
+	// process-level memory / tool / agent — shared across connections
+	// Each connection gets its own AppConfig (from manager), Session, ASR/TTS.
+	// Memory and tools use a placeholder AppConfig for initialization only;
+	// per-connection agent is constructed with the device's actual config.
+	placeholderCfg := config.DefaultConfig()
+	llmCfg := placeholderCfg.Provider.LLM.OpenAI
+
 	memCfg := memory.Config{
-		Mode:                 memory.Mode(strings.TrimSpace(appConfig.Memory.Mode)),
-		SessionMaxTurns:      appConfig.Memory.SessionMaxTurns,
-		SessionSummaryEveryN: appConfig.Memory.SessionSummaryEveryN,
-		LongTermDBPath:       appConfig.Memory.LongTermDBPath,
-		LongTermMaxResults:   appConfig.Memory.LongTermMaxResults,
-		RetentionDays:        appConfig.Memory.RetentionDays,
-		FTSMinScore:          appConfig.Memory.FTSMinScore,
+		Mode:                 memory.Mode(strings.TrimSpace(placeholderCfg.Memory.Mode)),
+		SessionMaxTurns:      placeholderCfg.Memory.SessionMaxTurns,
+		SessionSummaryEveryN: placeholderCfg.Memory.SessionSummaryEveryN,
+		LongTermDBPath:       placeholderCfg.Memory.LongTermDBPath,
+		LongTermMaxResults:   placeholderCfg.Memory.LongTermMaxResults,
+		RetentionDays:        placeholderCfg.Memory.RetentionDays,
+		FTSMinScore:          placeholderCfg.Memory.FTSMinScore,
 	}
 	memorySvc, err := memory.NewService(memCfg, memory.Options{
 		SystemPrompt: agent.DefaultSystemPrompt(),
 		LLM: memory.LLMConfig{
-			Provider: appConfig.Provider.LLM.Type,
+			Provider: placeholderCfg.Provider.LLM.Type,
 			APIKey:   llmCfg.APIKey,
 			BaseURL:  llmCfg.BaseURL,
 			Model:    llmCfg.Model,
@@ -91,19 +89,7 @@ func main() {
 		}
 	}()
 
-	agentCfg := agent.Config{
-		Provider:    appConfig.Provider.LLM.Type,
-		APIKey:      llmCfg.APIKey,
-		BaseURL:     llmCfg.BaseURL,
-		Model:       llmCfg.Model,
-		ExtraFields: llmCfg.ExtraFields,
-	}
-	toolCfg := tools.ManagerConfig{
-		MCPServers: toToolsMCPServers(appConfig.Tools.MCP),
-	}
-
-	logging.Infof("Creating ToolManager...")
-	toolMgr, err := tools.NewManager(baseCtx, toolCfg)
+	toolMgr, err := tools.NewManager(baseCtx, tools.ManagerConfig{})
 	if err != nil {
 		logging.Fatalf("Failed to create ToolManager: %v", err)
 	}
@@ -112,23 +98,18 @@ func main() {
 			logging.Warnf("Close ToolManager failed: %v", err)
 		}
 	}()
-	logging.Infof("ToolManager created successfully")
 
-	logging.Infof("Creating Agent...")
-	_, err = agent.New(baseCtx, agentCfg, toolMgr, memorySvc)
-	if err != nil {
-		logging.Fatalf("Failed to create Agent: %v", err)
-	}
-	logging.Infof("Agent created successfully")
+	deviceCfg := newHTTPDeviceConfigLoader(managerURL)
+	logging.Infof("Device config loader: manager at %s", managerURL)
 
-	srv := NewServer(appConfig, toolMgr, agentCfg, memorySvc)
+	srv := NewServer(toolMgr, memorySvc, deviceCfg)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(*wsPath, srv.HandleWS)
-	httpServer := &http.Server{Addr: *addr, Handler: mux}
+	mux.HandleFunc(cfg.Server.WsPath, srv.HandleWS)
+	httpServer := &http.Server{Addr: cfg.Server.Addr, Handler: mux}
 
 	go func() {
-		logging.Infof("Listening on %s (ws endpoint: %s)", *addr, *wsPath)
+		logging.Infof("Listening on %s (ws: %s)", cfg.Server.Addr, cfg.Server.WsPath)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logging.Fatalf("HTTP server error: %v", err)
 		}
@@ -143,41 +124,31 @@ func main() {
 	logging.Infof("========================================")
 
 	<-sigCh
-	logging.Infof("========================================")
-	logging.Infof("     Received interrupt signal...       ")
-	logging.Infof("========================================")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logging.Errorf("HTTP server shutdown error: %v", err)
 	}
-
-	logging.Infof("Closing active connections...")
 	srv.Shutdown(shutdownTimeout)
 
 	logging.Infof("WS VoiceBot Server stopped.")
 	logging.Sync()
 
-	// Any connection that used auto mode loads the Silero VAD model, which
-	// links ONNX Runtime. Returning from main() normally runs C++ static
-	// destructors on macOS that crash with "mutex lock failed: Invalid
-	// argument" (same root cause as the PortAudio crash cmd/voicebot works
-	// around — see its main.go). Bypass that cleanup entirely.
 	_, _, _ = syscall.Syscall(syscall.SYS_EXIT, 0, 0, 0)
 }
 
 func toToolsMCPServers(cfgs []config.MCPServerConfig) []tools.MCPServerConfig {
 	servers := make([]tools.MCPServerConfig, 0, len(cfgs))
-	for _, cfg := range cfgs {
+	for _, c := range cfgs {
 		servers = append(servers, tools.MCPServerConfig{
-			ID:           cfg.ID,
-			Transport:    cfg.Transport,
-			Command:      cfg.Command,
-			Args:         cfg.Args,
-			Endpoint:     cfg.Endpoint,
-			ToolNameList: cfg.ToolNameList,
-			TimeoutMs:    cfg.TimeoutMs,
+			ID:           c.ID,
+			Transport:    c.Transport,
+			Command:      c.Command,
+			Args:         c.Args,
+			Endpoint:     c.Endpoint,
+			ToolNameList: c.ToolNameList,
+			TimeoutMs:    c.TimeoutMs,
 		})
 	}
 	return servers

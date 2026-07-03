@@ -7,11 +7,11 @@ endif
 
 GO := GOTOOLCHAIN=$(GO_TOOLCHAIN) $(CGO_FLAGS) go
 
-.PHONY: all build build-voicebot run-voicebot build-wsserver run-wsserver test test-audio lint clean
+.PHONY: all build build-voicebot run-voicebot build-wsserver run-wsserver build-manager run-manager test test-audio lint clean
 
 all: build
 
-build: build-voicebot build-wsserver
+build: build-voicebot build-wsserver build-manager
 
 build-voicebot:
 	mkdir -p bin
@@ -27,7 +27,14 @@ build-wsserver:
 	$(GO) build -o bin/wsserver ./cmd/wsserver
 
 run-wsserver: build-wsserver
-	./bin/wsserver
+	./bin/wsserver -config data/wsserver.yaml
+
+build-manager:
+	mkdir -p bin
+	go build -o bin/manager ./cmd/manager
+
+run-manager: build-manager
+	./bin/manager
 
 test:
 	$(GO) test ./...

@@ -1,0 +1,10 @@
+server:
+  addr: ":8080"
+  ws_path: "/ws"
+
+manager:
+  url: "http://localhost:9090"   # manager 服务地址，用于查询设备配置
+
+logging:
+  level: "info"
+  format: "console"   # console | json

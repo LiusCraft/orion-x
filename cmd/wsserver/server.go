@@ -9,8 +9,6 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/liuscraft/orion-x/internal/agent"
-	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/tools"
@@ -34,10 +32,9 @@ const helloTimeout = 10 * time.Second
 // giving handleConnection's cleanup defers no chance to run (Recognizer
 // connections, TTSProcessor dispatchers, etc. would leak).
 type Server struct {
-	appConfig *config.AppConfig
 	toolsMgr  *tools.Manager
-	agentCfg  agent.Config
 	memorySvc memory.Service
+	deviceCfg DeviceConfigLoader
 	upgrader  websocket.Upgrader
 
 	rootCtx    context.Context
@@ -45,14 +42,13 @@ type Server struct {
 	connWG     sync.WaitGroup
 }
 
-func NewServer(appConfig *config.AppConfig, toolsMgr *tools.Manager, agentCfg agent.Config, memorySvc memory.Service) *Server {
+func NewServer(toolsMgr *tools.Manager, memorySvc memory.Service, deviceCfg DeviceConfigLoader) *Server {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	return &Server{
-		appConfig: appConfig,
-		toolsMgr:  toolsMgr,
-		agentCfg:  agentCfg,
-		memorySvc: memorySvc,
-		rootCtx:   rootCtx,
+		toolsMgr:   toolsMgr,
+		memorySvc:  memorySvc,
+		deviceCfg:  deviceCfg,
+		rootCtx:    rootCtx,
 		rootCancel: rootCancel,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },

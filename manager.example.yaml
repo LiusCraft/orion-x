@@ -1,0 +1,16 @@
+server:
+  addr: ":9090"
+
+database:
+  dsn: "postgres://orion:orion123@localhost:5432/orionx?sslmode=disable"
+
+jwt:
+  secret: "change-me-in-production"
+
+admin:
+  username: "admin"
+  password: "admin123"   # 仅首次启动时创建用户，之后此字段可删除
+
+logging:
+  level: "info"
+  format: "console"    # console | json

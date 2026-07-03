@@ -11,6 +11,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
+	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/pipeline"
@@ -136,6 +137,18 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		return nil, fmt.Errorf("unsupported bits_per_sample %d (only %d is supported)", bps, supportedBitsPerSample)
 	}
 
+	// Load per-device config from manager. Unregistered devices are rejected.
+	if hello.DeviceID == "" {
+		return nil, fmt.Errorf("device_id is required")
+	}
+	connCfg, err := s.deviceCfg.LoadConfig(hello.DeviceID)
+	if err != nil {
+		return nil, fmt.Errorf("load device config for %q: %w", hello.DeviceID, err)
+	}
+	if connCfg == nil {
+		return nil, fmt.Errorf("device %q is not registered", hello.DeviceID)
+	}
+
 	mode := hello.Mode
 	if mode == "" {
 		mode = wsproto.ModeAuto
@@ -168,15 +181,15 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		return nil, err
 	}
 
-	sess := session.New(session.SessionMeta{Model: s.appConfig.Provider.LLM.OpenAI.Model})
+	sess := session.New(session.SessionMeta{Model: connCfg.Provider.LLM.OpenAI.Model})
 	sessionID := sess.ID
 
-	recognizer, err := s.newRecognizer()
+	recognizer, err := s.newRecognizer(connCfg)
 	if err != nil {
 		return nil, err
 	}
 
-	inPipeCfg := s.appConfig.Audio.InPipe
+	inPipeCfg := connCfg.Audio.InPipe
 	asrProc, err := audio.NewASRProcessor(&audio.ASRConfig{
 		EnableVAD:       mode == wsproto.ModeAuto,
 		VADThreshold:    inPipeCfg.VADThreshold,
@@ -190,12 +203,12 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		return nil, err
 	}
 
-	ttsProvider, err := s.newTTSProvider()
+	ttsProvider, err := s.newTTSProvider(connCfg)
 	if err != nil {
 		return nil, err
 	}
 
-	ttsPipeCfg := s.appConfig.Audio.TTSPipeline
+	ttsPipeCfg := connCfg.Audio.TTSPipeline
 	queueSize := ttsPipeCfg.TextQueueSize
 	if queueSize <= 0 {
 		queueSize = 100
@@ -245,7 +258,14 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		devMCP = newDeviceMCPClient(safeConn, sessionID, connMgr.Registry())
 	}
 
-	connAgent, err := agent.New(ctx, s.agentCfg, connMgr, s.memorySvc)
+	connAgentCfg := agent.Config{
+		Provider:    connCfg.Provider.LLM.Type,
+		APIKey:      connCfg.Provider.LLM.OpenAI.APIKey,
+		BaseURL:     connCfg.Provider.LLM.OpenAI.BaseURL,
+		Model:       connCfg.Provider.LLM.OpenAI.Model,
+		ExtraFields: connCfg.Provider.LLM.OpenAI.ExtraFields,
+	}
+	connAgent, err := agent.New(ctx, connAgentCfg, connMgr, s.memorySvc)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("create per-connection agent: %w", err)
@@ -319,10 +339,10 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 	}, nil
 }
 
-func (s *Server) newRecognizer() (asr.Recognizer, error) {
-	asrCfg := s.appConfig.Provider.ASR.Aliyun
+func (s *Server) newRecognizer(cfg *config.AppConfig) (asr.Recognizer, error) {
+	asrCfg := cfg.Provider.ASR.Aliyun
 	return asr.NewRecognizer(asr.ProviderConfig{
-		Type: s.appConfig.Provider.ASR.Type,
+		Type: cfg.Provider.ASR.Type,
 		Config: asr.Config{
 			APIKey:     asrCfg.APIKey,
 			Endpoint:   asrCfg.Endpoint,
@@ -333,10 +353,10 @@ func (s *Server) newRecognizer() (asr.Recognizer, error) {
 	})
 }
 
-func (s *Server) newTTSProvider() (tts.Provider, error) {
-	ttsCfg := s.appConfig.Provider.TTS.Aliyun
+func (s *Server) newTTSProvider(cfg *config.AppConfig) (tts.Provider, error) {
+	ttsCfg := cfg.Provider.TTS.Aliyun
 	return tts.NewProvider(tts.ProviderConfig{
-		Type: s.appConfig.Provider.TTS.Type,
+		Type: cfg.Provider.TTS.Type,
 		Config: tts.Config{
 			APIKey:               ttsCfg.APIKey,
 			Endpoint:             ttsCfg.Endpoint,
