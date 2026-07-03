@@ -55,7 +55,7 @@ func loadMCPSpecs(ctx context.Context, cfg MCPServerConfig) ([]Spec, *mcpSession
 
 	specs := make([]Spec, 0, len(allTools))
 	for _, t := range allTools {
-		prefixedName := fmt.Sprintf("%s.%s.%s", mcpPrefix, cfg.ID, t.Name)
+		prefixedName := fmt.Sprintf("%s__%s__%s", mcpPrefix, cfg.ID, t.Name)
 		inputSchema, _ := t.InputSchema.(map[string]any)
 
 		originalName := t.Name
@@ -162,11 +162,12 @@ func flattenMCPEnv(env map[string]string) []string {
 }
 
 func ParseMCPToolName(name string) (serverID, toolName string, ok bool) {
-	if !strings.HasPrefix(name, mcpPrefix+".") {
+	prefix := mcpPrefix + "__"
+	if !strings.HasPrefix(name, prefix) {
 		return "", "", false
 	}
-	rest := strings.TrimPrefix(name, mcpPrefix+".")
-	parts := strings.SplitN(rest, ".", 2)
+	rest := strings.TrimPrefix(name, prefix)
+	parts := strings.SplitN(rest, "__", 2)
 	if len(parts) != 2 {
 		return "", "", false
 	}

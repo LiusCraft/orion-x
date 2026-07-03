@@ -12,7 +12,9 @@ import (
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
-	"github.com/liuscraft/orion-x/internal/wsproto"
+	"github.com/liuscraft/orion-x/internal/memory"
+	"github.com/liuscraft/orion-x/internal/tools"
+	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 )
 
 // helloTimeout bounds how long a client has to send its hello handshake
@@ -33,7 +35,9 @@ const helloTimeout = 10 * time.Second
 // connections, TTSProcessor dispatchers, etc. would leak).
 type Server struct {
 	appConfig *config.AppConfig
-	agentInst *agent.Agent
+	toolsMgr  *tools.Manager
+	agentCfg  agent.Config
+	memorySvc memory.Service
 	upgrader  websocket.Upgrader
 
 	rootCtx    context.Context
@@ -41,17 +45,16 @@ type Server struct {
 	connWG     sync.WaitGroup
 }
 
-// NewServer creates a Server.
-func NewServer(appConfig *config.AppConfig, agentInst *agent.Agent) *Server {
+func NewServer(appConfig *config.AppConfig, toolsMgr *tools.Manager, agentCfg agent.Config, memorySvc memory.Service) *Server {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	return &Server{
-		appConfig:  appConfig,
-		agentInst:  agentInst,
-		rootCtx:    rootCtx,
+		appConfig: appConfig,
+		toolsMgr:  toolsMgr,
+		agentCfg:  agentCfg,
+		memorySvc: memorySvc,
+		rootCtx:   rootCtx,
 		rootCancel: rootCancel,
 		upgrader: websocket.Upgrader{
-			// Voice clients are arbitrary (browser/app/device), not
-			// restricted to a single origin.
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
@@ -60,6 +63,21 @@ func NewServer(appConfig *config.AppConfig, agentInst *agent.Agent) *Server {
 // HandleWS upgrades an HTTP request to a WebSocket connection and hands it
 // off to a new goroutine for the connection's lifetime.
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
+	// Read auth / identity fields from headers first, then fall back to query params.
+	pick := func(header, query string) string {
+		if v := r.Header.Get(header); v != "" {
+			return v
+		}
+		return r.URL.Query().Get(query)
+	}
+	authorization    := pick("Authorization",    "access_token")
+	protocolVersion  := pick("Protocol-Version", "protocol-version")
+	deviceID         := pick("Device-Id",        "device-id")
+	clientID         := pick("Client-Id",        "client-id")
+
+	logging.Infof("wsserver: incoming connection — Authorization=%q ProtocolVersion=%q DeviceId=%q ClientId=%q RemoteAddr=%s",
+		authorization, protocolVersion, deviceID, clientID, r.RemoteAddr)
+
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logging.Warnf("wsserver: upgrade failed: %v", err)

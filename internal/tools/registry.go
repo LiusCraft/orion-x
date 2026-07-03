@@ -39,8 +39,10 @@ func NewRegistry(specs ...Spec) *Registry {
 }
 
 func (r *Registry) Add(spec Spec) {
+	if _, exists := r.specs[spec.Name]; !exists {
+		r.order = append(r.order, spec.Name)
+	}
 	r.specs[spec.Name] = spec
-	r.order = append(r.order, spec.Name)
 }
 
 func (r *Registry) Definitions() []llm.ToolDefinition {
@@ -73,4 +75,26 @@ func (r *Registry) Execute(ctx context.Context, name string, arguments json.RawM
 		return Result{}, fmt.Errorf("unknown tool: %s", name)
 	}
 	return spec.Execute(ctx, arguments)
+}
+
+// Specs returns all registered specs in registration order.
+func (r *Registry) Specs() []Spec {
+	out := make([]Spec, 0, len(r.order))
+	for _, name := range r.order {
+		out = append(out, r.specs[name])
+	}
+	return out
+}
+
+// Clone returns a new Registry with the same specs, independent of the original.
+func (r *Registry) Clone() *Registry {
+	c := &Registry{
+		specs: make(map[string]Spec, len(r.specs)),
+		order: make([]string, len(r.order)),
+	}
+	copy(c.order, r.order)
+	for k, v := range r.specs {
+		c.specs[k] = v
+	}
+	return c
 }

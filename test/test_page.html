@@ -159,6 +159,79 @@
   details summary::-webkit-details-marker { display: none; }
   details[open] .chevron { transform: rotate(180deg); }
   .chevron { transition: transform .2s; }
+
+  /* ── Light mode ── */
+  body.light-mode { background: #f1f5f9; color: #1e293b; }
+  body.light-mode header { background: #e2e8f0; border-color: rgba(0,0,0,0.08); }
+  body.light-mode .glass { background: rgba(255,255,255,0.75); border-color: rgba(0,0,0,0.1); }
+  body.light-mode .field { background: rgba(255,255,255,0.85); border-color: rgba(0,0,0,0.15); color: #1e293b; }
+  body.light-mode #messageLog { background: rgba(0,0,0,0.03); }
+  body.light-mode .bubble-stt { background: rgba(0,0,0,0.07); }
+  body.light-mode .bubble-tts { background: rgba(99,102,241,0.12); }
+  body.light-mode .mic-btn { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.15); }
+  body.light-mode .btn-ghost { background: rgba(0,0,0,0.05); color: #475569; border-color: rgba(0,0,0,0.1); }
+  body.light-mode .btn-ghost:hover:not(:disabled) { background: rgba(0,0,0,0.09); color: #1e293b; }
+  body.light-mode .btn-primary:disabled { background: rgba(0,0,0,0.1); color: rgba(0,0,0,.3); }
+  /* Tailwind slate overrides */
+  body.light-mode .text-slate-100 { color: #1e293b !important; }
+  body.light-mode .text-slate-400 { color: #475569 !important; }
+  body.light-mode .text-slate-500 { color: #64748b !important; }
+  body.light-mode .text-slate-600 { color: #94a3b8 !important; }
+  body.light-mode .border-white\/\[0\.06\] { border-color: rgba(0,0,0,0.08) !important; }
+  body.light-mode ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); }
+
+  /* ── Temperature effects on #micArea ── */
+  #micArea { transition: box-shadow .6s, background .6s; }
+
+  /* freezing ≤10°C */
+  #micArea.temp-freeze {
+    background: rgba(147,210,255,0.08);
+    box-shadow: 0 0 40px rgba(147,210,255,0.25), inset 0 0 30px rgba(147,210,255,0.08);
+  }
+  #micArea.temp-freeze::after {
+    content: '🧊❄️🌨️'; font-size: 1.1rem; letter-spacing: 4px;
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    animation: float-ice 3s ease-in-out infinite;
+  }
+  @keyframes float-ice { 0%,100%{opacity:.5;transform:translateX(-50%) translateY(0)} 50%{opacity:1;transform:translateX(-50%) translateY(-4px)} }
+
+  /* cool 10–22°C */
+  #micArea.temp-cool {
+    background: rgba(34,197,94,0.05);
+    box-shadow: 0 0 24px rgba(34,197,94,0.12);
+  }
+  #micArea.temp-cool::after { content: '🌿🍃'; font-size: 1rem; letter-spacing: 4px;
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); }
+
+  /* warm 22–32°C */
+  #micArea.temp-warm {
+    background: rgba(251,146,60,0.07);
+    box-shadow: 0 0 32px rgba(251,146,60,0.2);
+  }
+  #micArea.temp-warm::after { content: '☀️🌤️'; font-size: 1rem; letter-spacing: 4px;
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); }
+
+  /* hot >32°C */
+  #micArea.temp-hot {
+    animation: fire-pulse 1.2s ease-in-out infinite;
+  }
+  #micArea.temp-hot::after {
+    content: '🔥🌋🔥'; font-size: 1.2rem; letter-spacing: 4px;
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    animation: fire-shake .18s ease-in-out infinite alternate;
+  }
+  @keyframes fire-pulse {
+    0%,100% { background: rgba(239,68,68,0.08); box-shadow: 0 0 30px rgba(239,68,68,0.25), 0 0 60px rgba(251,146,60,0.15); }
+    50%      { background: rgba(251,146,60,0.12); box-shadow: 0 0 50px rgba(239,68,68,0.4),  0 0 90px rgba(251,146,60,0.25); }
+  }
+  @keyframes fire-shake { from{transform:translateX(-50%) rotate(-2deg)} to{transform:translateX(-50%) rotate(2deg)} }
+
+  /* temperature label */
+  #tempLabel {
+    position: absolute; bottom: 32px; right: 10px;
+    font-size: .7rem; font-weight: 600; opacity: .6;
+    transition: color .4s;
+  }
 </style>
 </head>
 <body class="min-h-screen text-slate-100">
@@ -180,7 +253,7 @@
 <div class="max-w-7xl mx-auto px-6 py-6 flex gap-5" style="height:calc(100vh - 61px)">
 
   <!-- Left sidebar: connection config -->
-  <aside class="w-64 shrink-0 flex flex-col gap-4">
+  <aside class="w-64 shrink-0 flex flex-col gap-4 overflow-y-auto">
     <div class="glass rounded-xl p-5 flex flex-col gap-3">
       <p class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1">Connection</p>
 
@@ -190,9 +263,19 @@
           class="field text-sm rounded-lg px-3 py-2 w-full" />
       </div>
       <div class="flex flex-col gap-1">
-        <label class="text-xs text-slate-400">Device ID</label>
+        <label class="text-xs text-slate-400">Device ID (MAC)</label>
         <input id="deviceId" type="text" value="web-debug-client"
           class="field text-sm rounded-lg px-3 py-2 w-full" />
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-xs text-slate-400">Client ID (UUID)</label>
+        <input id="clientId" type="text" value="web-debug-uuid-0001"
+          class="field text-sm rounded-lg px-3 py-2 w-full" />
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-xs text-slate-400">Access Token</label>
+        <input id="accessToken" type="text" placeholder="Bearer token (optional)"
+          class="field text-sm rounded-lg px-3 py-2 w-full font-mono" />
       </div>
       <div class="flex flex-col gap-1">
         <label class="text-xs text-slate-400">Mode</label>
@@ -200,6 +283,11 @@
           <option value="auto">Auto (Server VAD)</option>
           <option value="manual">Manual (Client)</option>
         </select>
+      </div>
+
+      <div class="flex items-center gap-2 mt-1">
+        <input type="checkbox" id="enableMCP" class="rounded">
+        <label for="enableMCP" class="text-xs text-slate-400 cursor-pointer">Enable device-MCP</label>
       </div>
 
       <button id="connectBtn" class="btn-primary px-4 py-2 text-sm mt-1">Connect</button>
@@ -221,13 +309,29 @@
         <button id="listenStopBtn"  disabled class="btn-ghost flex-1 px-3 py-2 text-xs">■ Stop</button>
       </div>
     </div>
+
+    <!-- IoT simulator -->
+    <div class="glass rounded-xl p-4 flex flex-col gap-2">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1">IoT Simulator</p>
+      <select id="iotDevicePreset" class="field text-xs rounded-lg px-2 py-1.5 w-full cursor-pointer">
+        <option value="speaker">🔊 Speaker (volume)</option>
+        <option value="light">💡 Light (on/off + brightness)</option>
+        <option value="thermostat">🌡️ Thermostat (temperature)</option>
+      </select>
+      <button id="iotSendDescBtn" disabled class="btn-ghost px-3 py-1.5 text-xs">Send Descriptors</button>
+      <button id="iotSendStateBtn" disabled class="btn-ghost px-3 py-1.5 text-xs">Send States</button>
+      <div id="iotCommandLog" class="mt-1 text-xs text-slate-500 font-mono max-h-20 overflow-y-auto space-y-0.5 hidden">
+        <p class="text-slate-600">Incoming commands…</p>
+      </div>
+    </div>
   </aside>
 
   <!-- Center: mic + conversation -->
   <main class="flex-1 flex flex-col gap-4 min-w-0">
 
     <!-- Mic area -->
-    <div class="glass rounded-xl p-6 flex flex-col items-center gap-4">
+    <div id="micArea" class="glass rounded-xl p-6 flex flex-col items-center gap-4 relative">
+      <div id="tempLabel" class="hidden"></div>
       <div class="relative">
         <div class="mic-btn">
           <div class="vol-ring" id="volRing"></div>
@@ -286,6 +390,17 @@
       <button data-snippet='{"type":"listen","state":"start"}' class="snippet-btn btn-ghost px-3 py-1.5 text-xs text-left">listen start</button>
       <button data-snippet='{"type":"listen","state":"stop"}'  class="snippet-btn btn-ghost px-3 py-1.5 text-xs text-left">listen stop</button>
       <button data-snippet='{"type":"abort"}'                 class="snippet-btn btn-ghost px-3 py-1.5 text-xs text-left">abort</button>
+      <hr class="border-white/[0.06] my-0.5">
+      <button data-snippet='{"type":"iot","descriptors":[]}' class="snippet-btn btn-ghost px-3 py-1.5 text-xs text-left text-amber-400/70">iot descriptors</button>
+      <button data-snippet='{"type":"iot","states":[]}'      class="snippet-btn btn-ghost px-3 py-1.5 text-xs text-left text-amber-400/70">iot states</button>
+    </div>
+
+    <!-- device-MCP status -->
+    <div id="mcpPanel" class="glass rounded-xl p-4 flex flex-col gap-2 hidden">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1">Device MCP</p>
+      <div id="mcpStatus" class="text-xs text-slate-500">Waiting…</div>
+      <div class="text-xs text-slate-600 font-semibold mt-1">Mock tools</div>
+      <div id="mcpToolList" class="text-xs text-slate-500 font-mono space-y-0.5"></div>
     </div>
   </aside>
 </div>
@@ -329,15 +444,19 @@ const STATE = {
   ws: null, connected: false, sessionId: null, mode: 'auto',
   audioCtx: null, micStream: null, processor: null, recording: false,
   // TTS playback
-  playCtx: null, nextPlayTime: 0, ttsSampleRate: 16000,
+  playCtx: null, nextPlayTime: 0, ttsSampleRate: 16000, gainNode: null,
   // Agent emotion (updated by llm messages)
   currentEmotion: '',
+  // device-MCP mock server state
+  mcp: { enabled: false, initialized: false, nextId: 100 },
 };
 
 // ── element refs ─────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const E = {
   serverUrl: $('serverUrl'), deviceId: $('deviceId'), mode: $('mode'),
+  clientId: $('clientId'), accessToken: $('accessToken'),
+  enableMCP: $('enableMCP'),
   connectBtn: $('connectBtn'), disconnectBtn: $('disconnectBtn'),
   statusDot: $('statusDot'), statusLabel: $('statusLabel'),
   connectionStatus: $('connectionStatus'), sessionId: $('sessionId'),
@@ -356,16 +475,52 @@ const E = {
   modeModal: $('modeModal'),
   connectPhoneBtn: $('connectPhoneBtn'), connectVoiceBtn: $('connectVoiceBtn'),
   cancelConnectBtn: $('cancelConnectBtn'),
+  // IoT simulator
+  iotDevicePreset: $('iotDevicePreset'),
+  iotSendDescBtn: $('iotSendDescBtn'), iotSendStateBtn: $('iotSendStateBtn'),
+  iotCommandLog: $('iotCommandLog'),
+  // device-MCP panel
+  mcpPanel: $('mcpPanel'), mcpStatus: $('mcpStatus'), mcpToolList: $('mcpToolList'),
 };
 
 // ── logging ──────────────────────────────────────────────────────────────────
+let _debugGroup = null, _debugCount = 0;
+
 function dbg(type, msg, data = null) {
   const ts = new Date().toLocaleTimeString('en', { hour12: false });
-  const el = document.createElement('div');
-  el.className = `log-entry log-${type}`;
-  el.textContent = `${ts}  ${type.padEnd(8)}${msg}${data ? '  ' + JSON.stringify(data) : ''}`;
-  if (E.messageLog.firstChild?.textContent === 'Ready.') E.messageLog.innerHTML = '';
-  E.messageLog.appendChild(el);
+  const text = `${ts}  ${type.padEnd(8)}${msg}${data ? '  ' + JSON.stringify(data) : ''}`;
+
+  if (E.messageLog.children.length === 1 &&
+      E.messageLog.firstChild?.textContent === 'Ready.') {
+    E.messageLog.innerHTML = '';
+  }
+
+  if (type === 'debug') {
+    if (!_debugGroup) {
+      _debugGroup = document.createElement('details');
+      _debugGroup.className = 'log-entry';
+      const summary = document.createElement('summary');
+      summary.className = 'log-debug cursor-pointer select-none';
+      _debugGroup.appendChild(summary);
+      E.messageLog.appendChild(_debugGroup);
+      _debugCount = 0;
+    }
+    _debugCount++;
+    _debugGroup.querySelector('summary').textContent =
+      `▸ ${_debugCount} audio frame${_debugCount > 1 ? 's' : ''}`;
+    const el = document.createElement('div');
+    el.className = 'log-debug pl-3';
+    el.textContent = text;
+    _debugGroup.appendChild(el);
+  } else {
+    _debugGroup = null;
+    _debugCount = 0;
+    const el = document.createElement('div');
+    el.className = `log-entry log-${type}`;
+    el.textContent = text;
+    E.messageLog.appendChild(el);
+  }
+
   if (E.autoscrollLog.checked) E.messageLog.scrollTop = E.messageLog.scrollHeight;
 }
 
@@ -421,7 +576,8 @@ function setConnected(v) {
   E.sessionId.textContent = '';
 
   const btns = [E.listenStartBtn, E.listenStopBtn, E.textInput,
-                E.sendTextBtn, E.abortBtn, E.rawMessage, E.sendRawBtn];
+                E.sendTextBtn, E.abortBtn, E.rawMessage, E.sendRawBtn,
+                E.iotSendDescBtn, E.iotSendStateBtn];
   btns.forEach(b => b.disabled = !v);
   E.connectBtn.disabled = v;
   E.disconnectBtn.disabled = !v;
@@ -452,17 +608,25 @@ function connect() {
   if (STATE.ws) STATE.ws.close();
   const url = E.serverUrl.value.trim();
   STATE.mode = E.mode.value;
-  dbg('info', `connecting → ${url}`);
-  STATE.ws = new WebSocket(url);
+  const params = new URLSearchParams({ 'protocol-version': '1' });
+  if (E.deviceId.value)    params.set('device-id',     E.deviceId.value);
+  if (E.clientId.value)    params.set('client-id',     E.clientId.value);
+  if (E.accessToken.value) params.set('access_token',  E.accessToken.value);
+  const wsUrl = `${url}?${params.toString()}`;
+  dbg('info', `connecting → ${wsUrl}`);
+  STATE.ws = new WebSocket(wsUrl);
   STATE.ws.binaryType = 'arraybuffer';
 
   STATE.ws.onopen = () => {
+    STATE.mcp.enabled = E.enableMCP.checked;
+    STATE.mcp.initialized = false;
     const hello = {
       type: 'hello',
       device_id: E.deviceId.value || 'web-debug',
       mode: STATE.mode,
       audio_params: { format: 'pcm', sample_rate: 16000, channels: 1, bits_per_sample: 16 },
     };
+    if (STATE.mcp.enabled) hello.features = { mcp: true };
     STATE.ws.send(JSON.stringify(hello));
     dbg('sent', 'hello', hello);
   };
@@ -476,14 +640,25 @@ function connect() {
       STATE.sessionId = msg.session_id;
       STATE.ttsSampleRate = msg.audio_params?.sample_rate || 16000;
       STATE.playCtx = new AudioContext({ sampleRate: STATE.ttsSampleRate });
+      STATE.gainNode = STATE.playCtx.createGain();
+      STATE.gainNode.connect(STATE.playCtx.destination);
       STATE.nextPlayTime = 0;
       setConnected(true);
+      if (STATE.mcp.enabled) {
+        E.mcpPanel.classList.remove('hidden');
+        E.mcpStatus.textContent = 'Waiting for initialize…';
+        E.mcpToolList.innerHTML = '';
+      }
     } else if (msg.type === 'stt' && msg.text) {
       addConvMsg('stt', msg.text, 'you (ASR)');
     } else if (msg.type === 'tts' && msg.text && msg.state !== 'sentence_end') {
       addConvMsg('tts', msg.text, `TTS · ${msg.state}`);
     } else if (msg.type === 'llm') {
       if (msg.emotion) setEmotion(msg.emotion);
+    } else if (msg.type === 'iot') {
+      handleIoTCommand(msg);
+    } else if (msg.type === 'mcp') {
+      handleMCPRequest(msg);
     }
   };
 
@@ -516,7 +691,7 @@ function playPCM(arrayBuffer) {
   buf.copyToChannel(f32, 0);
   const src = STATE.playCtx.createBufferSource();
   src.buffer = buf;
-  src.connect(STATE.playCtx.destination);
+  src.connect(STATE.gainNode ?? STATE.playCtx.destination);
   const now = STATE.playCtx.currentTime;
   const start = Math.max(now, STATE.nextPlayTime);
   src.start(start);
@@ -646,13 +821,186 @@ document.querySelectorAll('.snippet-btn').forEach(btn => {
   });
 });
 
-E.clearLogBtn.addEventListener('click', () => { E.messageLog.innerHTML = ''; });
+E.clearLogBtn.addEventListener('click', () => { E.messageLog.innerHTML = ''; _debugGroup = null; _debugCount = 0; });
 E.clearConvBtn.addEventListener('click', () => {
   E.conversation.innerHTML = '<p class="text-sm text-slate-600 text-center mt-8">No messages yet</p>';
 });
 
 E.mode.addEventListener('change', () => {
   if (STATE.connected) dbg('info', 'mode change needs reconnect');
+});
+
+// ── IoT device effects ────────────────────────────────────────────────────────
+function applyLightEffect(on, brightness) {
+  document.body.classList.toggle('light-mode', !!on);
+  if (brightness !== undefined)
+    document.body.style.filter = on ? `brightness(${brightness / 100 * 0.5 + 0.5})` : '';
+  dbg('info', `Light: ${on ? 'ON' : 'OFF'}${brightness !== undefined ? ` brightness=${brightness}` : ''}`);
+}
+
+function applyVolumeEffect(volume) {
+  if (STATE.gainNode)
+    STATE.gainNode.gain.setTargetAtTime(volume / 100, STATE.playCtx.currentTime, 0.1);
+  dbg('info', `Speaker: volume=${volume}`);
+}
+
+function applyTempEffect(temp) {
+  const area = document.getElementById('micArea');
+  const label = document.getElementById('tempLabel');
+  area.classList.remove('temp-freeze', 'temp-cool', 'temp-warm', 'temp-hot');
+  let cls, desc, color;
+  if (temp <= 10)      { cls = 'temp-freeze'; desc = `${temp}°C 冰冷`; color = '#93c5fd'; }
+  else if (temp <= 22) { cls = 'temp-cool';   desc = `${temp}°C 清爽`; color = '#86efac'; }
+  else if (temp <= 32) { cls = 'temp-warm';   desc = `${temp}°C 温暖`; color = '#fb923c'; }
+  else                 { cls = 'temp-hot';    desc = `${temp}°C 🔥`;   color = '#ef4444'; }
+  area.classList.add(cls);
+  label.textContent = desc; label.style.color = color;
+  label.classList.remove('hidden');
+  dbg('info', `Thermostat: ${desc}`);
+}
+
+// ── IoT simulator ────────────────────────────────────────────────────────────
+const IOT_PRESETS = {
+  speaker: {
+    descriptors: [{
+      name: 'Speaker', description: '扬声器',
+      properties: { volume: { type: 'number', description: '音量 0-100' } },
+      methods: {
+        SetVolume: { description: '设置音量', parameters: { volume: { type: 'number', description: '目标音量' } } },
+        GetVolume: { description: '获取当前音量' },
+      },
+    }],
+    states: [{ name: 'Speaker', state: { volume: 75 } }],
+  },
+  light: {
+    descriptors: [{
+      name: 'Light', description: '灯光',
+      properties: {
+        on:         { type: 'boolean', description: '开关状态' },
+        brightness: { type: 'number',  description: '亮度 0-100' },
+      },
+      methods: {
+        TurnOn:  { description: '开灯' },
+        TurnOff: { description: '关灯' },
+        SetBrightness: { description: '设置亮度', parameters: { brightness: { type: 'number', description: '亮度值' } } },
+      },
+    }],
+    states: [{ name: 'Light', state: { on: true, brightness: 80 } }],
+  },
+  thermostat: {
+    descriptors: [{
+      name: 'Thermostat', description: '恒温器',
+      properties: { temperature: { type: 'number', description: '当前温度 °C' } },
+      methods: {
+        SetTemperature: { description: '设置目标温度', parameters: { temperature: { type: 'number', description: '目标温度 °C' } } },
+      },
+    }],
+    states: [{ name: 'Thermostat', state: { temperature: 22.5 } }],
+  },
+};
+
+function handleIoTCommand(msg) {
+  if (!msg.commands?.length) return;
+  E.iotCommandLog.classList.remove('hidden');
+  msg.commands.forEach(cmd => {
+    const el = document.createElement('div');
+    const params = cmd.parameters ? ' ' + JSON.stringify(cmd.parameters) : '';
+    el.textContent = `▶ ${cmd.name}.${cmd.method}${params}`;
+    el.className = 'text-amber-400';
+    E.iotCommandLog.appendChild(el);
+    E.iotCommandLog.scrollTop = E.iotCommandLog.scrollHeight;
+    dbg('info', `iot cmd: ${cmd.name}.${cmd.method}`, cmd.parameters);
+
+    const p = cmd.parameters || {};
+    const dev = cmd.name.toLowerCase();
+    const method = cmd.method.toLowerCase();
+
+    if (dev === 'light') {
+      if (method === 'turnon')  applyLightEffect(true,  p.brightness);
+      else if (method === 'turnoff') applyLightEffect(false);
+      else if (method === 'setbrightness') applyLightEffect(true, p.brightness);
+    } else if (dev === 'speaker') {
+      if (method === 'setvolume' && p.volume !== undefined) applyVolumeEffect(p.volume);
+    } else if (dev === 'thermostat') {
+      if (method === 'settemperature' && p.temperature !== undefined) applyTempEffect(p.temperature);
+    }
+  });
+}
+
+// ── device-MCP mock server ────────────────────────────────────────────────────
+const MCP_MOCK_TOOLS = [
+  {
+    name: 'get_weather',
+    description: '获取指定城市的天气',
+    inputSchema: {
+      type: 'object',
+      properties: { city: { type: 'string', description: '城市名' } },
+      required: ['city'],
+    },
+  },
+  {
+    name: 'set_timer',
+    description: '设置计时器',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        seconds: { type: 'number', description: '计时秒数' },
+        label:   { type: 'string', description: '计时器名称' },
+      },
+      required: ['seconds'],
+    },
+  },
+];
+
+function sendMCP(payload) {
+  send({ type: 'mcp', payload });
+  dbg('sent', 'mcp', payload);
+}
+
+function handleMCPRequest(msg) {
+  if (!STATE.mcp.enabled || !msg.payload) return;
+  const p = msg.payload;
+  dbg('received', 'mcp', p);
+
+  if (!p.method) return;
+
+  if (p.method === 'initialize') {
+    STATE.mcp.initialized = true;
+    E.mcpStatus.textContent = 'Initialized ✓';
+    sendMCP({ jsonrpc: '2.0', id: p.id, result: {
+      protocolVersion: '2024-11-05',
+      capabilities: { tools: {} },
+      serverInfo: { name: 'web-debug-mcp', version: '1.0.0' },
+    }});
+  } else if (p.method === 'tools/list') {
+    E.mcpStatus.textContent = `Tools listed (${MCP_MOCK_TOOLS.length})`;
+    E.mcpToolList.innerHTML = MCP_MOCK_TOOLS.map(t =>
+      `<div class="text-emerald-400/80">${t.name}</div><div class="text-slate-600 pl-2">${t.description}</div>`
+    ).join('');
+    sendMCP({ jsonrpc: '2.0', id: p.id, result: { tools: MCP_MOCK_TOOLS } });
+  } else if (p.method === 'tools/call') {
+    const toolName = p.params?.name;
+    const args = p.params?.arguments || {};
+    dbg('info', `mcp tool call: ${toolName}`, args);
+    E.mcpStatus.textContent = `Called: ${toolName}`;
+    // Return a mock result
+    const resultText = `[mock] ${toolName}(${JSON.stringify(args)}) → ok`;
+    sendMCP({ jsonrpc: '2.0', id: p.id, result: {
+      content: [{ type: 'text', text: resultText }],
+    }});
+  }
+}
+
+// ── IoT button events ─────────────────────────────────────────────────────────
+E.iotSendDescBtn.addEventListener('click', () => {
+  const preset = IOT_PRESETS[E.iotDevicePreset.value];
+  if (!preset) return;
+  send({ type: 'iot', descriptors: preset.descriptors });
+});
+E.iotSendStateBtn.addEventListener('click', () => {
+  const preset = IOT_PRESETS[E.iotDevicePreset.value];
+  if (!preset) return;
+  send({ type: 'iot', states: preset.states });
 });
 
 // init

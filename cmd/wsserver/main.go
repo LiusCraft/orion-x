@@ -115,13 +115,13 @@ func main() {
 	logging.Infof("ToolManager created successfully")
 
 	logging.Infof("Creating Agent...")
-	agentInst, err := agent.New(baseCtx, agentCfg, toolMgr, memorySvc)
+	_, err = agent.New(baseCtx, agentCfg, toolMgr, memorySvc)
 	if err != nil {
 		logging.Fatalf("Failed to create Agent: %v", err)
 	}
 	logging.Infof("Agent created successfully")
 
-	srv := NewServer(appConfig, agentInst)
+	srv := NewServer(appConfig, toolMgr, agentCfg, memorySvc)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(*wsPath, srv.HandleWS)

@@ -22,6 +22,8 @@ const (
 	TypeSTT    MessageType = "stt"
 	TypeTTS    MessageType = "tts"
 	TypeLLM    MessageType = "llm"
+	TypeIoT    MessageType = "iot"
+	TypeMCP    MessageType = "mcp"
 )
 
 // Mode is the interaction mode negotiated at hello time and fixed for the
@@ -97,6 +99,9 @@ type HelloMessage struct {
 	AudioParams AudioParams `json:"audio_params"`
 	Mode        Mode        `json:"mode,omitempty"`
 	WelcomeMsg  string      `json:"welcome_msg,omitempty"`
+	// Features lists optional capabilities the client supports.
+	// Currently recognised values: "mcp": true (client acts as device-MCP server).
+	Features map[string]bool `json:"features,omitempty"`
 }
 
 // NewHelloResponse builds the server's handshake response.
@@ -165,6 +170,71 @@ func NewLLMMessage(sessionID, text, emotion string) LLMMessage {
 	return LLMMessage{Type: TypeLLM, SessionID: sessionID, Text: text, Emotion: emotion}
 }
 
+// IoTProperty describes a single property of an IoT device.
+type IoTProperty struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+}
+
+// IoTMethod describes a callable method on an IoT device, including its parameters.
+type IoTMethod struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  map[string]IoTProperty `json:"parameters,omitempty"`
+}
+
+// IoTDescriptor is the device capability declaration sent by the client.
+type IoTDescriptor struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Properties  map[string]IoTProperty `json:"properties,omitempty"`
+	Methods     map[string]IoTMethod   `json:"methods,omitempty"`
+}
+
+// IoTState is a device state snapshot sent by the client.
+type IoTState struct {
+	Name  string         `json:"name"`
+	State map[string]any `json:"state"`
+}
+
+// IoTCommand is a single device command sent by the server.
+type IoTCommand struct {
+	Name       string         `json:"name"`
+	Method     string         `json:"method"`
+	Parameters map[string]any `json:"parameters,omitempty"`
+}
+
+// IoTMessage is a bidirectional IoT frame.
+// Client→server: carries Descriptors (capability declaration) and/or States (current values).
+// Server→client: carries Commands (control instructions).
+type IoTMessage struct {
+	Type        MessageType      `json:"type"`
+	SessionID   string           `json:"session_id,omitempty"`
+	Descriptors []IoTDescriptor  `json:"descriptors,omitempty"`
+	States      []IoTState       `json:"states,omitempty"`
+	Commands    []IoTCommand     `json:"commands,omitempty"`
+}
+
+// NewIoTCommandMessage builds a server→client IoT control frame.
+func NewIoTCommandMessage(sessionID string, cmds []IoTCommand) IoTMessage {
+	return IoTMessage{Type: TypeIoT, SessionID: sessionID, Commands: cmds}
+}
+
+// MCPMessage wraps a JSON-RPC 2.0 payload for device-side MCP.
+// Server→client: method calls (initialize, tools/list, tools/call).
+// Client→server: result/error responses.
+type MCPMessage struct {
+	Type      MessageType `json:"type"`
+	SessionID string      `json:"session_id,omitempty"`
+	Payload   any         `json:"payload"`
+}
+
+// NewMCPMessage builds a server→client MCP frame.
+func NewMCPMessage(sessionID string, payload any) MCPMessage {
+	return MCPMessage{Type: TypeMCP, SessionID: sessionID, Payload: payload}
+}
+
 // envelope is decoded first to sniff the "type" field before parsing into a
 // concrete message type.
 type envelope struct {
@@ -199,6 +269,18 @@ func ParseClientMessage(data []byte) (any, error) {
 		var msg AbortMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return nil, fmt.Errorf("wsproto: invalid abort message: %w", err)
+		}
+		return &msg, nil
+	case TypeIoT:
+		var msg IoTMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, fmt.Errorf("wsproto: invalid iot message: %w", err)
+		}
+		return &msg, nil
+	case TypeMCP:
+		var msg MCPMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, fmt.Errorf("wsproto: invalid mcp message: %w", err)
 		}
 		return &msg, nil
 	default:

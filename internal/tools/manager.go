@@ -54,6 +54,26 @@ func (m *Manager) Registry() *Registry {
 	return m.registry
 }
 
+// CloneRegistry returns a clone of this manager's registry. The clone is
+// independent — adding specs to it does not affect other clones or the
+// original. Used by wsserver to give each connection its own per-connection
+// tool set (IoT / device-MCP) without touching shared state.
+func (m *Manager) CloneRegistry() *Registry {
+	return m.registry.Clone()
+}
+
+// Clone returns a new Manager whose registry is an independent clone of this
+// one's. The clone holds no MCP sessions and its Close() is a no-op — the
+// original Manager is responsible for managing session lifecycle. Use this to
+// create per-connection managers that can accumulate extra tools (IoT /
+// device-MCP) without affecting other connections.
+func (m *Manager) Clone() *Manager {
+	return &Manager{
+		registry: m.registry.Clone(),
+		sessions: nil,
+	}
+}
+
 func (m *Manager) Close() error {
 	var errs []error
 	for _, s := range m.sessions {

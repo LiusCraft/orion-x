@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
 	"github.com/liuscraft/orion-x/internal/logging"
@@ -17,10 +19,11 @@ import (
 	"github.com/liuscraft/orion-x/internal/provider/asr"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/session"
-	"github.com/liuscraft/orion-x/internal/wsproto"
+	"github.com/liuscraft/orion-x/internal/tools"
+	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 )
 
-// wsserverTTSSampleRate is the sample rate this server uses for TTS output,
+
 // independent of cmd/voicebot's 22050Hz (each entry point constructs its
 // own tts.Provider instance, so the two don't need to agree).
 const wsserverTTSSampleRate = 16000
@@ -85,6 +88,11 @@ type wsConnection struct {
 	ttsProc  audio.TTSProcessor
 	pl       pipeline.Pipeline
 	audioSrc *wsstages.WSAudioSource
+
+	connMgr   *tools.Registry
+	connAgent *agent.Agent
+	iotMgr    *iotManager
+	deviceMCP *deviceMCPClient
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -203,6 +211,10 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 	audioSrc := wsstages.NewWSAudioSource(inputCodec, clientSampleRate)
 	safeConn := wsstages.NewSafeConn(rawConn)
 
+	connMgr := s.toolsMgr.Clone()
+	iotMgr := newIoTManager(safeConn, connMgr.Registry())
+	var devMCP *deviceMCPClient
+
 	// Tag this connection's context with its own memory.Context so
 	// long-term memory (if enabled) is scoped per connection instead of
 	// bleeding together — unlike cmd/voicebot, which hardcodes a single
@@ -227,6 +239,18 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		_ = rawConn.Close()
 	}()
 
+	// If the client declared "mcp" support, create the device-MCP client and
+	// kick off the initialize handshake after the pipeline starts.
+	if hello.Features["mcp"] {
+		devMCP = newDeviceMCPClient(safeConn, sessionID, connMgr.Registry())
+	}
+
+	connAgent, err := agent.New(ctx, s.agentCfg, connMgr, s.memorySvc)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("create per-connection agent: %w", err)
+	}
+
 	if err := ttsProc.Start(ctx); err != nil {
 		cancel()
 		return nil, err
@@ -234,7 +258,7 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 
 	pl, err := pipeline.NewDAGBuilder().
 		AddStage(pstages.NewASRStage(asrProc, audioSrc)).
-		AddStage(pstages.NewAgentStage(s.agentInst, sess)).
+		AddStage(pstages.NewAgentStage(connAgent, sess)).
 		AddStage(pstages.NewTTSStage(ttsProc)).
 		AddStage(wsstages.NewWSOutputStage(safeConn, sessionID, outputCodec, wsserverTTSSampleRate, frameDurationMs, preBufferFrames)).
 		Connect("asr", "agent").
@@ -267,6 +291,15 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		}
 	}()
 
+	// If device-MCP was negotiated, kick off the handshake now.
+	if devMCP != nil {
+		go func() {
+			if err := devMCP.Initialize(ctx); err != nil {
+				logging.Warnf("wsserver[%s]: device MCP initialize failed: %v", sessionID, err)
+			}
+		}()
+	}
+
 	return &wsConnection{
 		server:    s,
 		rawConn:   rawConn,
@@ -277,6 +310,10 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		ttsProc:   ttsProc,
 		pl:        pl,
 		audioSrc:  audioSrc,
+		connMgr:   connMgr.Registry(),
+		connAgent: connAgent,
+		iotMgr:    iotMgr,
+		deviceMCP: devMCP,
 		ctx:       ctx,
 		cancel:    cancel,
 	}, nil
@@ -405,6 +442,10 @@ func (c *wsConnection) handleTextMessage(data []byte) {
 		c.handleAbort()
 	case *wsproto.HelloMessage:
 		logging.Warnf("wsserver[%s]: ignoring duplicate hello after handshake", c.sessionID)
+	case *wsproto.IoTMessage:
+		c.handleIoT(m)
+	case *wsproto.MCPMessage:
+		c.handleDeviceMCP(m)
 	}
 }
 
@@ -449,4 +490,26 @@ func (c *wsConnection) handleAbort() {
 	}:
 	case <-c.ctx.Done():
 	}
+}
+
+func (c *wsConnection) handleIoT(m *wsproto.IoTMessage) {
+	if len(m.Descriptors) > 0 {
+		c.iotMgr.handleDescriptors(m.Descriptors)
+	}
+	if len(m.States) > 0 {
+		c.iotMgr.handleStates(m.States)
+	}
+}
+
+func (c *wsConnection) handleDeviceMCP(m *wsproto.MCPMessage) {
+	if c.deviceMCP == nil {
+		logging.Warnf("wsserver[%s]: received mcp message but device MCP not enabled", c.sessionID)
+		return
+	}
+	raw, err := json.Marshal(m.Payload)
+	if err != nil {
+		logging.Warnf("wsserver[%s]: device mcp payload marshal error: %v", c.sessionID, err)
+		return
+	}
+	c.deviceMCP.HandleMessage(c.ctx, raw)
 }
