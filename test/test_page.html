@@ -258,10 +258,28 @@
       <p class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1">Connection</p>
 
       <div class="flex flex-col gap-1">
+        <label class="text-xs text-slate-400">连接方式</label>
+        <select id="connMode" class="field text-sm rounded-lg px-3 py-2 w-full cursor-pointer">
+          <option value="direct">Direct（手动配置）</option>
+          <option value="ota">Via OTA</option>
+        </select>
+      </div>
+
+      <!-- Direct 模式：手动填 WS URL -->
+      <div id="directUrlField" class="flex flex-col gap-1">
         <label class="text-xs text-slate-400">Server URL</label>
         <input id="serverUrl" type="text" value="ws://localhost:8080/ws"
           class="field text-sm rounded-lg px-3 py-2 w-full" />
       </div>
+
+      <!-- OTA 模式：填 HTTP OTA 端点 -->
+      <div id="otaConnField" class="flex flex-col gap-1 hidden">
+        <label class="text-xs text-slate-400">OTA URL</label>
+        <input id="otaConnUrl" type="text" value="http://localhost:8080/api/ota/"
+          class="field text-sm rounded-lg px-3 py-2 w-full font-mono" />
+        <p class="text-xs text-slate-600">WS 地址和 token 由 OTA 返回</p>
+      </div>
+
       <div class="flex flex-col gap-1">
         <label class="text-xs text-slate-400">Device ID (MAC)</label>
         <input id="deviceId" type="text" value="web-debug-client"
@@ -272,7 +290,7 @@
         <input id="clientId" type="text" value="web-debug-uuid-0001"
           class="field text-sm rounded-lg px-3 py-2 w-full" />
       </div>
-      <div class="flex flex-col gap-1">
+      <div id="tokenField" class="flex flex-col gap-1">
         <label class="text-xs text-slate-400">Access Token</label>
         <input id="accessToken" type="text" placeholder="Bearer token (optional)"
           class="field text-sm rounded-lg px-3 py-2 w-full font-mono" />
@@ -402,6 +420,30 @@
       <div class="text-xs text-slate-600 font-semibold mt-1">Mock tools</div>
       <div id="mcpToolList" class="text-xs text-slate-500 font-mono space-y-0.5"></div>
     </div>
+
+    <!-- OTA Tester -->
+    <div class="glass rounded-xl p-4 flex flex-col gap-2">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1">OTA Tester</p>
+      <div class="flex flex-col gap-1">
+        <label class="text-xs text-slate-400">OTA URL</label>
+        <input id="otaUrl" type="text" value="http://localhost:8080/api/ota/"
+          class="field text-xs rounded-lg px-2 py-1.5 w-full font-mono" />
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-xs text-slate-400">Request Body (JSON)</label>
+        <textarea id="otaBody" rows="6"
+          class="field text-xs rounded-lg px-2 py-1.5 w-full font-mono resize-none"></textarea>
+      </div>
+      <button id="otaSendBtn" class="btn-ghost px-3 py-1.5 text-xs">Send OTA Request</button>
+      <div id="otaResponse" class="hidden flex flex-col gap-1">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-slate-500">Response</span>
+          <span id="otaStatus" class="text-xs font-mono"></span>
+        </div>
+        <pre id="otaResponseBody"
+          class="text-xs text-slate-400 font-mono bg-black/20 rounded p-2 max-h-36 overflow-y-auto whitespace-pre-wrap break-all"></pre>
+      </div>
+    </div>
   </aside>
 </div>
 
@@ -456,6 +498,7 @@ const $ = id => document.getElementById(id);
 const E = {
   serverUrl: $('serverUrl'), deviceId: $('deviceId'), mode: $('mode'),
   clientId: $('clientId'), accessToken: $('accessToken'),
+  connMode: $('connMode'),
   enableMCP: $('enableMCP'),
   connectBtn: $('connectBtn'), disconnectBtn: $('disconnectBtn'),
   statusDot: $('statusDot'), statusLabel: $('statusLabel'),
@@ -604,17 +647,52 @@ function setConnected(v) {
 }
 
 // ── connect / disconnect ──────────────────────────────────────────────────────
-function connect() {
+async function connect() {
   if (STATE.ws) STATE.ws.close();
-  const url = E.serverUrl.value.trim();
   STATE.mode = E.mode.value;
+
+  let wsUrl = E.serverUrl.value.trim();
+  let token = E.accessToken.value.trim();
+
+  if (E.connMode.value === 'ota') {
+    const otaEndpoint = $('otaConnUrl').value.trim();
+    const body = {
+      application: { version: '1.0.0', elf_sha256: '' },
+      board: { type: 'web-debug', name: 'web-debug', ssid: '', rssi: 0 },
+    };
+    const headers = {
+      'Content-Type':    'application/json',
+      'Device-Id':       E.deviceId.value  || 'web-debug-client',
+      'Client-Id':       E.clientId.value  || 'web-debug-uuid-0001',
+      'User-Agent':      'web-debug/1.0.0',
+      'Accept-Language': 'zh-CN',
+    };
+    dbg('info', `OTA handshake → ${otaEndpoint}`);
+    try {
+      const res  = await fetch(otaEndpoint, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const data = await res.json();
+      dbg('received', 'OTA response', data);
+      if (!data.websocket?.url) throw new Error('OTA response missing websocket.url');
+      wsUrl = data.websocket.url;
+      token = data.websocket.token || '';
+      // 回填，方便用户看到实际地址
+      E.serverUrl.value   = wsUrl;
+      E.accessToken.value = token;
+      dbg('info', `OTA → WS ${wsUrl}`);
+    } catch (err) {
+      dbg('error', `OTA handshake failed: ${err.message}`);
+      return;
+    }
+  }
+
   const params = new URLSearchParams({ 'protocol-version': '1' });
-  if (E.deviceId.value)    params.set('device-id',     E.deviceId.value);
-  if (E.clientId.value)    params.set('client-id',     E.clientId.value);
-  if (E.accessToken.value) params.set('access_token',  E.accessToken.value);
-  const wsUrl = `${url}?${params.toString()}`;
-  dbg('info', `connecting → ${wsUrl}`);
-  STATE.ws = new WebSocket(wsUrl);
+  if (E.deviceId.value) params.set('device-id',    E.deviceId.value);
+  if (E.clientId.value) params.set('client-id',    E.clientId.value);
+  if (token)            params.set('access_token', token);
+  const fullUrl = `${wsUrl}?${params.toString()}`;
+  dbg('info', `connecting → ${fullUrl}`);
+  STATE.ws = new WebSocket(fullUrl);
   STATE.ws.binaryType = 'arraybuffer';
 
   STATE.ws.onopen = () => {
@@ -830,6 +908,13 @@ E.mode.addEventListener('change', () => {
   if (STATE.connected) dbg('info', 'mode change needs reconnect');
 });
 
+E.connMode.addEventListener('change', () => {
+  const isOTA = E.connMode.value === 'ota';
+  $('directUrlField').classList.toggle('hidden', isOTA);
+  $('otaConnField').classList.toggle('hidden', !isOTA);
+  $('tokenField').classList.toggle('hidden', isOTA);
+});
+
 // ── IoT device effects ────────────────────────────────────────────────────────
 function applyLightEffect(on, brightness) {
   document.body.classList.toggle('light-mode', !!on);
@@ -1001,6 +1086,72 @@ E.iotSendStateBtn.addEventListener('click', () => {
   const preset = IOT_PRESETS[E.iotDevicePreset.value];
   if (!preset) return;
   send({ type: 'iot', states: preset.states });
+});
+
+// ── OTA tester ────────────────────────────────────────────────────────────────
+const OTA_DEFAULT_BODY = {
+  application: {
+    version: '1.0.0',
+    elf_sha256: 'c8a8ecb6d6fbcda682494d9675cd1ead240ecf38bdde75282a42365a0e396033',
+  },
+  board: {
+    type: 'bread-compact-wifi',
+    name: 'bread-compact-wifi-128x64',
+    ssid: 'MyWifi',
+    rssi: -55,
+  },
+};
+
+const otaUrl          = $('otaUrl');
+const otaBody         = $('otaBody');
+const otaSendBtn      = $('otaSendBtn');
+const otaResponse     = $('otaResponse');
+const otaStatus       = $('otaStatus');
+const otaResponseBody = $('otaResponseBody');
+
+otaBody.value = JSON.stringify(OTA_DEFAULT_BODY, null, 2);
+
+otaSendBtn.addEventListener('click', async () => {
+  const url = otaUrl.value.trim();
+  let body;
+  try { body = JSON.parse(otaBody.value); } catch { dbg('error', 'OTA: invalid JSON body'); return; }
+
+  const boardName = body.board?.name || 'web-debug';
+  const headers = {
+    'Content-Type':   'application/json',
+    'Device-Id':      E.deviceId.value  || 'web-debug-client',
+    'Client-Id':      E.clientId.value  || 'web-debug-uuid-0001',
+    'User-Agent':     `${boardName}/1.0.0`,
+    'Accept-Language': 'zh-CN',
+  };
+
+  dbg('info', `OTA → POST ${url}`);
+  otaSendBtn.disabled = true;
+  otaResponse.classList.add('hidden');
+
+  try {
+    const res  = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    const text = await res.text();
+    let pretty = text;
+    try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch {}
+
+    otaStatus.textContent  = `${res.status} ${res.statusText}`;
+    otaStatus.className    = `text-xs font-mono ${res.ok ? 'text-green-400' : 'text-red-400'}`;
+    otaResponseBody.textContent = pretty;
+    otaResponse.classList.remove('hidden');
+
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch {}
+    dbg(res.ok ? 'received' : 'error', `OTA ${res.status}`, parsed);
+  } catch (err) {
+    otaStatus.textContent  = 'Network Error';
+    otaStatus.className    = 'text-xs font-mono text-red-400';
+    otaResponseBody.textContent = err.message;
+    otaResponse.classList.remove('hidden');
+    dbg('error', `OTA: ${err.message}`);
+  } finally {
+    otaSendBtn.disabled = false;
+  }
 });
 
 // init
