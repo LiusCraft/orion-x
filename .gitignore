@@ -1,4 +1,5 @@
 data/
+!web/manager/src/pages/data
 .DS_Store
 /bin/
 /voicebot
