@@ -240,6 +240,7 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		Connect("asr", "agent").
 		Connect("asr", "ws_output").
 		Connect("agent", "tts").
+		Connect("agent", "ws_output").
 		Connect("tts", "ws_output").
 		SetObserver(pipeline.NewLoggingObserver(false)).
 		Build()

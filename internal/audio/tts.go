@@ -289,7 +289,7 @@ func (p *ttsProcessor) Write(text string, opts tts.SynthesisOptions) error {
 	}
 
 	for _, s := range sentences {
-		if emo, stripped := extractLeadingEmoji(s); emo != "" {
+		if emo, stripped := ExtractLeadingEmoji(s); emo != "" {
 			p.currentEmotion = emo
 			s = stripped
 		}
@@ -319,7 +319,7 @@ func (p *ttsProcessor) Flush(opts tts.SynthesisOptions) error {
 	p.mu.Unlock()
 
 	if seg != "" {
-		if emo, stripped := extractLeadingEmoji(seg); emo != "" {
+		if emo, stripped := ExtractLeadingEmoji(seg); emo != "" {
 			p.currentEmotion = emo
 			seg = stripped
 		}
@@ -609,9 +609,9 @@ func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCt
 
 // --- 工具 ---
 
-// extractLeadingEmoji 返回文本开头的 emoji（含 skin-tone 修饰符）和剩余文本。
+// ExtractLeadingEmoji 返回文本开头的 emoji（含 skin-tone 修饰符）和剩余文本。
 // 若首字符不是 emoji 则返回 ("", original)。
-func extractLeadingEmoji(s string) (emoji, remaining string) {
+func ExtractLeadingEmoji(s string) (emoji, remaining string) {
 	if s == "" {
 		return "", ""
 	}

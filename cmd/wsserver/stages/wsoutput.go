@@ -91,6 +91,10 @@ type WSOutputStage struct {
 	ttsStarted bool
 	pendingBuf []int16 // PCM samples buffered until they fill one frame
 
+	// currentEmotion tracks the leading emoji from the ongoing LLM turn
+	// (reset on interrupt, same semantics as TTSProcessor.currentEmotion).
+	currentEmotion string
+
 	// debug: when WS_DEBUG_DUMP=1, raw PCM (before codec Encode) is written
 	// to /tmp/ws_debug_<sessionID>.pcm for offline analysis with ffplay.
 	debugDump    *os.File // raw PCM before codec
@@ -177,7 +181,11 @@ func (s *WSOutputStage) handleMessage(msg pipeline.Message) {
 	case pipeline.MessageTypeData:
 		switch payload := msg.Payload.(type) {
 		case string:
-			s.sendSTT(payload)
+			if source, _ := msg.Metadata.Extra["source"].(string); source == "llm" {
+				s.handleLLMText(payload)
+			} else {
+				s.sendSTT(payload)
+			}
 		case audio.TTSChunk:
 			s.handleTTSChunk(payload)
 		}
@@ -185,6 +193,31 @@ func (s *WSOutputStage) handleMessage(msg pipeline.Message) {
 	// MessageTypeFinished/MessageTypeError: nothing to forward to the
 	// client — the real "turn is over" signal for TTS is TTSChunk.Final,
 	// and errors are only logged, not exposed over the wire.
+}
+
+// handleLLMText inspects the leading emoji of an incoming LLM text chunk.
+// When the emotion changes (new emoji differs from currentEmotion), it sends a
+// single "llm" message carrying only the emotion — the text itself is not
+// forwarded. Chunks without a leading emoji, or whose emoji matches the
+// current emotion, are silently ignored.
+func (s *WSOutputStage) handleLLMText(text string) {
+	emo, _ := audio.ExtractLeadingEmoji(text)
+	if emo == "" {
+		return
+	}
+	s.mu.Lock()
+	changed := emo != s.currentEmotion
+	if changed {
+		s.currentEmotion = emo
+	}
+	s.mu.Unlock()
+
+	if !changed {
+		return
+	}
+	if err := s.conn.WriteJSON(wsproto.NewLLMMessage(s.sessionID, "", emo)); err != nil {
+		logging.Warnf("WSOutputStage: send llm emotion error: %v", err)
+	}
 }
 
 func (s *WSOutputStage) sendSTT(text string) {
@@ -372,6 +405,7 @@ func (s *WSOutputStage) handleInterrupt() {
 	s.mu.Lock()
 	wasStarted := s.ttsStarted
 	s.ttsStarted = false
+	s.currentEmotion = ""
 	s.mu.Unlock()
 
 	if !wasStarted {

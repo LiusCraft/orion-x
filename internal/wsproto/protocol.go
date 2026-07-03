@@ -21,6 +21,7 @@ const (
 	TypeAbort  MessageType = "abort"
 	TypeSTT    MessageType = "stt"
 	TypeTTS    MessageType = "tts"
+	TypeLLM    MessageType = "llm"
 )
 
 // Mode is the interaction mode negotiated at hello time and fixed for the
@@ -147,6 +148,21 @@ type TTSMessage struct {
 // NewTTSMessage builds a server-to-client TTS state message.
 func NewTTSMessage(sessionID string, state TTSState, text string) TTSMessage {
 	return TTSMessage{Type: TypeTTS, SessionID: sessionID, State: state, Text: text}
+}
+
+// LLMMessage carries a streaming LLM text chunk with an optional emotion tag.
+// Server to client only. Emotion is the leading emoji extracted from the LLM
+// output (e.g. "😊"); it is omitted when the current turn has no emotion.
+type LLMMessage struct {
+	Type      MessageType `json:"type"`
+	Text      string      `json:"text"`
+	Emotion   string      `json:"emotion,omitempty"`
+	SessionID string      `json:"session_id,omitempty"`
+}
+
+// NewLLMMessage builds a server-to-client LLM text chunk message.
+func NewLLMMessage(sessionID, text, emotion string) LLMMessage {
+	return LLMMessage{Type: TypeLLM, SessionID: sessionID, Text: text, Emotion: emotion}
 }
 
 // envelope is decoded first to sniff the "type" field before parsing into a

@@ -64,6 +64,21 @@
     border-color: rgba(34,197,94,.35);
   }
 
+  /* Agent emotion badge */
+  .emotion-badge {
+    position: absolute; top: -8px; right: -8px;
+    font-size: 1.75rem; line-height: 1;
+    pointer-events: none;
+    transition: opacity .3s;
+  }
+  .emotion-badge.hidden { opacity: 0; }
+  @keyframes emotion-pop {
+    0%   { transform: scale(.4); opacity: 0; }
+    65%  { transform: scale(1.25); opacity: 1; }
+    100% { transform: scale(1); }
+  }
+  .emotion-badge.pop { animation: emotion-pop .35s cubic-bezier(.34,1.56,.64,1) forwards; }
+
   /* Status dot */
   .status-dot {
     width: 8px; height: 8px; border-radius: 50%;
@@ -130,6 +145,14 @@
   }
   .btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,0.09); color: #f1f5f9; }
   .btn-ghost:disabled { opacity:.3; cursor: not-allowed; }
+
+  /* PTT (push-to-talk) button pressed state */
+  .ptt-btn.pressing,
+  .ptt-btn:active:not(:disabled) {
+    background: rgba(239,68,68,0.15);
+    border-color: rgba(239,68,68,0.35);
+    color: #ef4444;
+  }
 
   /* log section toggle */
   details summary { list-style: none; cursor: pointer; }
@@ -206,10 +229,12 @@
     <!-- Mic area -->
     <div class="glass rounded-xl p-6 flex flex-col items-center gap-4">
       <div class="relative">
-        <button id="micToggleBtn" class="mic-btn" disabled>
+        <div class="mic-btn">
           <div class="vol-ring" id="volRing"></div>
-          <span id="micIcon">🎙️</span>
-        </button>
+          <span id="micIcon"></span>
+        </div>
+        <!-- Agent emotion badge: updated by llm messages from the server -->
+        <div id="emotionBadge" class="emotion-badge hidden" aria-live="polite" aria-label="Agent emotion"></div>
       </div>
       <div class="flex items-center gap-2 text-sm">
         <div id="micDot" class="w-2 h-2 rounded-full bg-slate-600"></div>
@@ -239,6 +264,9 @@
         class="field flex-1 text-sm rounded-lg px-3 py-2" />
       <button id="sendTextBtn" disabled class="btn-primary px-4 py-2 text-sm shrink-0">Send</button>
       <button id="abortBtn" disabled class="btn-danger px-3 py-2 text-sm shrink-0">Abort</button>
+      <button id="pttBtn" disabled
+        class="ptt-btn btn-ghost px-3 py-2 text-sm shrink-0 hidden select-none"
+        title="按住说话，松开发送">🎙️ 按住说话</button>
     </div>
   </main>
 
@@ -281,6 +309,20 @@
   </div>
 </details>
 
+<!-- Mode selection modal: must be before <script> so DOM is ready when JS runs -->
+<div id="modeModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+  <div class="glass rounded-2xl p-8 w-72 flex flex-col gap-3 text-center">
+    <p class="font-semibold text-slate-100 text-base mb-1">选择连接方式</p>
+    <button id="connectPhoneBtn" class="btn-primary py-3 flex items-center justify-center gap-2 text-base">
+      <span>📞</span><span>拨打电话</span>
+    </button>
+    <button id="connectVoiceBtn" class="btn-ghost py-3 flex items-center justify-center gap-2 text-base">
+      <span>🎤</span><span>语音模式</span>
+    </button>
+    <button id="cancelConnectBtn" class="text-xs text-slate-600 hover:text-slate-400 transition mt-1">取消</button>
+  </div>
+</div>
+
 <script>
 // ── state ────────────────────────────────────────────────────────────────────
 const STATE = {
@@ -288,6 +330,8 @@ const STATE = {
   audioCtx: null, micStream: null, processor: null, recording: false,
   // TTS playback
   playCtx: null, nextPlayTime: 0, ttsSampleRate: 16000,
+  // Agent emotion (updated by llm messages)
+  currentEmotion: '',
 };
 
 // ── element refs ─────────────────────────────────────────────────────────────
@@ -305,9 +349,13 @@ const E = {
   messageLog: $('messageLog'), clearLogBtn: $('clearLogBtn'),
   autoscrollLog: $('autoscrollLog'),
   conversation: $('conversation'), clearConvBtn: $('clearConvBtn'),
-  micToggleBtn: $('micToggleBtn'), micIcon: $('micIcon'),
   micDot: $('micDot'), micStatusText: $('micStatusText'),
-  micLevel: $('micLevel'), volRing: $('volRing'),
+  micLevel: $('micLevel'), volRing: $('volRing'), micIcon: $('micIcon'),
+  emotionBadge: $('emotionBadge'),
+  pttBtn: $('pttBtn'),
+  modeModal: $('modeModal'),
+  connectPhoneBtn: $('connectPhoneBtn'), connectVoiceBtn: $('connectVoiceBtn'),
+  cancelConnectBtn: $('cancelConnectBtn'),
 };
 
 // ── logging ──────────────────────────────────────────────────────────────────
@@ -339,6 +387,31 @@ function escapeHtml(t) {
   const d = document.createElement('div'); d.textContent = t; return d.innerHTML;
 }
 
+// ── agent emotion ─────────────────────────────────────────────────────────────
+function setEmotion(emoji) {
+  if (!emoji || emoji === STATE.currentEmotion) return;
+  STATE.currentEmotion = emoji;
+  if (STATE.mode === 'auto') {
+    E.micIcon.textContent = emoji;
+  } else {
+    E.emotionBadge.textContent = emoji;
+    E.emotionBadge.classList.remove('hidden', 'pop');
+    void E.emotionBadge.offsetWidth;
+    E.emotionBadge.classList.add('pop');
+  }
+}
+
+function clearEmotion() {
+  STATE.currentEmotion = '';
+  if (STATE.mode === 'auto' && STATE.connected) {
+    E.micIcon.textContent = '😊';
+  } else {
+    E.micIcon.textContent = '';
+  }
+  E.emotionBadge.classList.add('hidden');
+  E.emotionBadge.classList.remove('pop');
+}
+
 // ── connection status UI ─────────────────────────────────────────────────────
 function setConnected(v) {
   STATE.connected = v;
@@ -348,7 +421,7 @@ function setConnected(v) {
   E.sessionId.textContent = '';
 
   const btns = [E.listenStartBtn, E.listenStopBtn, E.textInput,
-                E.sendTextBtn, E.abortBtn, E.rawMessage, E.sendRawBtn, E.micToggleBtn];
+                E.sendTextBtn, E.abortBtn, E.rawMessage, E.sendRawBtn];
   btns.forEach(b => b.disabled = !v);
   E.connectBtn.disabled = v;
   E.disconnectBtn.disabled = !v;
@@ -357,9 +430,21 @@ function setConnected(v) {
 
   if (STATE.mode === 'manual') {
     E.manualControls.classList.remove('opacity-40', 'pointer-events-none');
+    E.pttBtn.classList.remove('hidden');
+    E.pttBtn.disabled = !v;
+    E.micIcon.textContent = '';
   } else {
     E.manualControls.classList.add('opacity-40', 'pointer-events-none');
+    E.pttBtn.classList.add('hidden');
+    if (v) {
+      E.micIcon.textContent = STATE.currentEmotion || '😊';
+      startRecording();
+    } else {
+      E.micIcon.textContent = '';
+      stopRecording();
+    }
   }
+  if (!v) clearEmotion();
 }
 
 // ── connect / disconnect ──────────────────────────────────────────────────────
@@ -397,6 +482,8 @@ function connect() {
       addConvMsg('stt', msg.text, 'you (ASR)');
     } else if (msg.type === 'tts' && msg.text && msg.state !== 'sentence_end') {
       addConvMsg('tts', msg.text, `TTS · ${msg.state}`);
+    } else if (msg.type === 'llm') {
+      if (msg.emotion) setEmotion(msg.emotion);
     }
   };
 
@@ -440,8 +527,6 @@ function playPCM(arrayBuffer) {
 // ── mic recording ─────────────────────────────────────────────────────────────
 function setMicRecording(v) {
   STATE.recording = v;
-  E.micToggleBtn.classList.toggle('recording', v);
-  E.micIcon.textContent = v ? '⏹️' : '🎙️';
   E.micDot.className = `w-2 h-2 rounded-full ${v ? 'bg-red-500 animate-pulse' : 'bg-slate-600'}`;
   E.micStatusText.textContent = v ? 'Recording…' : 'Idle';
   if (!v) { E.micLevel.style.width = '0%'; E.volRing.style.boxShadow = ''; }
@@ -496,9 +581,47 @@ async function startRecording() {
 }
 
 // ── event listeners ──────────────────────────────────────────────────────────
-E.connectBtn.addEventListener('click', connect);
+// Connect 按钮打开模式选择弹窗
+E.connectBtn.addEventListener('click', () => E.modeModal.classList.remove('hidden'));
+E.cancelConnectBtn.addEventListener('click', () => E.modeModal.classList.add('hidden'));
+E.connectPhoneBtn.addEventListener('click', () => {
+  E.mode.value = 'auto';
+  E.modeModal.classList.add('hidden');
+  connect();
+});
+E.connectVoiceBtn.addEventListener('click', () => {
+  E.mode.value = 'manual';
+  E.modeModal.classList.add('hidden');
+  connect();
+});
+// 点击 modal 遮罩层关闭
+E.modeModal.addEventListener('click', e => { if (e.target === E.modeModal) E.modeModal.classList.add('hidden'); });
+
 E.disconnectBtn.addEventListener('click', disconnect);
-E.micToggleBtn.addEventListener('click', () => STATE.recording ? stopRecording() : startRecording());
+
+// PTT (push-to-talk) — 按住说话，松开停止，同时发 listen start/stop
+function startPTT(e) {
+  e.preventDefault();
+  if (!STATE.connected || STATE.recording) return;
+  E.pttBtn.classList.add('pressing');
+  E.pttBtn.textContent = '🔴 说话中…';
+  send({ type: 'listen', state: 'start' });
+  startRecording();
+}
+function stopPTT(e) {
+  e.preventDefault();
+  if (!STATE.recording) return;
+  E.pttBtn.classList.remove('pressing');
+  E.pttBtn.textContent = '🎙️ 按住说话';
+  send({ type: 'listen', state: 'stop' });
+  stopRecording();
+}
+E.pttBtn.addEventListener('mousedown', startPTT);
+E.pttBtn.addEventListener('mouseup',   stopPTT);
+E.pttBtn.addEventListener('mouseleave', stopPTT);
+E.pttBtn.addEventListener('touchstart', startPTT, { passive: false });
+E.pttBtn.addEventListener('touchend',  stopPTT);
+E.pttBtn.addEventListener('touchcancel', stopPTT);
 
 E.listenStartBtn.addEventListener('click', () => send({ type: 'listen', state: 'start' }));
 E.listenStopBtn.addEventListener('click',  () => send({ type: 'listen', state: 'stop'  }));

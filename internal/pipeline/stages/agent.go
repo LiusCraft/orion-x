@@ -157,10 +157,15 @@ func (s *AgentStage) drainEventChan(eventChan <-chan agent.AgentEvent) {
 func (s *AgentStage) convertAgentEvent(event agent.AgentEvent, metadata pipeline.Metadata) pipeline.Message {
 	switch e := event.(type) {
 	case *agent.TextChunkEvent:
+		md := metadata
+		if md.Extra == nil {
+			md.Extra = map[string]interface{}{}
+		}
+		md.Extra["source"] = "llm"
 		return pipeline.Message{
 			Type:     pipeline.MessageTypeData,
 			Payload:  e.Chunk, // string，TTS Stage 通过类型断言消费
-			Metadata: metadata,
+			Metadata: md,
 		}
 
 	case *agent.FinishedEvent:
