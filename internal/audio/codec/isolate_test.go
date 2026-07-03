@@ -33,7 +33,7 @@ func TestIsolateBug(t *testing.T) {
 	// Test B: 逐步编码帧0-3，再编码帧4，然后用全新解码器解码帧4
 	encB, _ := New(FormatOpus, 16000, 1, 60)
 	for f := 0; f < 4; f++ {
-		encB.Encode(samples[f*frameSize : (f+1)*frameSize])
+		_, _ = encB.Encode(samples[f*frameSize : (f+1)*frameSize])
 	}
 	framesB, _ := encB.Encode(frame4)
 	decB, _ := New(FormatOpus, 16000, 1, 60)
@@ -55,7 +55,7 @@ func TestIsolateBug(t *testing.T) {
 	}
 	decC, _ := New(FormatOpus, 16000, 1, 60)
 	for f := 0; f < 4; f++ {
-		decC.Decode(allFrames[f]) // 解包0-3，丢弃结果
+		_, _ = decC.Decode(allFrames[f]) // 解包0-3，丢弃结果
 	}
 	pcmCFrame4, _ := decC.Decode(allFrames[4])
 	maxDiffC := 0
@@ -72,7 +72,7 @@ func TestIsolateBug(t *testing.T) {
 	for f := 0; f < 5; f++ {
 		frames, _ := encD.Encode(samples[f*frameSize : (f+1)*frameSize])
 		if f < 4 {
-			decD.Decode(frames[0]) // 丢弃
+			_, _ = decD.Decode(frames[0]) // 丢弃
 		} else {
 			pcmD, _ := decD.Decode(frames[0])
 			maxDiffD := 0

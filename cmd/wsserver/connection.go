@@ -12,6 +12,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/pipeline"
+	wsstages "github.com/liuscraft/orion-x/cmd/wsserver/stages"
 	pstages "github.com/liuscraft/orion-x/internal/pipeline/stages"
 	"github.com/liuscraft/orion-x/internal/provider/asr"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
@@ -76,14 +77,14 @@ func computePreBufferFrames(playBufferDurationMs, frameDurationMs int) int {
 type wsConnection struct {
 	server    *Server
 	rawConn   *websocket.Conn
-	safeConn  *pstages.SafeConn
+	safeConn  *wsstages.SafeConn
 	sessionID string
 	mode      wsproto.Mode
 
 	asrProc  audio.ASRProcessor
 	ttsProc  audio.TTSProcessor
 	pl       pipeline.Pipeline
-	audioSrc *pstages.WSAudioSource
+	audioSrc *wsstages.WSAudioSource
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -199,8 +200,8 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		return nil, err
 	}
 
-	audioSrc := pstages.NewWSAudioSource(inputCodec, clientSampleRate)
-	safeConn := pstages.NewSafeConn(rawConn)
+	audioSrc := wsstages.NewWSAudioSource(inputCodec, clientSampleRate)
+	safeConn := wsstages.NewSafeConn(rawConn)
 
 	// Tag this connection's context with its own memory.Context so
 	// long-term memory (if enabled) is scoped per connection instead of
@@ -235,7 +236,7 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		AddStage(pstages.NewASRStage(asrProc, audioSrc)).
 		AddStage(pstages.NewAgentStage(s.agentInst, sess)).
 		AddStage(pstages.NewTTSStage(ttsProc)).
-		AddStage(pstages.NewWSOutputStage(safeConn, sessionID, outputCodec, wsserverTTSSampleRate, frameDurationMs, preBufferFrames)).
+		AddStage(wsstages.NewWSOutputStage(safeConn, sessionID, outputCodec, wsserverTTSSampleRate, frameDurationMs, preBufferFrames)).
 		Connect("asr", "agent").
 		Connect("asr", "ws_output").
 		Connect("agent", "tts").

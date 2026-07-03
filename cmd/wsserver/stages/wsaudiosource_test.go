@@ -7,7 +7,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
-	"github.com/liuscraft/orion-x/internal/pipeline/stages"
+	"github.com/liuscraft/orion-x/cmd/wsserver/stages"
 )
 
 func newPCMCodecForTest(t *testing.T) codec.Codec {

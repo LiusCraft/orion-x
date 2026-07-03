@@ -34,7 +34,7 @@ func TestRoundtripFullPCM(t *testing.T) {
 	// flush remaining
 	rest := len(samples) % frameSize
 	if rest > 0 {
-		enc.Encode(samples[len(samples)-rest:])
+		_, _ = enc.Encode(samples[len(samples)-rest:])
 	}
 	flushFrames, _ := enc.Flush()
 	allFrames = append(allFrames, flushFrames...)

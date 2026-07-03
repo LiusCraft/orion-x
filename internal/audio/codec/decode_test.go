@@ -11,7 +11,7 @@ func TestDecodeOpusDump(t *testing.T) {
 	if err != nil { t.Skip(err) }
 	c, _ := New(FormatOpus, 16000, 1, 60)
 	out, _ := os.Create("/tmp/ws_decoded.pcm")
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	off := 0
 	for off+2 <= len(data) {
 		l := int(binary.BigEndian.Uint16(data[off:]))
@@ -22,7 +22,7 @@ func TestDecodeOpusDump(t *testing.T) {
 		if err != nil { continue }
 		b := make([]byte, len(s)*2)
 		for i, v := range s { b[i*2]=byte(v); b[i*2+1]=byte(v>>8) }
-		out.Write(b)
+		_, _ = out.Write(b)
 	}
 	t.Logf("decoded -> /tmp/ws_decoded.pcm")
 }

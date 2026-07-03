@@ -13,8 +13,8 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/pipeline"
-	"github.com/liuscraft/orion-x/internal/pipeline/stages"
 	"github.com/liuscraft/orion-x/internal/wsproto"
+	"github.com/liuscraft/orion-x/cmd/wsserver/stages"
 )
 
 // newTestWSConnPair spins up a real WebSocket server (httptest) and dials
@@ -120,9 +120,6 @@ func TestWSOutputStage_STTMessage(t *testing.T) {
 	}
 }
 
-// TestWSOutputStage_TTSChunkFlow 验证完整的 start/sentence_start/音频帧/stop
-// 流程。音频块大小正好是一个完整 frame（60 samples @ testWSSampleRate），
-// 这样每个 TTSChunk 恰好产生一次编码+发送，不依赖任何跨 chunk 的缓冲行为。
 func TestWSOutputStage_TTSChunkFlow(t *testing.T) {
 	server, client := newTestWSConnPair(t)
 	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
@@ -187,9 +184,6 @@ func TestWSOutputStage_InterruptSendsStopIfStarted(t *testing.T) {
 	}
 }
 
-// TestWSOutputStage_InterruptBeforeTTSStartSendsNothing 是独立的测试用例
-// （而不是复用同一连接接着测），因为触发读超时的连接按 gorilla/websocket
-// 的文档不保证还能继续可靠读取，不适合在断言超时之后再复用同一个 conn。
 func TestWSOutputStage_InterruptBeforeTTSStartSendsNothing(t *testing.T) {
 	server, client := newTestWSConnPair(t)
 	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
@@ -221,8 +215,6 @@ func TestWSOutputStage_IgnoresFinishedAndErrorMessages(t *testing.T) {
 
 	input <- pipeline.Message{Type: pipeline.MessageTypeFinished}
 	input <- pipeline.Message{Type: pipeline.MessageTypeError, Metadata: pipeline.Metadata{Error: errors.New("boom")}}
-	// 紧接着发一个真正的 stt 消息，确认前两条没有产生任何输出干扰这条消息
-	// 的到达顺序（如果 Finished/Error 意外写了什么，这里会先读到它）。
 	input <- pipeline.NewMessage(pipeline.MessageTypeData, "之后的消息")
 
 	raw := readJSONWithTimeout(t, client, time.Second)
@@ -231,13 +223,6 @@ func TestWSOutputStage_IgnoresFinishedAndErrorMessages(t *testing.T) {
 	}
 }
 
-// TestWSOutputStage_PacesFramesBeyondPreBuffer is the regression test for
-// the "burst then stall" playback stutter: without pacing, WSOutputStage
-// forwarded audio as fast as TTSStage produced it, so a multi-second burst
-// from the upstream TTS provider arrived at the client all at once. This
-// feeds far more than the pre-buffer window's worth of frames in a single
-// TTSChunk and asserts that frames beyond the pre-buffer window arrive
-// spaced out, not back-to-back.
 func TestWSOutputStage_PacesFramesBeyondPreBuffer(t *testing.T) {
 	server, client := newTestWSConnPair(t)
 	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
@@ -248,7 +233,7 @@ func TestWSOutputStage_PacesFramesBeyondPreBuffer(t *testing.T) {
 	input := make(chan pipeline.Message, 16)
 	_ = stage.Process(ctx, input)
 
-	const totalFrames = 6 // well beyond the 3-frame pre-buffer window
+	const totalFrames = 6
 	input <- pipeline.Message{
 		Type:    pipeline.MessageTypeData,
 		Payload: audio.TTSChunk{Text: "长文本", Audio: audio.Int16ToBytesLE(testFrameSamples(1, totalFrames))},
@@ -263,12 +248,7 @@ func TestWSOutputStage_PacesFramesBeyondPreBuffer(t *testing.T) {
 		frameTimes = append(frameTimes, time.Now())
 	}
 
-	// Frames beyond the pre-buffer window (index >= 3, i.e. the 4th frame
-	// onward) should be paced ~60ms apart. Allow a generous lower bound
-	// (20ms) to keep this robust against scheduler jitter while still
-	// clearly distinguishing "paced" from "all sent back-to-back in
-	// microseconds", which is what the bug looked like.
-	const preBufferFrames = 3 // must match the preBufferFrames passed to NewWSOutputStage above
+	const preBufferFrames = 3
 	for i := preBufferFrames; i < len(frameTimes); i++ {
 		gap := frameTimes[i].Sub(frameTimes[i-1])
 		if gap < 20*time.Millisecond {
@@ -277,10 +257,6 @@ func TestWSOutputStage_PacesFramesBeyondPreBuffer(t *testing.T) {
 	}
 }
 
-// TestWSOutputStage_InterruptDropsQueuedFrames verifies barge-in discards
-// whatever audio is still queued in the pacer instead of playing it out —
-// otherwise the client would keep hearing stale speech for
-// (queued frames * frameDurationMs) after the user interrupted.
 func TestWSOutputStage_InterruptDropsQueuedFrames(t *testing.T) {
 	server, client := newTestWSConnPair(t)
 	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
@@ -299,10 +275,7 @@ func TestWSOutputStage_InterruptDropsQueuedFrames(t *testing.T) {
 
 	_ = readJSONWithTimeout(t, client, time.Second) // start
 
-	// Drain only the pre-buffer window's worth of frames (sent immediately);
-	// the remaining 7 are still sitting in the pacer's queue, paced at
-	// ~60ms each — which would take ~420ms to fully drain if not dropped.
-	const preBufferFrames = 3 // must match the preBufferFrames passed to NewWSOutputStage above
+	const preBufferFrames = 3
 	for i := 0; i < preBufferFrames; i++ {
 		_ = readBinaryWithTimeout(t, client, time.Second)
 	}
@@ -336,7 +309,6 @@ func TestSafeConn_ConcurrentWritesDoNotRace(t *testing.T) {
 	}
 	<-done
 
-	// 排空客户端收到的消息，确认没有 panic / 连接损坏。
 	_ = client.SetReadDeadline(time.Now().Add(time.Second))
 	count := 0
 	for count < 40 {

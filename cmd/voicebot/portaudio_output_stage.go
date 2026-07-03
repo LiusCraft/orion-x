@@ -77,18 +77,18 @@ func writeWAV(path string, pcm []byte, sampleRate int) {
 		logging.Warnf("PortAudioOutputStage: cannot create wav: %v", err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var buf [4]byte
-	putU32 := func(v uint32) { binary.LittleEndian.PutUint32(buf[:], v); f.Write(buf[:]) }
-	putU16 := func(v uint16) { binary.LittleEndian.PutUint16(buf[:2], v); f.Write(buf[:2]) }
+	putU32 := func(v uint32) { binary.LittleEndian.PutUint32(buf[:], v); _, _ = f.Write(buf[:]) }
+	putU16 := func(v uint16) { binary.LittleEndian.PutUint16(buf[:2], v); _, _ = f.Write(buf[:2]) }
 
 	dataLen := uint32(len(pcm))
 
-	f.Write([]byte("RIFF"))
+	_, _ = f.Write([]byte("RIFF"))
 	putU32(36 + dataLen)
-	f.Write([]byte("WAVE"))
-	f.Write([]byte("fmt "))
+	_, _ = f.Write([]byte("WAVE"))
+	_, _ = f.Write([]byte("fmt "))
 	putU32(16)
 	putU16(1)  // PCM
 	putU16(1)  // mono
@@ -96,9 +96,9 @@ func writeWAV(path string, pcm []byte, sampleRate int) {
 	putU32(uint32(sampleRate * 2)) // byte rate
 	putU16(2)  // block align
 	putU16(16) // bits per sample
-	f.Write([]byte("data"))
+	_, _ = f.Write([]byte("data"))
 	putU32(dataLen)
-	f.Write(pcm)
+	_, _ = f.Write(pcm)
 
 	logging.Infof("PortAudioOutputStage: WAV saved → %s (PCM %d bytes, %d Hz)", path, dataLen, sampleRate)
 }
