@@ -205,7 +205,7 @@ func (s *WSOutputStage) sendSTT(text string) {
 // correct.
 func (s *WSOutputStage) handleTTSChunk(chunk audio.TTSChunk) {
 	if chunk.Final {
-		s.flushAndStop()
+		s.flushAndStop(chunk.SentenceEnd, chunk.SentenceText)
 		return
 	}
 
@@ -298,7 +298,7 @@ func (s *WSOutputStage) ensureTTSStarted(text string) {
 // turn-end marker. The pacer only invokes sendTTSStop once every frame
 // queued ahead of that marker has actually been sent — not merely
 // enqueued — so "tts stop" never arrives before the last byte of audio.
-func (s *WSOutputStage) flushAndStop() {
+func (s *WSOutputStage) flushAndStop(hasSentenceEnd bool, sentenceText string) {
 	if len(s.pendingBuf) > 0 {
 		s.encodeAndEnqueue(s.pendingBuf)
 		s.pendingBuf = nil
@@ -323,6 +323,10 @@ func (s *WSOutputStage) flushAndStop() {
 
 	if !wasStarted {
 		return // 本轮从未真正播报过音频，没有 start 与之配对，不发 stop
+	}
+	// sentence_end 入队在所有音频帧之后、turn_end 之前，保证客户端收到顺序正确
+	if hasSentenceEnd {
+		s.pacer.enqueueSentenceEnd(sentenceText)
 	}
 	s.pacer.enqueueTurnEnd()
 }
