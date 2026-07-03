@@ -13,6 +13,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/audio/codec"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/pipeline"
+	textutil "github.com/liuscraft/orion-x/internal/text"
 	"github.com/liuscraft/orion-x/internal/wsproto"
 )
 
@@ -201,7 +202,7 @@ func (s *WSOutputStage) handleMessage(msg pipeline.Message) {
 // forwarded. Chunks without a leading emoji, or whose emoji matches the
 // current emotion, are silently ignored.
 func (s *WSOutputStage) handleLLMText(text string) {
-	emo, _ := audio.ExtractLeadingEmoji(text)
+	emo, _ := textutil.ExtractLeadingEmoji(text)
 	if emo == "" {
 		return
 	}
