@@ -40,6 +40,19 @@ type Provider interface {
 	Synthesize(ctx context.Context, text string, opts SynthesisOptions) (io.ReadCloser, error)
 }
 
+// SentenceBoundary marks a point in a SynthesisStream's audio output.
+// For sentence-end (IsBegin=false): Offset is the cumulative byte count
+// AudioReader has produced once that sentence's audio is fully available,
+// and Text is the sentence's full original text.
+// For sentence-begin (IsBegin=true): Offset is ignored (set to -1 by
+// convention) — the boundary signals that the next audio chunk from
+// AudioReader belongs to a sentence whose text is Text.
+type SentenceBoundary struct {
+	Offset  int
+	Text    string
+	IsBegin bool
+}
+
 // SynthesisStream 是一次 TTS 会话的流式接口。
 // 调用方顺序：WriteTextChunk → Finish → 读取 AudioReader()。
 type SynthesisStream interface {
@@ -51,6 +64,13 @@ type SynthesisStream interface {
 	AudioReader() io.ReadCloser
 	// Abort 中止 stream，关闭连接和 audioBuf（打断场景）。
 	Abort()
+	// SentenceBoundaries returns a channel that receives one SentenceBoundary
+	// per sentence once that sentence's audio has been fully written to
+	// AudioReader. Implementations that can't detect sentence boundaries may
+	// return nil — receiving from a nil channel blocks forever, so callers
+	// selecting on it alongside other cases simply never see that case fire,
+	// with no extra nil-checking needed.
+	SentenceBoundaries() <-chan SentenceBoundary
 }
 
 // StreamingProvider 是支持流式合成的 Provider 扩展接口。

@@ -57,6 +57,16 @@ type ASRProcessor interface {
 	Start(ctx context.Context) error
 	// Stop flushes pending audio and shuts down.
 	Stop() error
+	// BeginTurn starts a manually-controlled speech turn: only meaningful
+	// when EnableVAD=false (no-op otherwise, since VAD manages turn
+	// boundaries automatically). Write is a silent no-op until BeginTurn
+	// has been called (and after a matching EndTurn, until the next
+	// BeginTurn).
+	BeginTurn(ctx context.Context) error
+	// EndTurn ends the current manually-controlled speech turn, causing the
+	// recognizer to finalize and deliver its result via OnResult. No-op
+	// when EnableVAD=true or when there is no active turn.
+	EndTurn(ctx context.Context) error
 }
 
 // NewASRProcessor creates an ASRProcessor. cfg.Recognizer must not be nil.
@@ -76,6 +86,9 @@ type asrProcessor struct {
 	asrWG      sync.WaitGroup
 	mu         sync.Mutex
 	started    bool
+	// manualTurnActive 仅在 vadEnabled=false 时有意义：标记当前是否存在一个
+	// 已 BeginTurn 但尚未 EndTurn 的活跃 recognizer task。
+	manualTurnActive bool
 
 	speechMu    sync.Mutex
 	speechStart time.Time
@@ -148,6 +161,9 @@ func (p *asrProcessor) Start(ctx context.Context) error {
 	p.ctx, p.cancel = context.WithCancel(ctx)
 
 	if !p.vadEnabled {
+		// manual 模式：这里只注册结果回调，不立即启动 recognizer task——
+		// task 的生命周期由 BeginTurn/EndTurn 按 listen start/stop 驱动，
+		// 避免在没有活跃 listen 窗口时空占后端资源。
 		p.recognizer.OnResult(func(result asr.Result) {
 			logging.Infof("ASRProcessor: result received (final=%v, text_len=%d, usage_duration=%s, begin_ms=%d, end_ms=%s)",
 				result.IsFinal,
@@ -163,10 +179,6 @@ func (p *asrProcessor) Start(ctx context.Context) error {
 				fn(ASRResult{Text: result.Text, IsFinal: result.IsFinal})
 			}
 		})
-		if err := p.recognizer.Start(p.ctx); err != nil {
-			p.cancel()
-			return fmt.Errorf("ASRProcessor: start recognizer: %w", err)
-		}
 	} else {
 		p.asrStartCh = make(chan struct{}, 1)
 		p.asrFrameCh = make(chan []byte, 128) // ~3.8s buffer at 30ms/frame
@@ -196,6 +208,7 @@ func (p *asrProcessor) Stop() error {
 	ctx := p.ctx
 	cancel := p.cancel
 	vadEnabled := p.vadEnabled
+	manualTurnActive := p.manualTurnActive
 	p.mu.Unlock()
 
 	logging.Infof("ASRProcessor: stopping...")
@@ -230,7 +243,9 @@ func (p *asrProcessor) Stop() error {
 			cancel()
 		}
 		if recognizer != nil {
-			_ = recognizer.Finish(ctx)
+			if manualTurnActive {
+				_ = recognizer.Finish(ctx)
+			}
 			_ = recognizer.Close()
 		}
 	}
@@ -255,10 +270,18 @@ func (p *asrProcessor) Write(data []byte) error {
 	}
 	ctx := p.ctx
 	vadEnabled := p.vadEnabled
+	manualTurnActive := p.manualTurnActive
 	p.mu.Unlock()
 
 	if vadEnabled {
 		p.processVAD(ctx, data)
+		return nil
+	}
+
+	if !manualTurnActive {
+		// manual 模式下没有活跃的 listen 窗口：静默丢弃而不是报错，
+		// 避免调用方（如 ASRStage.readFromSource）因为一次意外的音频帧
+		// 而误判为致命错误并停止读取。
 		return nil
 	}
 
@@ -268,6 +291,58 @@ func (p *asrProcessor) Write(data []byte) error {
 		}
 		return fmt.Errorf("ASRProcessor: send audio: %w", err)
 	}
+	return nil
+}
+
+// BeginTurn starts a recognizer task for a manually-controlled speech turn
+// (EnableVAD=false). If a previous turn was never ended with EndTurn, it is
+// finished first so the underlying recognizer doesn't reject Start with
+// "already started". No-op when EnableVAD=true.
+func (p *asrProcessor) BeginTurn(ctx context.Context) error {
+	p.mu.Lock()
+	vadEnabled := p.vadEnabled
+	turnActive := p.manualTurnActive
+	p.mu.Unlock()
+
+	if vadEnabled {
+		return nil
+	}
+
+	if turnActive {
+		_ = p.recognizer.Finish(ctx)
+	}
+
+	if err := p.recognizer.Start(ctx); err != nil {
+		return fmt.Errorf("ASRProcessor: begin turn: %w", err)
+	}
+
+	p.mu.Lock()
+	p.manualTurnActive = true
+	p.mu.Unlock()
+	return nil
+}
+
+// EndTurn ends the current manually-controlled speech turn, asking the
+// recognizer to finalize and deliver its result via the OnResult callback.
+// No-op when EnableVAD=true or when there is no active turn (e.g. called
+// twice in a row).
+func (p *asrProcessor) EndTurn(ctx context.Context) error {
+	p.mu.Lock()
+	vadEnabled := p.vadEnabled
+	turnActive := p.manualTurnActive
+	p.mu.Unlock()
+
+	if vadEnabled || !turnActive {
+		return nil
+	}
+
+	if err := p.recognizer.Finish(ctx); err != nil {
+		return fmt.Errorf("ASRProcessor: end turn: %w", err)
+	}
+
+	p.mu.Lock()
+	p.manualTurnActive = false
+	p.mu.Unlock()
 	return nil
 }
 

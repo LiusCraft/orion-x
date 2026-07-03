@@ -7,11 +7,11 @@ endif
 
 GO := GOTOOLCHAIN=$(GO_TOOLCHAIN) $(CGO_FLAGS) go
 
-.PHONY: all build build-voicebot run-voicebot test test-audio clean
+.PHONY: all build build-voicebot run-voicebot build-wsserver run-wsserver test test-audio clean
 
 all: build
 
-build: build-voicebot
+build: build-voicebot build-wsserver
 
 build-voicebot:
 	mkdir -p bin
@@ -19,6 +19,15 @@ build-voicebot:
 
 run-voicebot: build-voicebot
 	./bin/voicebot
+
+# wsserver additionally needs libopus (e.g. `brew install opus`); it's
+# discovered automatically via pkg-config, no extra CGO flags required.
+build-wsserver:
+	mkdir -p bin
+	$(GO) build -o bin/wsserver ./cmd/wsserver
+
+run-wsserver: build-wsserver
+	./bin/wsserver
 
 test:
 	$(GO) test ./...

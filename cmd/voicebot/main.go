@@ -171,7 +171,7 @@ func main() {
 			Model:                ttsCfgSpec.Model,
 			Voice:                ttsCfgSpec.Voice,
 			Format:               "pcm",
-			SampleRate:           22050,
+			SampleRate:           ttsCfgSpec.SampleRate,
 			Volume:               ttsCfgSpec.Volume,
 			Rate:                 ttsCfgSpec.Rate,
 			Pitch:                ttsCfgSpec.Pitch,
@@ -252,7 +252,7 @@ func main() {
 	defer cancel()
 
 	sinkFormat := AudioFormat{
-		SampleRate:      22050,
+		SampleRate:      ttsCfgSpec.SampleRate,
 		Channels:        audio.InternalChannels,
 		FramesPerBuffer: 1024,
 	}
@@ -261,28 +261,23 @@ func main() {
 		logging.Fatalf("Failed to start sink: %v", err)
 	}
 
-	// Wire TTS audio output to the sink.
-	ttsProc.OnChunk(func(chunk audio.TTSChunk) {
-		samples := audio.BytesToInt16LE(chunk.Audio)
-		if err := sink.WritePCM(samples); err != nil {
-			logging.Errorf("Sink write error: %v", err)
-			return
-		}
-	})
-
 	// Start TTSProcessor (ASRProcessor is started inside ASRStage).
 	logging.Infof("Starting TTSProcessor...")
 	if err := ttsProc.Start(ctx); err != nil {
 		logging.Fatalf("Failed to start TTSProcessor: %v", err)
 	}
 
-	// Build pipeline: ASR → Agent → TTS
-	logging.Infof("Building pipeline: ASR → Agent → TTS...")
+	// Build pipeline: ASR → Agent → TTS → PortAudio output.
+	// TTS audio flows through the pipeline Message bus (TTSStage registers
+	// proc.OnChunk internally); PortAudioOutputStage is the sink that writes
+	// it to the speaker.
+	logging.Infof("Building pipeline: ASR → Agent → TTS → PortAudio...")
 	sess := session.New(session.SessionMeta{Model: agentCfg.Model})
 	pl := pipeline.NewBuilder().
 		AddStage(pstages.NewASRStage(asrProc, micSource)).
 		AddStage(pstages.NewAgentStage(agentInst, sess)).
 		AddStage(pstages.NewTTSStage(ttsProc)).
+		AddStage(NewPortAudioOutputStage(sink, sinkFormat.SampleRate)).
 		SetObserver(pipeline.NewLoggingObserver(false)).
 		Build()
 

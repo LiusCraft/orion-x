@@ -126,15 +126,16 @@ func (p *DashScopeProvider) newStream(ctx context.Context, cfg tts.Config, emoti
 	audioBuf := newBufferedPipe(1024 * 1024)
 
 	stream := &dashScopeStream{
-		createdAt: streamStart,
-		cfg:       cfg,
-		emotion:   emotion,
-		conn:      conn,
-		audioBuf:  audioBuf,
-		startedCh: make(chan struct{}),
-		doneCh:    make(chan struct{}),
-		errCh:     make(chan error, 1),
-		taskID:    newTaskID(),
+		createdAt:          streamStart,
+		cfg:                cfg,
+		emotion:            emotion,
+		conn:               conn,
+		audioBuf:           audioBuf,
+		startedCh:          make(chan struct{}),
+		doneCh:             make(chan struct{}),
+		errCh:              make(chan error, 1),
+		taskID:             newTaskID(),
+		sentenceBoundaryCh: make(chan tts.SentenceBoundary, 16),
 	}
 
 	stream.startReceiver()
@@ -185,6 +186,8 @@ type dashScopeStream struct {
 	firstAudioAt   time.Time
 	audioBytes     int
 	audioFrames    int
+
+	sentenceBoundaryCh chan tts.SentenceBoundary
 }
 
 // bufferedPipe is a thread-safe buffered pipe that doesn't block on write.
@@ -330,6 +333,10 @@ func (s *dashScopeStream) Abort() {
 	s.markDone()
 }
 
+// SentenceBoundaries 实现 tts.SynthesisStream。
+func (s *dashScopeStream) SentenceBoundaries() <-chan tts.SentenceBoundary {
+	return s.sentenceBoundaryCh
+}
 func (s *dashScopeStream) waitStarted(ctx context.Context) error {
 	select {
 	case <-s.startedCh:
@@ -343,19 +350,20 @@ func (s *dashScopeStream) waitStarted(ctx context.Context) error {
 
 func (s *dashScopeStream) sendRunTask(_ context.Context) error {
 	params := map[string]any{
-		"text_type":   s.cfg.TextType,
-		"voice":       s.cfg.Voice,
-		"format":      s.cfg.Format,
-		"sample_rate": s.cfg.SampleRate,
-		"volume":      s.cfg.Volume,
-		"rate":        s.cfg.Rate,
-		"pitch":       s.cfg.Pitch,
-		"enable_ssml": s.cfg.EnableSSML,
+		"text_type":              s.cfg.TextType,
+		"voice":                  s.cfg.Voice,
+		"format":                 s.cfg.Format,
+		"sample_rate":            s.cfg.SampleRate,
+		"volume":                 s.cfg.Volume,
+		"rate":                   s.cfg.Rate,
+		"pitch":                  s.cfg.Pitch,
+		"enable_ssml":            s.cfg.EnableSSML,
+		"word_timestamp_enabled": true,
 	}
 	// emotion 映射：系统内部 emotion → 该 voice 下可用的 emotion 参数
 	// 具体映射值由 voice 决定，后续按 voice 完善
 	if mapped := mapEmotion(s.cfg.Voice, s.emotion); mapped != "" {
-		params["instruction"] = fmt.Sprintf("请用情绪%s说话", mapped)
+		params["instruction"] = fmt.Sprintf("你说话的情感是%s。", mapped)
 	}
 
 	payload := runTaskMessage{
@@ -481,9 +489,45 @@ func (s *dashScopeStream) handleEvent(event eventMessage) bool {
 		s.closeWithError(err)
 		return true
 	case "result-generated":
-		// normal event, no action needed
+		s.handleResultGenerated(event.Payload)
 	}
 	return false
+}
+
+func (s *dashScopeStream) handleResultGenerated(payload taskPayload) {
+	if payload.Output == nil {
+		return
+	}
+	outputType := payload.Output.Type
+	text := payload.Output.OriginalText
+	if text == "" {
+		return
+	}
+
+	switch outputType {
+	case "sentence-begin":
+		// sentence-begin arrives before the first audio frame of the
+		// sentence — tell playAudio what text to attach to the next
+		// audio chunk so WSOutputStage can emit "tts sentence_start".
+		boundary := tts.SentenceBoundary{Offset: -1, Text: text, IsBegin: true}
+		select {
+		case s.sentenceBoundaryCh <- boundary:
+		default:
+		}
+	case "sentence-end":
+		// sentence-end arrives after all binary frames for this sentence
+		// have been written to audioBuf (confirmed against real traffic),
+		// so audioBytes at this point includes the full sentence audio.
+		s.metricsMu.Lock()
+		offset := s.audioBytes
+		s.metricsMu.Unlock()
+
+		boundary := tts.SentenceBoundary{Offset: offset, Text: text}
+		select {
+		case s.sentenceBoundaryCh <- boundary:
+		default:
+		}
+	}
 }
 
 func (s *dashScopeStream) recordTaskStarted() {
@@ -683,10 +727,27 @@ type taskPayload struct {
 	Model      string         `json:"model,omitempty"`
 	Parameters map[string]any `json:"parameters,omitempty"`
 	Input      map[string]any `json:"input"`
+	Output     *taskOutput    `json:"output,omitempty"`
+}
+
+// taskOutput is a result-generated event's payload.output. The "type" key
+// (sentence-begin / sentence-synthesis / sentence-end) is at the output
+// level, not nested under sentence.type. Confirmed against real DashScope
+// traffic with word_timestamp_enabled=true.
+type taskOutput struct {
+	Type         string        `json:"type,omitempty"`
+	OriginalText string        `json:"original_text,omitempty"`
+	Sentence     *taskSentence `json:"sentence,omitempty"`
+}
+
+type taskSentence struct {
+	Index int    `json:"index"`
+	Type  string `json:"type,omitempty"`
 }
 
 type eventMessage struct {
-	Header taskHeader `json:"header"`
+	Header  taskHeader  `json:"header"`
+	Payload taskPayload `json:"payload"`
 }
 
 func mapDashScopeError(code, message string) error {

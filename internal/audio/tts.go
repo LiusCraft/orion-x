@@ -18,6 +18,11 @@ import (
 type TTSChunk struct {
 	Text  string
 	Audio []byte
+	// Final 标记本轮最后一块音频，此时 Text/Audio 均为空。
+	Final bool
+	// SentenceEnd 标记该 chunk 音频包含某句话的最后一个字节。
+	SentenceEnd  bool
+	SentenceText string
 }
 
 // TTSConfig 配置 TTSProcessor。
@@ -29,6 +34,9 @@ type TTSConfig struct {
 	// MaxRunes 是单句最大字符数（超过则强制切句），默认 100。
 	MaxRunes int
 }
+
+// streamFlushTimeout 是 handleFlush 等待 streaming 路径音频播放完成的上限。
+const streamFlushTimeout = 5 * time.Second
 
 // DefaultTTSConfig 返回合理的默认配置，Provider 必须由调用方设置。
 func DefaultTTSConfig() *TTSConfig {
@@ -181,6 +189,7 @@ type ttsProcessor struct {
 	// currentStream：per-turn stream（StreamingProvider 路径），turn 结束（Flush）后置 nil
 	streamMu      sync.Mutex
 	currentStream tts.SynthesisStream
+	streamDoneCh  chan struct{} // 当前 stream 的 playAudio 读到 EOF 时关闭
 
 	// warmResultCh：Warm goroutine 完成后把就绪 stream 送到这里（容量1）
 	warmResultCh chan tts.SynthesisStream
@@ -233,6 +242,7 @@ func (p *ttsProcessor) Stop() error {
 		p.currentStream.Abort()
 		p.currentStream = nil
 	}
+	p.streamDoneCh = nil
 	p.streamMu.Unlock()
 
 	cancel()
@@ -354,6 +364,7 @@ func (p *ttsProcessor) Interrupt() error {
 		p.currentStream.Abort()
 		p.currentStream = nil
 	}
+	p.streamDoneCh = nil
 	p.streamMu.Unlock()
 
 	// 4. 清空句子队列
@@ -411,18 +422,35 @@ func (p *ttsProcessor) dispatcher() {
 	}
 }
 
-// handleFlush 在 dispatcher 里处理 Flush 信号：向 currentStream 发 finish-task，重置 stream。
+// handleFlush 在 dispatcher 里处理 Flush 信号：向 currentStream 发 finish-task，
+// 等待其音频播放完成（streaming 路径），最后发出 Final 标记 chunk。
 func (p *ttsProcessor) handleFlush(synthCtx context.Context) {
 	p.streamMu.Lock()
 	stream := p.currentStream
+	doneCh := p.streamDoneCh
 	p.currentStream = nil
+	p.streamDoneCh = nil
 	p.streamMu.Unlock()
 
-	if stream == nil {
-		return
+	if stream != nil {
+		if err := stream.Finish(synthCtx); err != nil && !errors.Is(err, context.Canceled) {
+			logging.Errorf("TTSProcessor: Finish failed: %v", err)
+		}
+		if doneCh != nil {
+			select {
+			case <-doneCh:
+			case <-synthCtx.Done():
+			case <-time.After(streamFlushTimeout):
+				logging.Warnf("TTSProcessor: timeout waiting stream playback to finish after Finish")
+			}
+		}
 	}
-	if err := stream.Finish(synthCtx); err != nil && !errors.Is(err, context.Canceled) {
-		logging.Errorf("TTSProcessor: Finish failed: %v", err)
+
+	p.mu.Lock()
+	fn := p.onChunk
+	p.mu.Unlock()
+	if fn != nil {
+		fn(TTSChunk{Final: true})
 	}
 }
 
@@ -459,10 +487,15 @@ func (p *ttsProcessor) dispatchStreaming(item sentenceItem, synthCtx context.Con
 		p.streamMu.Unlock()
 
 		reader := stream.AudioReader()
+		boundaries := stream.SentenceBoundaries()
+		doneCh := make(chan struct{})
+		p.streamMu.Lock()
+		p.streamDoneCh = doneCh
+		p.streamMu.Unlock()
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
-			p.playAudio(reader, "", synthCtx)
+			p.playAudio(reader, "", synthCtx, func() { close(doneCh) }, boundaries)
 		}()
 	}
 
@@ -493,11 +526,13 @@ func (p *ttsProcessor) dispatchBatch(item sentenceItem, synthCtx context.Context
 		return
 	}
 	logging.Infof("TTSProcessor: Synthesize done (elapsed=%v, text=%q)", time.Since(start), truncate(item.text, 30))
-	p.playAudio(reader, item.text, synthCtx)
+	p.playAudio(reader, item.text, synthCtx, nil, nil)
 }
 
 // playAudio 从 reader 流式读 PCM，每帧调 onChunk。firstText 只在首帧附加。
-func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCtx context.Context) {
+func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCtx context.Context, onEOF func(), boundaries <-chan tts.SentenceBoundary) {
+	var pendingBoundary *tts.SentenceBoundary
+	nextText := firstText
 	defer func() { _ = reader.Close() }()
 
 	p.mu.Lock()
@@ -514,16 +549,43 @@ func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCt
 		if n > 0 {
 			totalBytes += n
 
+			// Non-blocking drain of pending boundaries.
+			for {
+				select {
+				case b, ok := <-boundaries:
+					if !ok { break }
+					if b.IsBegin { nextText = b.Text; continue }
+					pendingBoundary = &b
+				default:
+				}
+				break
+			}
+
 			text := ""
 			if first {
-				text = firstText
 				first = false
 				logging.Infof("TTSProcessor: playback first frame (elapsed=%v, frame_bytes=%d)", time.Since(playStart), n)
 			}
-
-			if fn != nil {
-				fn(TTSChunk{Text: text, Audio: buf[:n]})
+			// nextText 由首帧的 firstText（batch 路径）或 sentence-begin
+			// boundary（streaming 路径）设置，不能只限定在 first 内消费，
+			// 否则后续句子的 text 永远不会放到 chunk.Text 中。
+			if nextText != "" {
+				text = nextText
+				nextText = ""
 			}
+
+			// 复制音频数据：fn 可能异步持有 chunk（例如 TTSStage 通过
+			// pipeline channel 转发到另一个 goroutine），下一轮 reader.Read
+			// 会覆盖 buf，直接传 buf[:n] 会导致数据竞争。
+			audioCopy := make([]byte, n)
+			copy(audioCopy, buf[:n])
+			chunk := TTSChunk{Text: text, Audio: audioCopy}
+			if pendingBoundary != nil && totalBytes >= pendingBoundary.Offset {
+				chunk.SentenceEnd = true
+				chunk.SentenceText = pendingBoundary.Text
+				pendingBoundary = nil
+			}
+			if fn != nil { fn(chunk) }
 		}
 		if err != nil {
 			break
@@ -539,6 +601,10 @@ func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCt
 	}
 
 	logging.Infof("TTSProcessor: playback done (elapsed=%v, total_bytes=%d)", time.Since(playStart), totalBytes)
+
+	if onEOF != nil && synthCtx.Err() == nil {
+		onEOF()
+	}
 }
 
 // --- 工具 ---

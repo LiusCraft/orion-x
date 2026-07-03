@@ -2,6 +2,8 @@ package stages
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/logging"
@@ -9,7 +11,11 @@ import (
 	"github.com/liuscraft/orion-x/internal/provider/tts"
 )
 
-// TTSStage wraps a TTSProcessor as a pipeline sink stage.
+// TTSStage wraps a TTSProcessor as a pipeline stage. It consumes text
+// messages (writing them to the processor) and produces audio.TTSChunk
+// messages (from the processor's OnChunk callback) as output, so a
+// downstream output stage (PortAudio, WebSocket, ...) can consume audio via
+// the standard pipeline Message bus instead of a side-channel callback.
 type TTSStage struct {
 	*pipeline.BaseStage
 	proc audio.TTSProcessor
@@ -25,14 +31,49 @@ func NewTTSStage(proc audio.TTSProcessor) pipeline.Stage {
 }
 
 func (s *TTSStage) Process(ctx context.Context, input <-chan pipeline.Message) <-chan pipeline.Message {
-	output := make(chan pipeline.Message)
+	output := make(chan pipeline.Message, 16)
+
+	// send/closeOutput 共享 mu，确保 OnChunk 回调（在 TTSProcessor 内部的
+	// dispatcher/playAudio goroutine 里触发）和主循环都不会在 output 已关闭后
+	// 写入它，避免 send on closed channel。
+	var mu sync.Mutex
+	closed := false
+
+	send := func(msg pipeline.Message) {
+		mu.Lock()
+		defer mu.Unlock()
+		if closed {
+			return
+		}
+		select {
+		case output <- msg:
+		case <-ctx.Done():
+		}
+	}
+
+	closeOutput := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if closed {
+			return
+		}
+		closed = true
+		close(output)
+	}
+
+	s.proc.OnChunk(func(chunk audio.TTSChunk) {
+		send(pipeline.Message{
+			Type:     pipeline.MessageTypeData,
+			Payload:  chunk,
+			Metadata: pipeline.Metadata{Timestamp: time.Now()},
+		})
+	})
 
 	go func() {
-		defer close(output)
+		defer closeOutput()
 		defer func() {
 			// 确保管道关闭时把剩余文本送出去
-			opts := s.currentOpts()
-			_ = s.proc.Flush(opts)
+			_ = s.proc.Flush(s.currentOpts())
 		}()
 
 		for {
@@ -48,23 +89,20 @@ func (s *TTSStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 				case pipeline.MessageTypeData:
 					if err := s.handleTextChunk(msg); err != nil {
 						logging.Errorf("TTSStage: handle text chunk error: %v", err)
-						msg = msg.WithError(err)
+						send(pipeline.Message{
+							Type:     pipeline.MessageTypeError,
+							Metadata: pipeline.Metadata{Error: err, Timestamp: time.Now()},
+						})
 					}
 
 				case pipeline.MessageTypeFinished:
-					opts := s.currentOpts()
-					if err := s.proc.Flush(opts); err != nil {
+					if err := s.proc.Flush(s.currentOpts()); err != nil {
 						logging.Errorf("TTSStage: flush TTS error: %v", err)
 					}
 
 				case pipeline.MessageTypeInterrupt:
 					_ = s.proc.Interrupt()
-				}
-
-				select {
-				case output <- msg:
-				case <-ctx.Done():
-					return
+					send(msg)
 				}
 			}
 		}

@@ -13,3 +13,13 @@ func BytesToInt16LE(data []byte) []int16 {
 	}
 	return samples
 }
+
+// Int16ToBytesLE converts int16 samples to PCM16LE bytes.
+func Int16ToBytesLE(samples []int16) []byte {
+	data := make([]byte, len(samples)*2)
+	for i, s := range samples {
+		data[i*2] = byte(s)
+		data[i*2+1] = byte(s >> 8)
+	}
+	return data
+}

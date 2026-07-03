@@ -2,6 +2,7 @@ package audio
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -45,6 +46,70 @@ func (p *mockTTSProvider) Synthesize(ctx context.Context, text string, _ tts.Syn
 	}
 	// 返回文本的字节作为 mock 音频
 	return io.NopCloser(strings.NewReader(text)), nil
+}
+
+// --- mock streaming provider ---
+//
+// mockSynthesisStream 用 io.Pipe 模拟 Finish 的异步性：Finish 后延迟
+// finishDelay 才关闭 pipe，模拟真实 provider 的 task-finished 事件延迟到达。
+type mockSynthesisStream struct {
+	pr *io.PipeReader
+	pw *io.PipeWriter
+
+	finishDelay time.Duration
+
+	mu      sync.Mutex
+	aborted bool
+}
+
+func newMockSynthesisStream(finishDelay time.Duration) *mockSynthesisStream {
+	pr, pw := io.Pipe()
+	return &mockSynthesisStream{pr: pr, pw: pw, finishDelay: finishDelay}
+}
+
+func (s *mockSynthesisStream) WriteTextChunk(_ context.Context, text string) error {
+	_, err := s.pw.Write([]byte(text))
+	return err
+}
+
+func (s *mockSynthesisStream) Finish(_ context.Context) error {
+	go func() {
+		if s.finishDelay > 0 {
+			time.Sleep(s.finishDelay)
+		}
+		_ = s.pw.Close()
+	}()
+	return nil
+}
+
+func (s *mockSynthesisStream) AudioReader() io.ReadCloser {
+	return s.pr
+}
+
+func (s *mockSynthesisStream) Abort() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.aborted {
+		return
+	}
+	s.aborted = true
+	_ = s.pw.CloseWithError(errors.New("aborted"))
+}
+
+func (s *mockSynthesisStream) SentenceBoundaries() <-chan tts.SentenceBoundary {
+	return nil // no sentence-boundary support in mock
+}
+
+type mockStreamingProvider struct {
+	finishDelay time.Duration
+}
+
+func (p *mockStreamingProvider) Synthesize(_ context.Context, text string, _ tts.SynthesisOptions) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader(text)), nil
+}
+
+func (p *mockStreamingProvider) StartSynthesis(_ context.Context, _ tts.SynthesisOptions) (tts.SynthesisStream, error) {
+	return newMockSynthesisStream(p.finishDelay), nil
 }
 
 // --- helpers ---
@@ -306,7 +371,7 @@ func TestTTSProcessorPlaybackOrder(t *testing.T) {
 	defer mu.Unlock()
 
 	if len(order) != 2 {
-		t.Fatalf("expected 2 chunks, got %d", len(order))
+		t.Fatalf("expected 2 chunks, got %d (%v)", len(order), order)
 	}
 	if order[0] != "First." || order[1] != "Second." {
 		t.Errorf("wrong playback order: %v", order)
@@ -420,6 +485,117 @@ func TestSentenceSplitter_Flush(t *testing.T) {
 	}
 	if s.flush() != "" {
 		t.Error("second flush should return empty")
+	}
+}
+
+// TestTTSProcessorFinalChunk_Batch 验证 batch 路径下 Flush 后最终收到 Final
+// chunk，且它排在所有真实音频 chunk 之后、payload 为空。
+func TestTTSProcessorFinalChunk_Batch(t *testing.T) {
+	proc := newTestTTSProcessor(newMockTTSProvider())
+
+	var mu sync.Mutex
+	var chunks []TTSChunk
+	proc.OnChunk(func(c TTSChunk) {
+		mu.Lock()
+		chunks = append(chunks, c)
+		mu.Unlock()
+	})
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	_ = proc.Write("第一句。第二句。", defaultOpts)
+	time.Sleep(100 * time.Millisecond)
+	if err := proc.Flush(defaultOpts); err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+
+	if !waitForFinalChunk(&mu, &chunks, time.Second) {
+		t.Fatal("timeout waiting for Final chunk")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(chunks) < 3 { // 2 句真实音频 + 1 个 Final
+		t.Fatalf("expected at least 3 chunks (2 audio + final), got %d", len(chunks))
+	}
+	last := chunks[len(chunks)-1]
+	if !last.Final {
+		t.Fatal("expected last chunk to be Final")
+	}
+	if last.Audio != nil || last.Text != "" {
+		t.Errorf("Final chunk should have empty payload, got text=%q audio_len=%d", last.Text, len(last.Audio))
+	}
+	for i, c := range chunks[:len(chunks)-1] {
+		if c.Final {
+			t.Errorf("chunk[%d] unexpectedly marked Final", i)
+		}
+	}
+}
+
+// TestTTSProcessorFinalChunk_Streaming 验证 streaming 路径下 Final chunk 不会
+// 早于 stream 真实结束——stream.Finish() 是异步的，handleFlush 必须等待
+// playAudio 读到 EOF 才能发出 Final。
+func TestTTSProcessorFinalChunk_Streaming(t *testing.T) {
+	provider := &mockStreamingProvider{finishDelay: 150 * time.Millisecond}
+	proc := newTestTTSProcessor(provider)
+
+	var mu sync.Mutex
+	var chunks []TTSChunk
+	var finalAt time.Time
+	proc.OnChunk(func(c TTSChunk) {
+		mu.Lock()
+		chunks = append(chunks, c)
+		if c.Final {
+			finalAt = time.Now()
+		}
+		mu.Unlock()
+	})
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	_ = proc.Write("流式第一句。", defaultOpts)
+	time.Sleep(50 * time.Millisecond)
+
+	flushStart := time.Now()
+	if err := proc.Flush(defaultOpts); err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+
+	if !waitForFinalChunk(&mu, &chunks, 2*time.Second) {
+		t.Fatal("timeout waiting for Final chunk")
+	}
+
+	mu.Lock()
+	elapsed := finalAt.Sub(flushStart)
+	mu.Unlock()
+	if elapsed < provider.finishDelay {
+		t.Errorf("Final chunk arrived too early: elapsed=%v, want >= %v", elapsed, provider.finishDelay)
+	}
+}
+
+// waitForFinalChunk 轮询 chunks 直到出现 Final chunk 或超时。
+func waitForFinalChunk(mu *sync.Mutex, chunks *[]TTSChunk, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	for {
+		mu.Lock()
+		for _, c := range *chunks {
+			if c.Final {
+				mu.Unlock()
+				return true
+			}
+		}
+		mu.Unlock()
+		select {
+		case <-deadline:
+			return false
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 

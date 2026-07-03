@@ -368,15 +368,147 @@ func TestASRProcessorContextCancel(t *testing.T) {
 	_ = proc.Stop()
 }
 
-// TestASRProcessorRecognizerStartError verifies that Start returns a wrapped
-// error when the underlying recognizer fails to start (VAD disabled path).
+// TestASRProcessorRecognizerStartError verifies that BeginTurn (not Start)
+// returns a wrapped error when the underlying recognizer fails to start
+// (manual mode, VAD disabled): the recognizer task is now deferred until
+// BeginTurn, so Start itself should succeed.
 func TestASRProcessorRecognizerStartError(t *testing.T) {
 	r := newMockRecognizer()
 	r.startErr = fmt.Errorf("connection refused")
 
 	proc, _ := NewASRProcessor(newTestASRConfig(r))
-	if err := proc.Start(context.Background()); err == nil {
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start should succeed (recognizer task deferred to BeginTurn): %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	if err := proc.BeginTurn(context.Background()); err == nil {
 		t.Fatal("expected error when recognizer.Start fails")
+	}
+}
+
+// TestASRProcessorWrite_NoActiveTurn verifies Write silently drops audio (no
+// error, no SendAudio call) in manual mode before BeginTurn / after EndTurn,
+// instead of propagating an error that would trip up callers like
+// ASRStage.readFromSource.
+func TestASRProcessorWrite_NoActiveTurn(t *testing.T) {
+	r := newMockRecognizer()
+	proc, _ := NewASRProcessor(newTestASRConfig(r))
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	if err := proc.Write(make([]byte, 320)); err != nil {
+		t.Fatalf("Write without BeginTurn should not error: %v", err)
+	}
+	if r.getSendAudioCount() != 0 {
+		t.Fatalf("expected no SendAudio calls without an active turn, got %d", r.getSendAudioCount())
+	}
+}
+
+// TestASRProcessorBeginEndTurn_MultipleRounds verifies manual mode supports
+// repeated BeginTurn -> Write -> EndTurn cycles over the same processor,
+// reusing the underlying recognizer connection (Start/Finish called once per
+// round, never Close in between).
+func TestASRProcessorBeginEndTurn_MultipleRounds(t *testing.T) {
+	r := newMockRecognizer()
+	proc, _ := NewASRProcessor(newTestASRConfig(r))
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	ctx := context.Background()
+	for round := 1; round <= 3; round++ {
+		if err := proc.BeginTurn(ctx); err != nil {
+			t.Fatalf("round %d: BeginTurn failed: %v", round, err)
+		}
+		if err := proc.Write(make([]byte, 320)); err != nil {
+			t.Fatalf("round %d: Write failed: %v", round, err)
+		}
+		if err := proc.EndTurn(ctx); err != nil {
+			t.Fatalf("round %d: EndTurn failed: %v", round, err)
+		}
+	}
+
+	r.mu.Lock()
+	startCalls, finishCalls, sendCalls := r.startCalls, r.finishCalls, len(r.sendAudioCalls)
+	r.mu.Unlock()
+
+	if startCalls != 3 {
+		t.Errorf("expected 3 recognizer.Start calls, got %d", startCalls)
+	}
+	if finishCalls != 3 {
+		t.Errorf("expected 3 recognizer.Finish calls, got %d", finishCalls)
+	}
+	if sendCalls != 3 {
+		t.Errorf("expected 3 SendAudio calls (one per round), got %d", sendCalls)
+	}
+}
+
+// TestASRProcessorBeginTurn_RecoversUnfinishedTurn verifies that calling
+// BeginTurn again without a matching EndTurn first finishes the stale turn
+// (so the underlying recognizer doesn't reject Start with "already started").
+func TestASRProcessorBeginTurn_RecoversUnfinishedTurn(t *testing.T) {
+	r := newMockRecognizer()
+	proc, _ := NewASRProcessor(newTestASRConfig(r))
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	ctx := context.Background()
+	if err := proc.BeginTurn(ctx); err != nil {
+		t.Fatalf("first BeginTurn failed: %v", err)
+	}
+	// 故意不调用 EndTurn，直接再次 BeginTurn。
+	if err := proc.BeginTurn(ctx); err != nil {
+		t.Fatalf("second BeginTurn (recovering stale turn) failed: %v", err)
+	}
+
+	r.mu.Lock()
+	startCalls, finishCalls := r.startCalls, r.finishCalls
+	r.mu.Unlock()
+
+	if startCalls != 2 {
+		t.Errorf("expected 2 recognizer.Start calls, got %d", startCalls)
+	}
+	if finishCalls != 1 {
+		t.Errorf("expected 1 recognizer.Finish call (recovering stale turn), got %d", finishCalls)
+	}
+}
+
+// TestASRProcessorBeginEndTurn_NoopWhenVADEnabled verifies BeginTurn/EndTurn
+// are no-ops when EnableVAD=true, since VAD manages turn boundaries
+// automatically.
+func TestASRProcessorBeginEndTurn_NoopWhenVADEnabled(t *testing.T) {
+	r := newMockRecognizer()
+	seg := &mockSegmenter{}
+	proc := newTestASRProcessorWithVAD(r, seg)
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	ctx := context.Background()
+	if err := proc.BeginTurn(ctx); err != nil {
+		t.Fatalf("BeginTurn should be a no-op, got error: %v", err)
+	}
+	if err := proc.EndTurn(ctx); err != nil {
+		t.Fatalf("EndTurn should be a no-op, got error: %v", err)
+	}
+
+	r.mu.Lock()
+	startCalls, finishCalls := r.startCalls, r.finishCalls
+	r.mu.Unlock()
+
+	if startCalls != 0 || finishCalls != 0 {
+		t.Errorf("expected no recognizer Start/Finish calls in VAD mode, got start=%d finish=%d", startCalls, finishCalls)
 	}
 }
 
