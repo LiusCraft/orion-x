@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { voicebotApi, deviceApi, type Device } from '@/lib/api'
+import { voicebotApi, deviceApi, languageApi, availableResourcesApi, modelApi, type Device, type Language, type AvailableResources, type AIModel } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
+import { ChevronLeft, Plus, Trash2, Play } from 'lucide-react'
+import QuickChat from './QuickChat'
 
 interface MCPServer {
   id: string
@@ -21,43 +21,68 @@ interface MCPServer {
 }
 
 interface BotConfig {
-  provider: {
-    llm: { openai: { api_key: string; base_url: string; model: string } }
-    asr: { aliyun: { api_key: string; model: string; endpoint: string } }
-    tts: { aliyun: {
-      api_key: string; endpoint: string; model: string; voice: string
-      volume: number; rate: number; pitch: number
-      voice_map: Record<string, string>
-    }}
-  }
-  audio: { in_pipe: { enable_vad: boolean; vad_threshold: number; vad_min_silence_ms: number; vad_speech_pad_ms: number; sample_rate: number } }
-  tools: { mcp: MCPServer[] }
+  language: string
+  asr: { model_id: string; vad_mode: string; vad_threshold: number; vad_min_silence_ms: number; vad_speech_pad_ms: number }
+  tts: { model_id: string; voice_id: string; volume: number; rate: number; pitch: number }
+  llm: { model_id: string; prompt: string }
+  audio: { sample_rate: number }
   memory: { mode: string; session_max_turns: number; session_summary_every_n: number; long_term_db_path: string; long_term_max_results: number; retention_days: number }
+  mcp: MCPServer[]
 }
 
 const DC: BotConfig = {
-  provider: {
-    llm: { openai: { api_key: '', base_url: 'https://open.bigmodel.cn/api/coding/paas/v4', model: 'glm-4-flash' } },
-    asr: { aliyun: { api_key: '', model: 'fun-asr-realtime', endpoint: 'wss://dashscope.aliyuncs.com/api-ws/v1/inference' } },
-    tts: { aliyun: { api_key: '', endpoint: 'wss://dashscope.aliyuncs.com/api-ws/v1/inference', model: 'cosyvoice-v3-flash', voice: 'longanyang', volume: 50, rate: 1.0, pitch: 1.0, voice_map: { happy: 'longanyang', sad: 'zhichu', angry: 'zhimeng', calm: 'longxiaochun', excited: 'longanyang', default: 'longanyang' } } },
-  },
-  audio: { in_pipe: { enable_vad: true, vad_threshold: 0.5, vad_min_silence_ms: 500, vad_speech_pad_ms: 300, sample_rate: 16000 } },
-  tools: { mcp: [] },
+  language: 'zh-CN',
+  asr: { model_id: '', vad_mode: 'auto', vad_threshold: 0.5, vad_min_silence_ms: 500, vad_speech_pad_ms: 300 },
+  tts: { model_id: '', voice_id: '', volume: 50, rate: 1.0, pitch: 1.0 },
+  llm: { model_id: '' },
+  audio: { sample_rate: 16000 },
   memory: { mode: 'session', session_max_turns: 10, session_summary_every_n: 20, long_term_db_path: 'data/memory.db', long_term_max_results: 6, retention_days: 365 },
+  mcp: [],
 }
+
+const EMOTIONS = ['happy', 'sad', 'angry', 'calm', 'excited'] as const
+const EMOTION_LABELS: Record<string, string> = { happy: '开心', sad: '悲伤', angry: '生气', calm: '平静', excited: '兴奋' }
+
+const VAD_MODES = [
+  { value: 'realtime', label: '实时模式', desc: '持续监听，需要 AEC 支持' },
+  { value: 'auto', label: '自动模式', desc: 'VAD 检测语音边界，自动停止' },
+  { value: 'manual', label: '手动模式', desc: '客户端发送开始/停止信号' },
+]
 
 function parseCfg(json: string): BotConfig {
   try {
     const c = JSON.parse(json)
+    if (c.asr?.model_id || c.llm?.model_id) {
+      return {
+        language: c.language || DC.language,
+        asr: { ...DC.asr, ...c.asr },
+        tts: { ...DC.tts, ...c.tts },
+        llm: { ...DC.llm, ...c.llm },
+        audio: { ...DC.audio, ...c.audio },
+        memory: { ...DC.memory, ...c.memory },
+        mcp: Array.isArray(c.mcp) ? c.mcp : [],
+      }
+    }
     return {
-      provider: {
-        llm: { openai: { ...DC.provider.llm.openai, ...c?.provider?.llm?.openai } },
-        asr: { aliyun: { ...DC.provider.asr.aliyun, ...c?.provider?.asr?.aliyun } },
-        tts: { aliyun: { ...DC.provider.tts.aliyun, ...c?.provider?.tts?.aliyun } },
+      language: DC.language,
+      asr: {
+        model_id: '',
+        vad_mode: c.audio?.in_pipe?.enable_vad === false ? 'manual' : 'auto',
+        vad_threshold: c.audio?.in_pipe?.vad_threshold ?? DC.asr.vad_threshold,
+        vad_min_silence_ms: c.audio?.in_pipe?.vad_min_silence_ms ?? DC.asr.vad_min_silence_ms,
+        vad_speech_pad_ms: c.audio?.in_pipe?.vad_speech_pad_ms ?? DC.asr.vad_speech_pad_ms,
       },
-      audio: { in_pipe: { ...DC.audio.in_pipe, ...c?.audio?.in_pipe } },
-      tools: { mcp: Array.isArray(c?.tools?.mcp) ? c.tools.mcp : [] },
-      memory: { ...DC.memory, ...c?.memory },
+      tts: {
+        model_id: '',
+        voice_id: c.provider?.tts?.aliyun?.voice ?? DC.tts.voice_id,
+        volume: c.provider?.tts?.aliyun?.volume ?? DC.tts.volume,
+        rate: c.provider?.tts?.aliyun?.rate ?? DC.tts.rate,
+        pitch: c.provider?.tts?.aliyun?.pitch ?? DC.tts.pitch,
+      },
+  llm: { model_id: '', prompt: '' },
+      audio: { sample_rate: c.audio?.in_pipe?.sample_rate ?? DC.audio.sample_rate },
+      memory: { ...DC.memory, ...c.memory },
+      mcp: Array.isArray(c.tools?.mcp) ? c.tools.mcp : [],
     }
   } catch { return structuredClone(DC) }
 }
@@ -76,6 +101,7 @@ const inp = 'bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-600 fo
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+
   const [name, setName] = useState('')
   const [cfg, setCfg] = useState<BotConfig>(structuredClone(DC))
   const [devices, setDevices] = useState<Device[]>([])
@@ -83,6 +109,15 @@ export default function AgentDetailPage() {
   const [saving, setSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'ok' | 'err'>('idle')
   const [saveErr, setSaveErr] = useState('')
+
+  const [languages, setLanguages] = useState<Language[]>([])
+  const [resources, setResources] = useState<AvailableResources | null>(null)
+  const [llmModels, setLlmModels] = useState<AIModel[]>([])
+  const [voiceNameFilter, setVoiceNameFilter] = useState('')
+  const [voiceGenderFilter, setVoiceGenderFilter] = useState('')
+  const [voiceTagFilter, setVoiceTagFilter] = useState('')
+
+  // Dialog states
   const [mcpOpen, setMcpOpen] = useState(false)
   const [newMcp, setNewMcp] = useState<MCPServer>({ id: '', transport: 'stdio', command: '', args: [], endpoint: '', tool_name_list: [], timeout_ms: 30000 })
   const [mcpArgsStr, setMcpArgsStr] = useState('')
@@ -93,23 +128,65 @@ export default function AgentDetailPage() {
   const [devAdding, setDevAdding] = useState(false)
   const [devErr, setDevErr] = useState('')
 
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [splitPct, setSplitPct] = useState(50)
+  const dragging = useRef(false)
+
   useEffect(() => {
     if (!id) return
-    Promise.all([voicebotApi.get(id), deviceApi.list(id)]).then(([b, d]) => {
-      setName(b.data.name); setCfg(parseCfg(b.data.config_json)); setDevices(d.data)
-    }).finally(() => setLoading(false))
+    ;(async () => {
+      const [b, d, langs, llm] = await Promise.all([
+        voicebotApi.get(id), deviceApi.list(id), languageApi.list(), modelApi.list(),
+      ])
+      const parsed = parseCfg(b.data.config_json)
+      setName(b.data.name); setCfg(parsed); setDevices(d.data)
+      setLanguages(langs.data); setLlmModels(llm.data)
+
+      const res = await availableResourcesApi.list(parsed.language || undefined)
+      setResources(res.data)
+
+      setLoading(false)
+    })()
   }, [id])
 
-  const setLlm = (p: Partial<BotConfig['provider']['llm']['openai']>) =>
-    setCfg(c => ({ ...c, provider: { ...c.provider, llm: { openai: { ...c.provider.llm.openai, ...p } } } }))
-  const setAsr = (p: Partial<BotConfig['provider']['asr']['aliyun']>) =>
-    setCfg(c => ({ ...c, provider: { ...c.provider, asr: { aliyun: { ...c.provider.asr.aliyun, ...p } } } }))
-  const setTts = (p: Partial<BotConfig['provider']['tts']['aliyun']>) =>
-    setCfg(c => ({ ...c, provider: { ...c.provider, tts: { aliyun: { ...c.provider.tts.aliyun, ...p } } } }))
-  const setInPipe = (p: Partial<BotConfig['audio']['in_pipe']>) =>
-    setCfg(c => ({ ...c, audio: { in_pipe: { ...c.audio.in_pipe, ...p } } }))
-  const setMem = (p: Partial<BotConfig['memory']>) =>
-    setCfg(c => ({ ...c, memory: { ...c.memory, ...p } }))
+  // Re-fetch resources when language changes (skip first load)
+  useEffect(() => {
+    if (id && resources) {
+      availableResourcesApi.list(cfg.language || undefined).then(r => setResources(r.data))
+    }
+  }, [cfg.language])
+
+  const setAsr = (p: Partial<BotConfig['asr']>) => setCfg(c => ({ ...c, asr: { ...c.asr, ...p } }))
+  const setTts = (p: Partial<BotConfig['tts']>) => setCfg(c => ({ ...c, tts: { ...c.tts, ...p } }))
+  const setLlm = (p: Partial<BotConfig['llm']>) => setCfg(c => ({ ...c, llm: { ...c.llm, ...p } }))
+  const setMem = (p: Partial<BotConfig['memory']>) => setCfg(c => ({ ...c, memory: { ...c.memory, ...p } }))
+
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault(); dragging.current = true
+    const startX = e.clientX
+    const startPct = splitPct
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging.current || !containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      let pct = startPct + ((ev.clientX - startX) / rect.width) * 100
+      pct = Math.max(30, Math.min(70, pct))
+      setSplitPct(pct)
+    }
+    const onUp = () => { dragging.current = false; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [splitPct])
+
+  const asrModels = resources?.asr ?? []
+  const llmTypes = new Set(['text', 'vision', 'multimodal'])
+
+  const allVoiceTags = [...new Set((resources?.voices ?? []).flatMap(v => v.tags || []))].sort()
+  const filteredVoices = (resources?.voices ?? []).filter(v => {
+    if (voiceNameFilter && !v.name.toLowerCase().includes(voiceNameFilter.toLowerCase())) return false
+    if (voiceGenderFilter && v.gender !== voiceGenderFilter) return false
+    if (voiceTagFilter && !(v.tags || []).includes(voiceTagFilter)) return false
+    return true
+  })
 
   const handleSave = async () => {
     if (!id) return
@@ -124,7 +201,7 @@ export default function AgentDetailPage() {
   }
 
   const handleAddMcp = () => {
-    setCfg(c => ({ ...c, tools: { mcp: [...c.tools.mcp, { ...newMcp, args: mcpArgsStr.trim() ? mcpArgsStr.split(/\s+/) : [], tool_name_list: mcpToolsStr.trim() ? mcpToolsStr.split(',').map(s => s.trim()).filter(Boolean) : [] }] } }))
+    setCfg(c => ({ ...c, mcp: [...c.mcp, { ...newMcp, args: mcpArgsStr.trim() ? mcpArgsStr.split(/\s+/) : [], tool_name_list: mcpToolsStr.trim() ? mcpToolsStr.split(',').map(s => s.trim()).filter(Boolean) : [] }] }))
     setMcpOpen(false)
     setNewMcp({ id: '', transport: 'stdio', command: '', args: [], endpoint: '', tool_name_list: [], timeout_ms: 30000 })
     setMcpArgsStr(''); setMcpToolsStr('')
@@ -148,17 +225,13 @@ export default function AgentDetailPage() {
     setDevices(prev => prev.filter(d => d.id !== devId))
   }
 
+  const asr = cfg.asr; const tts = cfg.tts; const llm = cfg.llm; const mem = cfg.memory
+
   if (loading) return (
     <div className="flex items-center justify-center py-32">
       <div className="w-5 h-5 border-2 border-zinc-700 border-t-violet-500 rounded-full animate-spin" />
     </div>
   )
-
-  const llm = cfg.provider.llm.openai
-  const asr = cfg.provider.asr.aliyun
-  const tts = cfg.provider.tts.aliyun
-  const ip = cfg.audio.in_pipe
-  const mem = cfg.memory
 
   return (
     <div className="min-h-full">
@@ -180,11 +253,12 @@ export default function AgentDetailPage() {
         </div>
       </div>
 
-      <div className="px-8 py-6">
-        <Tabs defaultValue="llm">
+      <div ref={containerRef} className="flex h-[calc(100vh-61px)]">
+        <div className="overflow-y-auto px-8 py-6 min-w-0" style={{ width: `${splitPct}%` }}>
+          <Tabs defaultValue="basic">
           <TabsList className="bg-zinc-900 border border-zinc-800 mb-6 h-auto flex-wrap gap-0.5 p-1">
-            {(['基本', 'LLM', 'ASR', 'TTS', '音频', '记忆', 'MCP', '设备'] as const).map((t, i) => (
-              <TabsTrigger key={t} value={['basic','llm','asr','tts','audio','memory','mcp','devices'][i]}
+            {(['基本', '语音识别', '语音合成', '记忆', 'MCP', '设备'] as const).map((t, i) => (
+              <TabsTrigger key={t} value={['basic', 'asr', 'tts', 'memory', 'mcp', 'devices'][i]}
                 className="data-[state=active]:bg-zinc-700 data-[state=active]:text-white text-zinc-400 text-sm h-8">{t}</TabsTrigger>
             ))}
           </TabsList>
@@ -194,105 +268,240 @@ export default function AgentDetailPage() {
             <Field label="智能体名称">
               <Input value={name} onChange={e => setName(e.target.value)} className={inp} />
             </Field>
-          </TabsContent>
-
-          {/* ── LLM ── */}
-          <TabsContent value="llm" className="space-y-5 pt-1">
-            <Field label="API Key">
-              <Input value={llm.api_key} onChange={e => setLlm({ api_key: e.target.value })} type="password" placeholder="sk-..." className={inp} />
+            <Field label="角色提示词">
+              <textarea value={llm.prompt} onChange={e => setLlm({ prompt: e.target.value })}
+                placeholder="设置智能体的角色、行为规范、回答风格等..."
+                className="bg-zinc-800 border border-zinc-700 text-white placeholder:text-zinc-600 focus-visible:ring-violet-500 rounded-lg px-3 py-2 text-sm w-full resize-none h-24" />
             </Field>
-            <Field label="Base URL">
-              <Input value={llm.base_url} onChange={e => setLlm({ base_url: e.target.value })} placeholder="https://..." className={inp} />
-            </Field>
-            <Field label="模型">
-              <Input value={llm.model} onChange={e => setLlm({ model: e.target.value })} placeholder="glm-4-flash" className={inp} />
-            </Field>
+            <div className="flex flex-wrap gap-4">
+              <div className="shrink-0">
+                <Field label="语言">
+                  <Select value={cfg.language} onValueChange={v => setCfg(c => ({ ...c, language: v }))}>
+                <SelectTrigger>
+                  <span className="text-left flex-1 truncate">
+                    {languages.find(l => l.code === cfg.language)?.name || cfg.language}
+                  </span>
+                </SelectTrigger>
+                <SelectContent className="max-h-60">
+                      {languages.map(l => (
+                        <SelectItem key={l.code} value={l.code}>{l.name} ({l.code})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+              <div className="shrink-0">
+                <Field label="聊天模型">
+                  <Select value={llm.model_id} onValueChange={v => setLlm({ model_id: v })}>
+                    <SelectTrigger>
+                      <span className="text-left flex-1 truncate">
+                        {llmModels.filter(m => llmTypes.has(m.type)).find(m => m.id === llm.model_id)?.name || <span className="text-zinc-500">选择模型</span>}
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {llmModels.filter(m => llmTypes.has(m.type)).map(m => (
+                        <SelectItem key={m.id} value={m.id}>
+                          <span>{m.name}</span>
+                          <span className="text-zinc-500 ml-2 text-xs">{m.provider?.name}</span>
+                        </SelectItem>
+                      ))}
+                      {llmModels.filter(m => llmTypes.has(m.type)).length === 0 && (
+                        <div className="px-2 py-3 text-xs text-zinc-500 text-center">暂无可用的聊天模型</div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+            </div>
           </TabsContent>
 
           {/* ── ASR ── */}
           <TabsContent value="asr" className="space-y-5 pt-1">
-            <Field label="API Key">
-              <Input value={asr.api_key} onChange={e => setAsr({ api_key: e.target.value })} type="password" placeholder="Dashscope API Key" className={inp} />
+            <Field label="语音识别模型">
+              <Select value={asr.model_id} onValueChange={v => setAsr({ model_id: v })}>
+                <SelectTrigger>
+                  <span className="text-left flex-1 truncate">
+                    {asrModels.find(m => m.id === asr.model_id)?.name || <span className="text-zinc-500">选择语音识别模型</span>}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  {asrModels.map(m => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name}
+                    </SelectItem>
+                  ))}
+                  {asrModels.length === 0 && (
+                    <div className="px-2 py-3 text-xs text-zinc-500 text-center">暂无可用的语音识别模型</div>
+                  )}
+                </SelectContent>
+              </Select>
             </Field>
-            <Field label="模型">
-              <Input value={asr.model} onChange={e => setAsr({ model: e.target.value })} placeholder="fun-asr-realtime" className={inp} />
-            </Field>
-            <Field label="Endpoint">
-              <Input value={asr.endpoint} onChange={e => setAsr({ endpoint: e.target.value })} placeholder="wss://..." className={inp} />
-            </Field>
+
+            <div className="border-t border-zinc-800 pt-4">
+              <Label className="text-xs text-zinc-400 uppercase tracking-wide mb-3 block">监听模式</Label>
+              <div className="space-y-2">
+                {VAD_MODES.map(mode => (
+                  <label key={mode.value}
+                    className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors
+                      ${asr.vad_mode === mode.value ? 'border-violet-500 bg-violet-500/10' : 'border-zinc-800 bg-zinc-900 hover:border-zinc-700'}`}
+                    onClick={() => setAsr({ vad_mode: mode.value })}>
+                    <div className={`w-4 h-4 mt-0.5 rounded-full border-2 shrink-0 flex items-center justify-center
+                      ${asr.vad_mode === mode.value ? 'border-violet-500' : 'border-zinc-600'}`}>
+                      {asr.vad_mode === mode.value && <div className="w-2 h-2 rounded-full bg-violet-500" />}
+                    </div>
+                    <div>
+                      <p className="text-sm text-white font-medium">{mode.label}</p>
+                      <p className="text-xs text-zinc-500 mt-0.5">{mode.desc}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {asr.vad_mode !== 'manual' && (
+              <div className="border-t border-zinc-800 pt-4 space-y-4">
+                <Field label={`活动检测阈值 (${asr.vad_threshold.toFixed(2)})`}>
+                  <input type="range" min={0} max={1} step={0.05} value={asr.vad_threshold}
+                    onChange={e => setAsr({ vad_threshold: +e.target.value })}
+                    className="w-full accent-violet-500" />
+                  <div className="flex justify-between text-[10px] text-zinc-600 -mt-1">
+                    <span>0 (低灵敏度)</span>
+                    <span>1 (高灵敏度)</span>
+                  </div>
+                </Field>
+                {asr.vad_mode === 'auto' && (
+                  <div className="flex flex-wrap gap-4">
+                    <Field label="最小静音时长 (ms)">
+                      <Input type="number" min={0} value={asr.vad_min_silence_ms}
+                        onChange={e => setAsr({ vad_min_silence_ms: +e.target.value })} className={inp} />
+                    </Field>
+                    <Field label="语音填充 (ms)">
+                      <Input type="number" min={0} value={asr.vad_speech_pad_ms}
+                        onChange={e => setAsr({ vad_speech_pad_ms: +e.target.value })} className={inp} />
+                    </Field>
+                  </div>
+                )}
+              </div>
+            )}
           </TabsContent>
 
           {/* ── TTS ── */}
           <TabsContent value="tts" className="space-y-5 pt-1">
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="API Key">
-                <Input value={tts.api_key} onChange={e => setTts({ api_key: e.target.value })} type="password" placeholder="Dashscope API Key" className={inp} />
-              </Field>
-              <Field label="Endpoint">
-                <Input value={tts.endpoint} onChange={e => setTts({ endpoint: e.target.value })} placeholder="wss://..." className={inp} />
-              </Field>
-              <Field label="模型">
-                <Input value={tts.model} onChange={e => setTts({ model: e.target.value })} placeholder="cosyvoice-v3-flash" className={inp} />
-              </Field>
-              <Field label="默认音色">
-                <Input value={tts.voice} onChange={e => setTts({ voice: e.target.value })} placeholder="longanyang" className={inp} />
-              </Field>
-              <Field label="音量 (0-100)">
-                <Input type="number" min={0} max={100} value={tts.volume} onChange={e => setTts({ volume: +e.target.value })} className={inp} />
-              </Field>
-              <Field label="语速 (0.5-2.0)">
-                <Input type="number" min={0.5} max={2} step={0.1} value={tts.rate} onChange={e => setTts({ rate: +e.target.value })} className={inp} />
-              </Field>
-              <Field label="音调 (0.5-2.0)">
-                <Input type="number" min={0.5} max={2} step={0.1} value={tts.pitch} onChange={e => setTts({ pitch: +e.target.value })} className={inp} />
-              </Field>
-            </div>
-            <div className="space-y-2 pt-1">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-zinc-400 uppercase tracking-wide">情绪音色映射</Label>
-                <Button size="sm" variant="outline" className="h-7 px-2 text-xs border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-                  onClick={() => setTts({ voice_map: { ...tts.voice_map, '': '' } })}>
-                  <Plus className="w-3 h-3 mr-1" />新增
-                </Button>
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <Label className="text-xs text-zinc-400 uppercase tracking-wide">
+                  音色列表
+                  <span className="text-zinc-600 ml-1 font-normal normal-case">({resources?.voices.length ?? 0})</span>
+                </Label>
+                {tts.voice_id && (
+                  <span className="text-[11px] text-violet-400">当前选中: {resources?.voices.find(v => v.id === tts.voice_id)?.name}</span>
+                )}
               </div>
-              {Object.entries(tts.voice_map).map(([emotion, voice], idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <Input value={emotion} placeholder="情绪 (happy...)" className={`${inp} flex-1`}
-                    onChange={e => { const m = { ...tts.voice_map }; delete m[emotion]; setTts({ voice_map: { ...m, [e.target.value]: voice } }) }} />
-                  <Input value={voice} placeholder="音色名称" className={`${inp} flex-1`}
-                    onChange={e => setTts({ voice_map: { ...tts.voice_map, [emotion]: e.target.value } })} />
-                  <button onClick={() => { const m = { ...tts.voice_map }; delete m[emotion]; setTts({ voice_map: m }) }}
-                    className="text-zinc-600 hover:text-red-400 transition-colors p-1.5">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+
+              {resources?.voices && resources.voices.length > 0 && <>
+                <div className="flex gap-2 mb-3">
+                  <input type="text" value={voiceNameFilter} onChange={e => setVoiceNameFilter(e.target.value)}
+                    placeholder="搜索音色..."
+                    className="bg-zinc-800 border border-zinc-700 text-white placeholder:text-zinc-500 rounded-lg px-2.5 py-1.5 text-xs flex-1 min-w-0 focus:outline-none focus:border-violet-500 transition-colors" />
+                  <select value={voiceGenderFilter} onChange={e => setVoiceGenderFilter(e.target.value)}
+                    className="bg-zinc-800 border border-zinc-700 text-white rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-violet-500">
+                    <option value="">全部性别</option>
+                    <option value="female">女声</option>
+                    <option value="male">男声</option>
+                    <option value="neutral">中性</option>
+                  </select>
+                  <select value={voiceTagFilter} onChange={e => setVoiceTagFilter(e.target.value)}
+                    className="bg-zinc-800 border border-zinc-700 text-white rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-violet-500">
+                    <option value="">全部标签</option>
+                    {allVoiceTags.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
                 </div>
-              ))}
+
+                {filteredVoices.length === 0 ? (
+                  <div className="text-center py-10 border border-dashed border-zinc-800 rounded-xl">
+                    <p className="text-zinc-500 text-sm">没有匹配的音色</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {filteredVoices.map(v => {
+                      const isSelected = tts.voice_id === v.id
+                      const emoMap = v.emotions as Record<string, unknown> | null
+                      return (
+                        <div key={v.id}
+                          className={`relative rounded-xl border p-4 cursor-pointer transition-all
+                            ${isSelected ? 'border-violet-500 bg-violet-500/10 shadow-sm shadow-violet-500/20' : 'border-zinc-800 bg-zinc-900 hover:border-zinc-700'}`}
+                          onClick={() => setTts({ voice_id: v.id })}>
+                          <div className="flex items-start justify-between">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-white truncate">{v.name}</p>
+                            </div>
+                            {v.gender && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0
+                                ${v.gender === 'female' ? 'bg-pink-500/20 text-pink-300' :
+                                  v.gender === 'male' ? 'bg-blue-500/20 text-blue-300' : 'bg-zinc-700 text-zinc-400'}`}>
+                                {v.gender === 'female' ? '女声' : v.gender === 'male' ? '男声' : '中性'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {EMOTIONS.map(em => {
+                              const supported = emoMap ? (em in emoMap) : false
+                              return (
+                                <span key={em}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded border
+                                    ${supported
+                                      ? 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                                      : 'bg-transparent border-zinc-800 text-zinc-700'}`}>
+                                  {EMOTION_LABELS[em]}
+                                </span>
+                              )
+                            })}
+                          </div>
+                          {v.preview_url && (
+                            <button onClick={e => { e.stopPropagation(); new Audio(v.preview_url).play() }}
+                              className="mt-2 text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1">
+                              <Play className="w-3 h-3" />试听
+                            </button>
+                          )}
+                          {isSelected && (
+                            <div className="absolute bottom-2 right-2 w-5 h-5 rounded-full bg-violet-600 flex items-center justify-center">
+                              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </>}
+
+              {(!resources?.voices || resources.voices.length === 0) && (
+                <div className="text-center py-10 border border-dashed border-zinc-800 rounded-xl">
+                  <p className="text-zinc-500 text-sm">当前语言下没有可用的音色</p>
+                </div>
+              )}
             </div>
-          </TabsContent>
-          {/* ── 音频/VAD ── */}
-          <TabsContent value="audio" className="space-y-5 pt-1">
-            <Field label="采样率 (Hz)">
-              <Input type="number" value={ip.sample_rate} onChange={e => setInPipe({ sample_rate: +e.target.value })} className={inp} />
-            </Field>
-            <div className="flex items-center gap-3">
-              <Switch checked={ip.enable_vad} onCheckedChange={v => setInPipe({ enable_vad: v })}
-                className="data-[state=checked]:bg-violet-600" />
-              <Label className="text-sm text-zinc-300 cursor-pointer">启用 VAD 端点检测</Label>
-            </div>
-            {ip.enable_vad && (
-              <div className="grid grid-cols-2 gap-4 pl-3 border-l border-zinc-800">
-                <Field label="检测阈值 (0-1)">
-                  <Input type="number" min={0} max={1} step={0.05} value={ip.vad_threshold}
-                    onChange={e => setInPipe({ vad_threshold: +e.target.value })} className={inp} />
-                </Field>
-                <Field label="最小静音时长 (ms)">
-                  <Input type="number" min={0} value={ip.vad_min_silence_ms}
-                    onChange={e => setInPipe({ vad_min_silence_ms: +e.target.value })} className={inp} />
-                </Field>
-                <Field label="语音填充 (ms)">
-                  <Input type="number" min={0} value={ip.vad_speech_pad_ms}
-                    onChange={e => setInPipe({ vad_speech_pad_ms: +e.target.value })} className={inp} />
-                </Field>
+
+            {tts.voice_id && (
+              <div className="border-t border-zinc-800 pt-4 space-y-4">
+                <Label className="text-xs text-zinc-400 uppercase tracking-wide block">合成参数</Label>
+                <div className="grid grid-cols-3 gap-4">
+                  <Field label={`语速 (${tts.rate.toFixed(1)})`}>
+                    <input type="range" min={0.5} max={2} step={0.1} value={tts.rate}
+                      onChange={e => setTts({ rate: +e.target.value })}
+                      className="w-full accent-violet-500" />
+                  </Field>
+                  <Field label={`音量 (${tts.volume})`}>
+                    <input type="range" min={0} max={100} value={tts.volume}
+                      onChange={e => setTts({ volume: +e.target.value })}
+                      className="w-full accent-violet-500" />
+                  </Field>
+                  <Field label={`语调 (${tts.pitch.toFixed(1)})`}>
+                    <input type="range" min={0.5} max={2} step={0.1} value={tts.pitch}
+                      onChange={e => setTts({ pitch: +e.target.value })}
+                      className="w-full accent-violet-500" />
+                  </Field>
+                </div>
               </div>
             )}
           </TabsContent>
@@ -301,10 +510,10 @@ export default function AgentDetailPage() {
           <TabsContent value="memory" className="space-y-5 pt-1">
             <Field label="记忆模式">
               <Select value={mem.mode} onValueChange={v => setMem({ mode: v })}>
-                <SelectTrigger className="bg-zinc-800 border-zinc-700 text-white focus:ring-violet-500 h-9">
+                <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-zinc-800 border-zinc-700 text-white">
+                <SelectContent>
                   <SelectItem value="none">无记忆</SelectItem>
                   <SelectItem value="session">会话记忆</SelectItem>
                   <SelectItem value="long_term">长期记忆</SelectItem>
@@ -338,6 +547,7 @@ export default function AgentDetailPage() {
               </div>
             )}
           </TabsContent>
+
           {/* ── MCP ── */}
           <TabsContent value="mcp" className="space-y-4 pt-1">
             <div className="flex justify-end">
@@ -346,13 +556,13 @@ export default function AgentDetailPage() {
                 <Plus className="w-3.5 h-3.5" />添加 MCP 服务
               </Button>
             </div>
-            {cfg.tools.mcp.length === 0 ? (
+            {cfg.mcp.length === 0 ? (
               <div className="text-center py-14 border border-dashed border-zinc-800 rounded-xl">
                 <p className="text-zinc-500 text-sm">暂无 MCP 工具</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {cfg.tools.mcp.map(m => (
+                {cfg.mcp.map(m => (
                   <div key={m.id} className="flex items-start justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3">
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -366,7 +576,7 @@ export default function AgentDetailPage() {
                         <p className="text-xs text-zinc-600">工具：{m.tool_name_list.join(', ')}</p>
                       )}
                     </div>
-                    <button onClick={() => setCfg(c => ({ ...c, tools: { mcp: c.tools.mcp.filter(x => x.id !== m.id) } }))}
+                    <button onClick={() => setCfg(c => ({ ...c, mcp: c.mcp.filter(x => x.id !== m.id) }))}
                       className="text-zinc-600 hover:text-red-400 transition-colors p-1.5 ml-3 shrink-0">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -410,6 +620,12 @@ export default function AgentDetailPage() {
             )}
           </TabsContent>
         </Tabs>
+        </div>
+        <div className="w-[5px] shrink-0 cursor-col-resize bg-zinc-800 hover:bg-violet-500/50 transition-colors relative z-10"
+          onMouseDown={onResizeStart} />
+        <div className="flex flex-col min-w-0" style={{ width: `${100 - splitPct}%` }}>
+          <QuickChat agentId={id!} vadMode={cfg.asr.vad_mode} />
+        </div>
       </div>
 
       {/* MCP Dialog */}
@@ -426,10 +642,10 @@ export default function AgentDetailPage() {
               </Field>
               <Field label="Transport">
                 <Select value={newMcp.transport} onValueChange={v => setNewMcp(m => ({ ...m, transport: v as MCPServer['transport'] }))}>
-                  <SelectTrigger className="bg-zinc-800 border-zinc-700 text-white h-9">
+                  <SelectTrigger className="bg-zinc-800 border-zinc-600">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-zinc-800 border-zinc-700 text-white">
+                  <SelectContent className="bg-zinc-800 border-zinc-600">
                     <SelectItem value="stdio">stdio</SelectItem>
                     <SelectItem value="sse">sse</SelectItem>
                     <SelectItem value="streamable">streamable</SelectItem>

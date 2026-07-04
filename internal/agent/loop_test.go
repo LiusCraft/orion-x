@@ -85,7 +85,7 @@ func newTestSession(userText string) *session.Session {
 
 func TestRunLoopSingleStepNoToolCalls(t *testing.T) {
 	client := &sequentialClient{responses: []func() *llm.StreamReader{textStream("你好")}}
-	a := newWithClient(client, tools.NewRegistry(), "test-model", nil)
+	a := newWithClient(client, tools.NewRegistry(), "test-model", nil, "")
 	sess := newTestSession("你好")
 
 	eventChan, err := a.Run(context.Background(), sess)
@@ -109,7 +109,7 @@ func TestRunLoopSingleToolCallRoundtrip(t *testing.T) {
 			return tools.Result{Output: "12:00"}, nil
 		},
 	})
-	a := newWithClient(client, registry, "test-model", nil)
+	a := newWithClient(client, registry, "test-model", nil, "")
 	sess := newTestSession("现在几点")
 
 	eventChan, err := a.Run(context.Background(), sess)
@@ -148,7 +148,7 @@ func TestRunLoopParallelToolCallRoundtrip(t *testing.T) {
 			return tools.Result{Output: "B"}, nil
 		}},
 	)
-	a := newWithClient(client, registry, "test-model", nil)
+	a := newWithClient(client, registry, "test-model", nil, "")
 	sess := newTestSession("并行测试")
 
 	eventChan, err := a.Run(context.Background(), sess)
@@ -176,7 +176,7 @@ func TestRunLoopUnknownToolIsRecoverable(t *testing.T) {
 		toolCallStream(llm.ToolCall{ID: "1", Name: "doesNotExist", Arguments: "{}"}),
 		textStream("抱歉，我做不到"),
 	}}
-	a := newWithClient(client, tools.NewRegistry(), "test-model", nil)
+	a := newWithClient(client, tools.NewRegistry(), "test-model", nil, "")
 	sess := newTestSession("帮我做件怪事")
 
 	eventChan, err := a.Run(context.Background(), sess)
@@ -203,7 +203,7 @@ func TestRunLoopToolExecuteErrorTerminates(t *testing.T) {
 			return tools.Result{}, wantErr
 		},
 	})
-	a := newWithClient(client, registry, "test-model", nil)
+	a := newWithClient(client, registry, "test-model", nil, "")
 	sess := newTestSession("触发错误")
 
 	eventChan, err := a.Run(context.Background(), sess)
@@ -236,7 +236,7 @@ func TestRunLoopReachesMaxSteps(t *testing.T) {
 			return tools.Result{Output: "again"}, nil
 		},
 	})
-	a := newWithClient(&alwaysToolCallClient{}, registry, "test-model", nil)
+	a := newWithClient(&alwaysToolCallClient{}, registry, "test-model", nil, "")
 	a.SetMaxSteps(2)
 	sess := newTestSession("死循环")
 

@@ -91,11 +91,12 @@ func main() {
 		}
 	}()
 	agentCfg := agent.Config{
-		Provider:    appConfig.Provider.LLM.Type,
-		APIKey:      llmCfg.APIKey,
-		BaseURL:     llmCfg.BaseURL,
-		Model:       llmCfg.Model,
-		ExtraFields: llmCfg.ExtraFields,
+		Provider:     appConfig.Provider.LLM.Type,
+		APIKey:       llmCfg.APIKey,
+		BaseURL:      llmCfg.BaseURL,
+		Model:        llmCfg.Model,
+		SystemPrompt: llmCfg.Prompt,
+		ExtraFields:  llmCfg.ExtraFields,
 	}
 	toolCfg := tools.ManagerConfig{
 		MCPServers: toToolsMCPServers(appConfig.Tools.MCP),

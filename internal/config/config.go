@@ -50,6 +50,7 @@ type LLMConfig struct {
 	APIKey      string         `json:"api_key"`
 	BaseURL     string         `json:"base_url"`
 	Model       string         `json:"model"`
+	Prompt      string         `json:"prompt,omitempty"`
 	ExtraFields map[string]any `json:"extra_fields,omitempty"`
 }
 

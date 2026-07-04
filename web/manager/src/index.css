@@ -49,3 +49,31 @@
     color: hsl(var(--foreground));
   }
 }
+
+/* ── Global scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(139, 92, 246, 0.25);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 92, 246, 0.6);
+}
+::-webkit-scrollbar-thumb:active {
+  background: rgba(139, 92, 246, 0.8);
+}
+
+/* ── Global cursor ── */
+a, button, [role="button"], [role="tab"], [role="menuitem"],
+[role="radio"], [role="checkbox"], [role="switch"],
+[role="option"], select, summary, label,
+input[type="submit"], input[type="reset"], input[type="checkbox"],
+input[type="radio"], details summary, .cursor-pointer {
+  cursor: pointer;
+}

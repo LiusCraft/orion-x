@@ -8,6 +8,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	wsstages "github.com/liuscraft/orion-x/cmd/wsserver/stages"
+	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
@@ -15,15 +17,12 @@ import (
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/pipeline"
-	wsstages "github.com/liuscraft/orion-x/cmd/wsserver/stages"
 	pstages "github.com/liuscraft/orion-x/internal/pipeline/stages"
 	"github.com/liuscraft/orion-x/internal/provider/asr"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
-	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 )
-
 
 // independent of cmd/voicebot's 22050Hz (each entry point constructs its
 // own tts.Provider instance, so the two don't need to agree).
@@ -259,11 +258,12 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 	}
 
 	connAgentCfg := agent.Config{
-		Provider:    connCfg.Provider.LLM.Type,
-		APIKey:      connCfg.Provider.LLM.OpenAI.APIKey,
-		BaseURL:     connCfg.Provider.LLM.OpenAI.BaseURL,
-		Model:       connCfg.Provider.LLM.OpenAI.Model,
-		ExtraFields: connCfg.Provider.LLM.OpenAI.ExtraFields,
+		Provider:     connCfg.Provider.LLM.Type,
+		APIKey:       connCfg.Provider.LLM.OpenAI.APIKey,
+		BaseURL:      connCfg.Provider.LLM.OpenAI.BaseURL,
+		Model:        connCfg.Provider.LLM.OpenAI.Model,
+		SystemPrompt: connCfg.Provider.LLM.OpenAI.Prompt,
+		ExtraFields:  connCfg.Provider.LLM.OpenAI.ExtraFields,
 	}
 	connAgent, err := agent.New(ctx, connAgentCfg, connMgr, s.memorySvc)
 	if err != nil {

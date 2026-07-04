@@ -11,11 +11,12 @@ import (
 )
 
 type Agent struct {
-	client    llm.Client
-	registry  *tools.Registry
-	model     string
-	memorySvc memory.Service
-	maxSteps  int
+	client       llm.Client
+	registry     *tools.Registry
+	model        string
+	memorySvc    memory.Service
+	maxSteps     int
+	systemPrompt string
 }
 
 func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc memory.Service) (*Agent, error) {
@@ -38,17 +39,18 @@ func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc memory.S
 		return nil, err
 	}
 
-	return newWithClient(client, mgr.Registry(), normalized.Model, memorySvc), nil
+	return newWithClient(client, mgr.Registry(), normalized.Model, memorySvc, normalized.SystemPrompt), nil
 }
 
 // newWithClient 使用已构造好的 llm.Client 组装 Agent，供测试注入 fake client。
-func newWithClient(client llm.Client, registry *tools.Registry, model string, memorySvc memory.Service) *Agent {
+func newWithClient(client llm.Client, registry *tools.Registry, model string, memorySvc memory.Service, systemPrompt string) *Agent {
 	return &Agent{
-		client:    client,
-		registry:  registry,
-		model:     model,
-		memorySvc: memorySvc,
-		maxSteps:  10,
+		client:       client,
+		registry:     registry,
+		model:        model,
+		memorySvc:    memorySvc,
+		maxSteps:     10,
+		systemPrompt: systemPrompt,
 	}
 }
 

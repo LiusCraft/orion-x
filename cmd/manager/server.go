@@ -40,7 +40,8 @@ func newRouter(
 	providerH := handler.NewProviderHandler(providers)
 	modelH := handler.NewModelHandler(models)
 	voiceH := handler.NewVoiceHandler(voices)
-	internalH := handler.NewInternalHandler(voicebots, devices)
+	internalH := handler.NewInternalHandler(voicebots, devices, models, voices)
+	availableH := handler.NewAvailableHandler(providers, models, voices)
 
 	api := r.Group("/api")
 	{
@@ -82,6 +83,9 @@ func newRouter(
 		mdl.GET("/:id/voices/:vid", voiceH.Get)
 		mdl.PUT("/:id/voices/:vid", voiceH.Update)
 		mdl.DELETE("/:id/voices/:vid", voiceH.Delete)
+
+		// 可用资源（无 API key）
+		api.GET("/available-resources", jwtMw, availableH.List)
 
 		// 预留：活跃会话列表
 		api.GET("/sessions", jwtMw, func(c *gin.Context) {

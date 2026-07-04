@@ -116,6 +116,8 @@ export const modelApi = {
   update: (id: string, data: { name?: string; base_url?: string; model_id?: string; extra?: Record<string, unknown> }) =>
     http.put<AIModel>(`/models/${id}`, data),
   remove: (id: string) => http.delete(`/models/${id}`),
+  voices: (modelId: string, lang?: string) =>
+    http.get<ModelVoice[]>(`/models/${modelId}/voices`, { params: lang ? { lang } : undefined }),
 }
 
 export interface ModelVoice {
@@ -154,4 +156,34 @@ export const languageApi = {
 export const voiceApi = {
   listSystem: (lang?: string) =>
     http.get<ModelVoice[]>('/voices/system', { params: lang ? { lang } : undefined }),
+}
+
+export interface ResourceOption {
+  id: string
+  name: string
+}
+
+export interface VoiceResource {
+  id: string
+  name: string
+  description?: string
+  gender?: string
+  avatar_url?: string
+  preview_url?: string
+  tags?: string[]
+  langs?: string[]
+  emotions?: Record<string, unknown>
+  is_system: boolean
+  is_cloned: boolean
+  source_audio_url?: string
+}
+
+export interface AvailableResources {
+  asr: ResourceOption[]
+  voices: VoiceResource[]
+}
+
+export const availableResourcesApi = {
+  list: (lang?: string) =>
+    http.get<AvailableResources>('/available-resources', { params: lang ? { lang } : undefined }),
 }

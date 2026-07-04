@@ -8,10 +8,15 @@ import (
 	"github.com/liuscraft/orion-x/internal/session"
 )
 
-// buildContextMessages 构建发给 LLM 的完整消息列表：system 消息（优先取长期记忆
-// 服务提供的上下文，失败或未启用时退回默认提示词）+ 会话历史。
+// buildContextMessages 构建发给 LLM 的完整消息列表：system 消息（优先取 Agent 配
+// 置的角色提示词，其次取长期记忆服务提供的上下文，最后退回默认提示词）+ 会话历史。
 func (a *Agent) buildContextMessages(ctx context.Context, sess *session.Session) []llm.Message {
 	history := sess.ToLLMMessages()
+
+	// Agent 配置的角色提示词优先
+	if a.systemPrompt != "" {
+		return mergeSystemAndHistory([]llm.Message{{Role: "system", Content: a.systemPrompt}}, history)
+	}
 
 	if a.memorySvc != nil {
 		memMsgs, err := a.memorySvc.BuildContextMessages(ctx, "")
