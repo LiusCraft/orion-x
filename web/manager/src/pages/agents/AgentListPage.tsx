@@ -122,7 +122,7 @@ export default function AgentListPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold text-white">我的智能体</h1>
-            <p className="text-sm text-zinc-500 mt-0.5">管理语音智能体实例及其 LLM / ASR / TTS 配置</p>
+            <p className="text-sm text-zinc-500 mt-0.5">管理你的语音机器人，配置模型与语音</p>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={() => toggleView('grid')}

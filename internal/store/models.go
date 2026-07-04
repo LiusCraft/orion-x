@@ -19,6 +19,7 @@ type User struct {
 	ID           string `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	Username     string `gorm:"uniqueIndex;not null;type:varchar(64)" json:"username"`
 	PasswordHash string `gorm:"not null" json:"-"`
+	Email        string `gorm:"type:varchar(128)" json:"email,omitempty"`
 	BaseModel
 }
 

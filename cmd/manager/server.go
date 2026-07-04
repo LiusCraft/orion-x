@@ -50,6 +50,11 @@ func newRouter(
 
 		jwtMw := middleware.JWT(jwtSecret)
 
+		authed := api.Group("/auth", jwtMw)
+		authed.POST("/change-password", authH.ChangePassword)
+		authed.POST("/bind-email", authH.BindEmail)
+		authed.GET("/profile", authH.Profile)
+
 		bots := api.Group("/voicebots", jwtMw)
 		bots.GET("", botH.List)
 		bots.POST("", botH.Create)

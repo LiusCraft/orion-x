@@ -77,3 +77,20 @@ input[type="submit"], input[type="reset"], input[type="checkbox"],
 input[type="radio"], details summary, .cursor-pointer {
   cursor: pointer;
 }
+
+/* ── Light mode: override zinc palette to swap dark→light ── */
+.light {
+  --color-zinc-950: #ffffff;
+  --color-zinc-900: #f8f8fa;
+  --color-zinc-800: #ebebeb;
+  --color-zinc-700: #e0e0e0;
+  --color-zinc-600: #a0a0a0;
+  --color-zinc-500: #828282;
+  --color-zinc-400: #5c5c5c;
+  --color-zinc-300: #4a4a4a;
+  --color-zinc-200: #383838;
+  --color-zinc-100: #262626;
+  --color-white: #141414;
+}
+.light .bg-violet-600 { color: #fff; }
+.light .bg-emerald-600 { color: #fff; }

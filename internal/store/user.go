@@ -46,3 +46,11 @@ func (s *UserStore) GetByID(id string) (*User, error) {
 	}
 	return &u, nil
 }
+
+func (s *UserStore) UpdatePassword(id, newHash string) error {
+	return s.db.Model(&User{}).Where("id = ?", id).Update("password_hash", newHash).Error
+}
+
+func (s *UserStore) UpdateEmail(id, email string) error {
+	return s.db.Model(&User{}).Where("id = ?", id).Update("email", email).Error
+}

@@ -28,8 +28,8 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const { data } = await authApi.login(username, password)
-      setAuth(data.token, data.username)
-      navigate('/voicebots')
+      setAuth(data.token, data.user_id, data.username)
+      navigate('/agents')
     } catch {
       setError('用户名或密码错误')
     } finally {

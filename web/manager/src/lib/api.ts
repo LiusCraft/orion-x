@@ -40,6 +40,12 @@ export interface Device {
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<{ token: string; user_id: string; username: string }>('/auth/login', { username, password }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    http.post<{ message: string }>('/auth/change-password', { old_password: oldPassword, new_password: newPassword }),
+  bindEmail: (email: string) =>
+    http.post<{ message: string; email: string }>('/auth/bind-email', { email }),
+  profile: () =>
+    http.get<{ user_id: string; username: string; email: string }>('/auth/profile'),
 }
 
 export const voicebotApi = {

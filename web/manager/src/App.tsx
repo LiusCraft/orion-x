@@ -1,8 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/lib/store'
 import LoginPage from '@/pages/LoginPage'
-import VoicebotListPage from '@/pages/VoicebotListPage'
-import VoicebotDetailPage from '@/pages/VoicebotDetailPage'
 import Layout from '@/components/Layout'
 
 import AgentPlazaPage from '@/pages/agents/AgentPlazaPage'
@@ -42,10 +40,6 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-
-        {/* Legacy voicebot routes */}
-        <Route path="/voicebots" element={<RequireAuth><VoicebotListPage /></RequireAuth>} />
-        <Route path="/voicebots/:id" element={<RequireAuth><VoicebotDetailPage /></RequireAuth>} />
 
         {/* Main manager routes (all inside Layout) */}
         <Route element={<RequireAuth><Layout /></RequireAuth>}>
