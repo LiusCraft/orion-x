@@ -31,6 +31,9 @@ func init() {
 			Model:       cfg.Model,
 			ExtraFields: cfg.ExtraFields,
 		})
+	}, provider.ProviderMeta{
+		Name:           "OpenAI",
+		DefaultBaseURL: "https://api.openai.com",
 	})
 }
 

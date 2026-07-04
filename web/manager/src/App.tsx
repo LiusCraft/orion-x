@@ -23,6 +23,7 @@ import VoiceListPage from '@/pages/voice/VoiceListPage'
 
 import ModelMonitorPage from '@/pages/models/ModelMonitorPage'
 import MyModelsPage from '@/pages/models/MyModelsPage'
+import ProvidersPage from '@/pages/models/ProvidersPage'
 
 import UsagePage from '@/pages/billing/UsagePage'
 import ResourcesPage from '@/pages/billing/ResourcesPage'
@@ -69,6 +70,7 @@ export default function App() {
           <Route path="/voice" element={<VoiceListPage />} />
 
           {/* Models */}
+          <Route path="/models/providers" element={<ProvidersPage />} />
           <Route path="/models/monitor" element={<ModelMonitorPage />} />
           <Route path="/models" element={<MyModelsPage />} />
 

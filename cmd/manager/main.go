@@ -14,7 +14,11 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/liuscraft/orion-x/cmd/manager/handler"
+	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
+	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
+	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
@@ -51,6 +55,10 @@ func main() {
 	users := store.NewUserStore(db)
 	voicebots := store.NewVoicebotStore(db)
 	devices := store.NewDeviceStore(db)
+	providers := store.NewProviderStore(db)
+	models := store.NewAIModelStore(db)
+	languages := store.NewLanguageStore(db)
+	voices := store.NewModelVoiceStore(db, languages)
 
 	if pass := strings.TrimSpace(cfg.Admin.Password); pass != "" {
 		if _, err := users.GetByUsername(cfg.Admin.Username); errors.Is(err, store.ErrNotFound) {
@@ -68,7 +76,9 @@ func main() {
 	secret := []byte(cfg.JWT.Secret)
 	sign := func(userID string) (string, error) { return signToken(secret, userID) }
 
-	r := newRouter(secret, users, voicebots, devices, sign)
+	langH := handler.NewLanguageHandler(languages)
+
+	r := newRouter(secret, users, voicebots, devices, providers, models, voices, langH, sign)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {

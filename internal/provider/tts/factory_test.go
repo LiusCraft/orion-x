@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewProviderUsesRegisteredProvider(t *testing.T) {
-	Register("fake", func(cfg Config) (Provider, error) { return fakeProvider{}, nil })
+	Register("fake", func(cfg Config) (Provider, error) { return fakeProvider{}, nil }, ProviderMeta{})
 
 	provider, err := NewProvider(ProviderConfig{Type: "fake"})
 	if err != nil {

@@ -101,23 +101,42 @@ type ProviderConfig struct {
 
 type Constructor func(cfg Config) (Provider, error)
 
-var constructors = map[string]Constructor{}
+type ProviderMeta struct {
+	Name           string
+	DefaultBaseURL string
+}
 
-func Register(providerType string, constructor Constructor) {
+type registration struct {
+	constructor Constructor
+	meta        ProviderMeta
+}
+
+var constructors = map[string]registration{}
+
+func Register(providerType string, constructor Constructor, meta ProviderMeta) {
 	providerType = normalizeType(providerType, "")
 	if providerType == "" || constructor == nil {
 		return
 	}
-	constructors[providerType] = constructor
+	constructors[providerType] = registration{constructor: constructor, meta: meta}
+}
+
+// ListRegistered returns all registered TTS provider types with their metadata.
+func ListRegistered() map[string]ProviderMeta {
+	out := make(map[string]ProviderMeta, len(constructors))
+	for k, v := range constructors {
+		out[k] = v.meta
+	}
+	return out
 }
 
 func NewProvider(cfg ProviderConfig) (Provider, error) {
 	providerType := normalizeType(cfg.Type, TypeAliyun)
-	constructor, ok := constructors[providerType]
+	reg, ok := constructors[providerType]
 	if !ok {
 		return nil, fmt.Errorf("unsupported tts provider: %s", cfg.Type)
 	}
-	return constructor(cfg.Config)
+	return reg.constructor(cfg.Config)
 }
 
 func normalizeType(value, fallback string) string {

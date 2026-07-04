@@ -4,7 +4,7 @@ import { useAuthStore } from '@/lib/store'
 import {
   Bot, Store, Cpu, Puzzle, Zap, Brain, BookOpen, Database,
   Mic2, Wand2, Music, Activity, Layers, BarChart3, CreditCard,
-  Key, Link2, LogOut,
+  Key, Link2, LogOut, Building2,
 } from 'lucide-react'
 
 const NAV_GROUPS = [
@@ -42,6 +42,7 @@ const NAV_GROUPS = [
   {
     label: '模型',
     items: [
+      { to: '/models/providers', icon: Building2, label: '厂商管理', end: false },
       { to: '/models/monitor', icon: Activity, label: '模型监控', end: false },
       { to: '/models', icon: Layers, label: '我的模型', end: true },
     ],

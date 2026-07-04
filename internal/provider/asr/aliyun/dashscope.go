@@ -19,6 +19,9 @@ const defaultDashScopeEndpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inferen
 func init() {
 	asr.Register(asr.TypeAliyun, func(cfg asr.Config) (asr.Recognizer, error) {
 		return NewDashScopeRecognizer(cfg)
+	}, asr.ProviderMeta{
+		Name:           "阿里云 Dashscope",
+		DefaultBaseURL: defaultDashScopeEndpoint,
 	})
 }
 

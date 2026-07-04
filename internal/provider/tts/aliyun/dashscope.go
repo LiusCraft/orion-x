@@ -32,6 +32,9 @@ type DashScopeProvider struct {
 func init() {
 	tts.Register(tts.TypeAliyun, func(cfg tts.Config) (tts.Provider, error) {
 		return NewDashScopeProvider(cfg)
+	}, tts.ProviderMeta{
+		Name:           "阿里云 Dashscope",
+		DefaultBaseURL: defaultDashScopeEndpoint,
 	})
 }
 

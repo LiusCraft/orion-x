@@ -23,25 +23,44 @@ type Config struct {
 
 type AdapterConstructor func(context.Context, Config) (Adapter, error)
 
+type ProviderMeta struct {
+	Name           string
+	DefaultBaseURL string
+}
+
+type registration struct {
+	constructor AdapterConstructor
+	meta        ProviderMeta
+}
+
 type Registry struct {
-	adapters map[string]AdapterConstructor
+	adapters map[string]registration
 }
 
 func NewRegistry() *Registry {
-	return &Registry{adapters: make(map[string]AdapterConstructor)}
+	return &Registry{adapters: make(map[string]registration)}
 }
 
-func (r *Registry) Register(key string, constructor AdapterConstructor) {
+func (r *Registry) Register(key string, constructor AdapterConstructor, meta ProviderMeta) {
 	key = strings.ToLower(strings.TrimSpace(key))
 	if key == "" || constructor == nil {
 		return
 	}
-	r.adapters[key] = constructor
+	r.adapters[key] = registration{constructor: constructor, meta: meta}
 }
 
 func (r *Registry) Get(key string) (AdapterConstructor, bool) {
-	c, ok := r.adapters[key]
-	return c, ok
+	reg, ok := r.adapters[key]
+	return reg.constructor, ok
+}
+
+// ListRegistered returns all registered LLM provider types with their metadata.
+func (r *Registry) ListRegistered() map[string]ProviderMeta {
+	out := make(map[string]ProviderMeta, len(r.adapters))
+	for k, v := range r.adapters {
+		out[k] = v.meta
+	}
+	return out
 }
 
 type Client struct {
@@ -87,8 +106,8 @@ func DefaultRegistry() *Registry {
 	return defaultRegistry
 }
 
-func Register(key string, constructor AdapterConstructor) {
-	defaultRegistry.Register(key, constructor)
+func Register(key string, constructor AdapterConstructor, meta ProviderMeta) {
+	defaultRegistry.Register(key, constructor, meta)
 }
 
 func NewClientWithDefault(ctx context.Context, cfg Config) (llm.Client, error) {
