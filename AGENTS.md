@@ -34,11 +34,12 @@ No CI for Go -- only docs deploy in `.github/workflows/deploy-docs.yml`.
 Pipeline: `ASR → Agent → TTS → <output>` built via `pipeline.NewBuilder()` (linear) or `pipeline.NewDAGBuilder()` (fan-out/fan-in, e.g. `asr` broadcasting to both `agent` and a `stt`-echoing output stage). TTS audio flows through the pipeline `Message` bus (`TTSStage` registers `TTSProcessor.OnChunk` internally and emits `audio.TTSChunk` messages) rather than a side-channel callback, so `cmd/voicebot` and `cmd/wsserver` each plug in their own output stage (`PortAudioOutputStage`, `stages.WSOutputStage`).
 
 Two entry points:
+
 - `cmd/voicebot/` -- CLI harness: local mic/speaker, one process-wide session.
 - `cmd/wsserver/` -- WebSocket server: one independent session + DAG pipeline per connection (`asr`→`agent`→`tts`→`ws_output`, plus `asr`→`ws_output` for STT echo). Protocol (hello/listen/abort/stt/tts JSON control frames + binary audio frames) is defined in `internal/wsproto/`; it's inspired by xiaozhi-esp32-server's protocol but deliberately omits `iot`/`mcp`/`server` (device-control/remote-tool-call/ops concerns unrelated to plain voice chat). Supports `auto` (server VAD) and `manual` (client-driven `listen start/stop`, via `ASRProcessor.BeginTurn/EndTurn`) modes, negotiated at hello time and fixed for the connection's lifetime. Audio wire format defaults to Opus/16kHz when a client's hello omits `audio_params` (negotiable per-connection, PCM passthrough or Opus, `internal/audio/codec/`); TTS output is always synthesized at 16kHz server-side (== `audio.InternalSampleRate`, independent of `cmd/voicebot`'s 22050Hz) since that's a valid Opus rate.
 
 | Package | Role |
-|---|---|
+| --- | --- |
 | `internal/config/` | JSON config loader + validation |
 | `internal/logging/` | Zap wrapper; use `logging.Infof/Errorf/...` (not std lib `log`) |
 | `internal/agent/` | LLM agent with tool calling loop |
@@ -54,6 +55,11 @@ Two entry points:
 | `internal/text/` | Text segmenter, markdown filter, emotion tags |
 
 Design docs in `docs/` -- read before modifying major modules.
+
+## Diagnostics
+
+- Default: `lens_diagnostics mode=delta` only. Do NOT run mode=all or mode=full unless explicitly told "跑".
+- The user is called **piagent**. Always address them as piagent.
 
 ## Quirks
 
