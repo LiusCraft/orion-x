@@ -41,7 +41,7 @@ func NewService(cfg Config, opts Options) (*Service, error) {
 	}
 
 	store := NewCuratedStore(opts.ManagerURL, opts.DeviceID, cfg.MemoryCharLimit, cfg.UserCharLimit)
-	review := NewBackgroundReview(store, opts.ReviewConfig)
+	review := NewBackgroundReview(store, opts.ReviewConfig, opts.LLM)
 
 	var compressor *Compressor
 	if opts.LLM != nil {
