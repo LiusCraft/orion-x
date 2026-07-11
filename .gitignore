@@ -13,3 +13,4 @@ web-ui/dist/
 # Debug binaries
 __debug_bin*
 .opencode/
+/manager
