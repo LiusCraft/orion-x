@@ -1,16 +1,17 @@
-data/
+
+__debug_bin*
 !web/manager/src/pages/data
 .DS_Store
+.opencode/
+.pi-subagents/
 /bin/
+/manager
 /voicebot
+# Debug binaries
 cmd/voicebot/config/voicebot.json
-docs-site/node_modules
+data/
 docs-site/.vitepress/cache
 docs-site/.vitepress/dist
-web-ui/node_modules
+docs-site/node_modules
 web-ui/dist/
-
-# Debug binaries
-__debug_bin*
-.opencode/
-/manager
+web-ui/node_modules

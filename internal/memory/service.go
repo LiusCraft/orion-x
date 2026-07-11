@@ -127,6 +127,9 @@ func (s *Service) RecordTurn(ctx context.Context, turn Turn) error {
 }
 
 func (s *Service) Close() error {
+	if s.store != nil {
+		s.store.WaitForSync()
+	}
 	return nil
 }
 

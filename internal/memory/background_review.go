@@ -31,6 +31,12 @@ func (r *BackgroundReview) Spawn(ctx context.Context, recentTurns []Turn, existi
 	}
 
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				logging.Errorf("BackgroundReview: panic: %v", rec)
+			}
+		}()
+
 		// Build review context from recent turns
 		var b strings.Builder
 		b.WriteString("当前记忆：\n")

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/liuscraft/orion-x/internal/logging"
 )
 
 const (
@@ -17,13 +19,13 @@ const (
 )
 
 type ToolResult struct {
-	Success       bool     `json:"success"`
-	Done          bool     `json:"done,omitempty"`
-	Error         string   `json:"error,omitempty"`
+	Success        bool     `json:"success"`
+	Done           bool     `json:"done,omitempty"`
+	Error          string   `json:"error,omitempty"`
 	CurrentEntries []string `json:"current_entries,omitempty"`
-	Usage         string   `json:"usage,omitempty"`
-	Target        string   `json:"target,omitempty"`
-	EntryCount    int      `json:"entry_count,omitempty"`
+	Usage          string   `json:"usage,omitempty"`
+	Target         string   `json:"target,omitempty"`
+	EntryCount     int      `json:"entry_count,omitempty"`
 }
 
 type managerMemoryEntry struct {
@@ -55,6 +57,7 @@ type CuratedStore struct {
 	httpClient *http.Client
 
 	mu             sync.RWMutex
+	wg             sync.WaitGroup
 	memoryEntries  []string
 	userEntries    []string
 	memorySnapshot string // frozen at Load(), never changes
@@ -82,6 +85,10 @@ func NewCuratedStore(managerURL, deviceID string, memoryLimit, userLimit int) *C
 
 // Load fetches memory from Manager and builds frozen snapshot.
 func (c *CuratedStore) Load(ctx context.Context) error {
+	if c.deviceID == "" {
+		c.buildSnapshot()
+		return nil // skip HTTP call for empty deviceID
+	}
 	url := fmt.Sprintf("%s/internal/devices/%s/memory", c.managerURL, c.deviceID)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -183,10 +190,10 @@ func (c *CuratedStore) Add(target, content string) *ToolResult {
 	if newTotal > limit {
 		current := charCount(entries)
 		return &ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("已达到 %d/%d 字符。添加这条(%d字符)会超限。请在同一轮中使用 replace 合并相关条目，或 remove 删除过期条目，然后重试。", current, limit, len([]rune(content))),
+			Success:        false,
+			Error:          fmt.Sprintf("已达到 %d/%d 字符。添加这条(%d字符)会超限。请在同一轮中使用 replace 合并相关条目，或 remove 删除过期条目，然后重试。", current, limit, len([]rune(content))),
 			CurrentEntries: entries,
-			Usage:  fmt.Sprintf("%d/%d", current, limit),
+			Usage:          fmt.Sprintf("%d/%d", current, limit),
 		}
 	}
 
@@ -298,7 +305,10 @@ func (c *CuratedStore) usageStr(target string, entries []string, limit int) stri
 
 // goSync async-flushes to manager. Best-effort, logs errors.
 func (c *CuratedStore) goSync() {
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
+
 		c.mu.RLock()
 		memEntries := copySlice(c.memoryEntries)
 		userEntries := copySlice(c.userEntries)
@@ -314,16 +324,30 @@ func (c *CuratedStore) goSync() {
 			payload.Entries = append(payload.Entries, managerMemoryEntry{Target: "user", Content: e})
 		}
 
-		body, _ := json.Marshal(payload)
+		body, err := json.Marshal(payload)
+		if err != nil {
+			logging.Errorf("CuratedStore[%s]: goSync marshal payload: %v", c.deviceID, err)
+			return
+		}
 		url := fmt.Sprintf("%s/internal/devices/%s/memory", c.managerURL, c.deviceID)
-		req, _ := http.NewRequest("PUT", url, bytes.NewReader(body))
+		req, err := http.NewRequest("PUT", url, bytes.NewReader(body))
+		if err != nil {
+			logging.Errorf("CuratedStore[%s]: goSync create request: %v", c.deviceID, err)
+			return
+		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
+			logging.Errorf("CuratedStore[%s]: goSync HTTP PUT: %v", c.deviceID, err)
 			return
 		}
 		_ = resp.Body.Close()
 	}()
+}
+
+// WaitForSync blocks until all pending goSync goroutines complete.
+func (c *CuratedStore) WaitForSync() {
+	c.wg.Wait()
 }
 
 // --- Utility funcs ---

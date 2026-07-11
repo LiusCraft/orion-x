@@ -233,13 +233,13 @@ func DefaultConfig() *AppConfig {
 			MemoryCharLimit:      2200,
 			UserCharLimit:        1375,
 			Review: struct {
-						Enabled bool   `json:"enabled"`
-						Model   string `json:"model"`
+				Enabled bool   `json:"enabled"`
+				Model   string `json:"model"`
 			}{
-						Enabled: true,
+				Enabled: true,
 			},
 		},
-}
+	}
 }
 
 func Load(path string) (*AppConfig, error) {

@@ -9,10 +9,10 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/tools"
-	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 )
 
 // helloTimeout bounds how long a client has to send its hello handshake
@@ -66,10 +66,10 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		return r.URL.Query().Get(query)
 	}
-	authorization    := pick("Authorization",    "access_token")
-	protocolVersion  := pick("Protocol-Version", "protocol-version")
-	deviceID         := pick("Device-Id",        "device-id")
-	clientID         := pick("Client-Id",        "client-id")
+	authorization := pick("Authorization", "access_token")
+	protocolVersion := pick("Protocol-Version", "protocol-version")
+	deviceID := pick("Device-Id", "device-id")
+	clientID := pick("Client-Id", "client-id")
 
 	logging.Infof("wsserver: incoming connection — Authorization=%q ProtocolVersion=%q DeviceId=%q ClientId=%q RemoteAddr=%s",
 		authorization, protocolVersion, deviceID, clientID, r.RemoteAddr)

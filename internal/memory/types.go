@@ -59,5 +59,3 @@ func FromContext(ctx context.Context) (Context, bool) {
 	memCtx, ok := value.(Context)
 	return memCtx, ok
 }
-
-
