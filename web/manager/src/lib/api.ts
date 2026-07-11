@@ -325,6 +325,7 @@ export const mcpApi = {
 		endpoint?: string;
 		headers?: Record<string, string>;
 		timeout_ms?: number;
+		market_id?: string;
 	}) =>
 		http.post<{ success: boolean; message: string }>(
 			"/mcp/test-connection",
@@ -339,6 +340,7 @@ export const mcpApi = {
 		endpoint?: string;
 		headers?: Record<string, string>;
 		timeout_ms?: number;
+		market_id?: string;
 	}) =>
 		http.post<{
 			success: boolean;
@@ -358,6 +360,7 @@ export const mcpApi = {
 		endpoint?: string;
 		headers?: Record<string, string>;
 		timeout_ms?: number;
+		market_id?: string;
 		tool_name: string;
 		arguments?: Record<string, unknown>;
 	}) =>

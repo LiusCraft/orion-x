@@ -10,26 +10,61 @@ import {
 	Link,
 	Brain,
 	Trash2,
-	Pencil,
 	Loader2,
+	RefreshCw,
 	Terminal,
-	ChevronDown,
-	ChevronRight,
 	Play,
 	CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-	DialogFooter,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+	Sheet,
+	SheetContent,
+	SheetHeader,
+	SheetTitle,
+} from "@/components/ui/sheet";
 import { mcpApi, type MCPMarketEntry, type MCPServer } from "@/lib/api";
+import {
+	McpServerDetail,
+	ToolInputs,
+	ToolResult,
+} from "@/pages/components/McpServerDetail";
+
+function LogoIcon({
+	name,
+	icon,
+	size = "md",
+}: {
+	name?: string;
+	icon?: string;
+	size?: "sm" | "md";
+}) {
+	const dims = size === "sm" ? "w-7 h-7" : "w-9 h-9";
+	const iconDims = size === "sm" ? "w-3.5 h-3.5" : "w-4 h-4";
+
+	if (icon) {
+		return (
+			<img
+				src={icon}
+				alt=""
+				className={`${dims} rounded-xl shrink-0 object-contain bg-zinc-800/60`}
+				onError={(e) => {
+					(e.target as HTMLImageElement).style.display = "none";
+				}}
+			/>
+		);
+	}
+
+	const IconComp = pickIcon(name);
+	return (
+		<div
+			className={`${dims} rounded-xl bg-violet-400/10 flex items-center justify-center shrink-0`}
+		>
+			<IconComp className={`${iconDims} text-violet-400`} strokeWidth={1.5} />
+		</div>
+	);
+}
 
 function pickIcon(name?: string) {
 	const n = (name || "").toLowerCase();
@@ -50,12 +85,34 @@ function pickIcon(name?: string) {
 	return Globe;
 }
 
+type DrawerMode = "new" | "edit";
+
+const initialForm = {
+	name: "",
+	description: "",
+	icon: "",
+	tags: "",
+	transport: "streamable" as string,
+	command: "",
+	args: "",
+	endpoint: "",
+	toolList: "",
+	timeoutMs: 30000,
+	cwd: "",
+	envKeys: [""] as string[],
+	envVals: [""] as string[],
+	headerKeys: [""] as string[],
+	headerVals: [""] as string[],
+};
+
 export default function McpPage() {
 	const [market, setMarket] = useState<MCPMarketEntry[]>([]);
 	const [servers, setServers] = useState<MCPServer[]>([]);
 	const [loading, setLoading] = useState(true);
 
-	const [addOpen, setAddOpen] = useState(false);
+	const [drawerOpen, setDrawerOpen] = useState(false);
+	const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
+	// The server being edited — null for "new" mode
 	const [editTarget, setEditTarget] = useState<MCPServer | null>(null);
 	const [testing, setTesting] = useState(false);
 	const [testResult, setTestResult] = useState<{
@@ -71,8 +128,12 @@ export default function McpPage() {
 	>([]);
 	const [toolsLoading, setToolsLoading] = useState(false);
 	const [toolsOpen, setToolsOpen] = useState(false);
+	const [testedEndpoint, setTestedEndpoint] = useState("");
+	const [testedHeaders, setTestedHeaders] = useState("");
 	const [selectedTool, setSelectedTool] = useState<string | null>(null);
-	const [callArgs, setCallArgs] = useState("{}");
+	const [toolArgs, setToolArgs] = useState<
+		Record<string, Record<string, unknown>>
+	>({});
 	const [callResult, setCallResult] = useState<{
 		success: boolean;
 		message?: string;
@@ -80,20 +141,10 @@ export default function McpPage() {
 		output?: string;
 	} | null>(null);
 	const [calling, setCalling] = useState(false);
-	const [form, setForm] = useState({
-		name: "",
-		transport: "streamable" as string,
-		command: "",
-		args: "",
-		endpoint: "",
-		toolList: "",
-		timeoutMs: 30000,
-		cwd: "",
-		envKeys: [""] as string[],
-		envVals: [""] as string[],
-		headerKeys: [""] as string[],
-		headerVals: [""] as string[],
-	});
+	const [form, setForm] = useState({ ...initialForm });
+	const [descPreview, setDescPreview] = useState(true);
+
+	const isOfficial = editTarget?.market_id != null;
 
 	const addEnvRow = () =>
 		setForm((f) => ({
@@ -130,8 +181,10 @@ export default function McpPage() {
 		const rec: Record<string, string> = {};
 		let has = false;
 		for (let i = 0; i < keys.length; i++) {
-			if (keys[i].trim()) {
-				rec[keys[i].trim()] = vals[i].trim();
+			const k = keys[i].trim();
+			const v = vals[i].trim();
+			if (k && v) {
+				rec[k] = v;
 				has = true;
 			}
 		}
@@ -148,34 +201,78 @@ export default function McpPage() {
 		);
 	}, []);
 
-	const handleRemoveServer = async (serverId: string) => {
+	const removeServer = async (serverId: string) => {
 		await mcpApi.servers.remove(serverId);
 		setServers((prev) => prev.filter((s) => s.id !== serverId));
+		setDrawerOpen(false);
 	};
 
-	const handleEdit = (s: MCPServer) => {
-		setEditTarget(s);
-		setForm({
-			name: s.name,
-			transport: s.transport,
-			command: s.command || "",
-			args: (s.args || []).join(" "),
-			endpoint: s.endpoint || "",
-			toolList: (s.tool_name_list || []).join(", "),
-			timeoutMs: s.timeout_ms,
-			cwd: s.cwd || "",
-			envKeys: s.env ? Object.keys(s.env) : [""],
-			envVals: s.env ? Object.values(s.env) : [""],
-			headerKeys: s.headers ? Object.keys(s.headers) : [""],
-			headerVals: s.headers ? Object.values(s.headers) : [""],
-		});
-		setAddOpen(true);
+	const openDrawer = (server: MCPServer | null, mode: DrawerMode) => {
+		setDrawerMode(mode);
+		setEditTarget(server);
+		if (server) {
+			const marketEntry = server.market_id
+				? market.find((m) => m.id === server.market_id)
+				: undefined;
+			const marketHdrs = marketEntry?.config?.headers as
+				| Record<string, string>
+				| undefined;
+			const hKeys = server.headers
+				? Object.keys(server.headers)
+				: marketHdrs
+					? Object.keys(marketHdrs)
+					: [""];
+			const hVals = server.headers
+				? Object.values(server.headers)
+				: marketHdrs
+					? new Array(Object.keys(marketHdrs).length).fill("")
+					: [""];
+
+			setForm({
+				name: server.name,
+				description: server.description || "",
+				icon: server.icon || "",
+				tags: (server.tags || []).join(", "),
+				transport: server.transport,
+				command: server.command || "",
+				args: (server.args || []).join(" "),
+				endpoint: server.endpoint || "",
+				toolList: (server.tool_name_list || []).join(", "),
+				timeoutMs: server.timeout_ms,
+				cwd: server.cwd || "",
+				envKeys: server.env ? Object.keys(server.env) : [""],
+				envVals: server.env ? Object.values(server.env) : [""],
+				headerKeys: hKeys,
+				headerVals: hVals,
+			});
+		} else {
+			setForm({ ...initialForm });
+			setTestedEndpoint("");
+			setTestedHeaders("");
+		}
+		// Default to preview if description has content
+		setDescPreview(!!server?.description);
+		setTestResult(null);
+		setToolsList([]);
+		setToolsOpen(false);
+		setSelectedTool(null);
+		setToolArgs({});
+		setCallResult(null);
+		setDrawerOpen(true);
 	};
 
 	const handleSave = async () => {
 		if (!form.name.trim()) return;
 		const payload = {
 			name: form.name.trim(),
+			description: form.description.trim(),
+			icon: form.icon.trim(),
+			tags: form.tags.trim()
+				? form.tags
+						.split(",")
+						.map((s) => s.trim())
+						.filter(Boolean)
+				: [],
 			transport: form.transport,
 			command: form.command.trim(),
 			args: form.args.trim() ? form.args.split(/\s+/) : [],
@@ -200,20 +297,11 @@ export default function McpPage() {
 			const { data } = await mcpApi.servers.create(payload);
 			setServers((prev) => [...prev, data]);
 		}
-		resetForm();
+		setDrawerOpen(false);
 	};
 
 	const getConnParams = () => {
-		const p: {
-			transport: string;
-			command?: string;
-			args?: string[];
-			env?: Record<string, string>;
-			cwd?: string;
-			endpoint?: string;
-			headers?: Record<string, string>;
-			timeout_ms?: number;
-		} = {
+		const p: Parameters<typeof mcpApi.listTools>[0] = {
 			transport: form.transport,
 			timeout_ms: Math.min(form.timeoutMs, 15000),
 		};
@@ -232,6 +320,9 @@ export default function McpPage() {
 					| Record<string, string>
 					| undefined) ?? undefined;
 		}
+		if (isOfficial && editTarget?.market_id) {
+			p.market_id = editTarget.market_id;
+		}
 		return p;
 	};
 
@@ -240,10 +331,39 @@ export default function McpPage() {
 		setToolsOpen(true);
 		setSelectedTool(null);
 		setCallResult(null);
+		setToolArgs({});
 		try {
 			const { data } = await mcpApi.listTools(getConnParams());
 			if (data.success && data.tools) {
 				setToolsList(data.tools);
+				// Init args for each tool from schema defaults
+				const init: Record<string, Record<string, unknown>> = {};
+				for (const t of data.tools) {
+					if (t.input_schema?.properties) {
+						const props = t.input_schema.properties as Record<
+							string,
+							{ type?: string; default?: unknown }
+						>;
+						const vals: Record<string, unknown> = {};
+						for (const [k, v] of Object.entries(props)) {
+							if (v.default !== undefined) {
+								vals[k] = v.default;
+							} else {
+								// Set type-appropriate empty value
+								vals[k] =
+									v.type === "boolean"
+										? false
+										: v.type === "number" || v.type === "integer"
+											? 0
+											: "";
+							}
+						}
+						init[t.name] = vals;
+					} else {
+						init[t.name] = {};
+					}
+				}
+				setToolArgs(init);
 			} else {
 				setToolsList([]);
 			}
@@ -258,21 +378,16 @@ export default function McpPage() {
 		setCalling(true);
 		setCallResult(null);
 		try {
-			let parsed: Record<string, unknown> = {};
-			try {
-				parsed = JSON.parse(callArgs);
-			} catch {
-				setCallResult({
-					success: false,
-					message: "参数格式错误，请输入合法的 JSON",
-				});
-				setCalling(false);
-				return;
+			const args = toolArgs[selectedTool!] ?? {};
+			// Filter out empty values
+			const cleaned: Record<string, unknown> = {};
+			for (const [k, v] of Object.entries(args)) {
+				if (v !== "" && v !== undefined) cleaned[k] = v;
 			}
 			const { data } = await mcpApi.callTool({
 				...getConnParams(),
 				tool_name: selectedTool!,
-				arguments: parsed,
+				arguments: cleaned,
 			});
 			setCallResult(data);
 		} catch (err: unknown) {
@@ -287,16 +402,7 @@ export default function McpPage() {
 		setTesting(true);
 		setTestResult(null);
 		try {
-			const payload: {
-				transport: string;
-				command?: string;
-				args?: string[];
-				env?: Record<string, string>;
-				cwd?: string;
-				endpoint?: string;
-				headers?: Record<string, string>;
-				timeout_ms?: number;
-			} = {
+			const payload: Parameters<typeof mcpApi.testConnection>[0] = {
 				transport: form.transport,
 				timeout_ms: Math.min(form.timeoutMs, 15000),
 			};
@@ -310,8 +416,18 @@ export default function McpPage() {
 				payload.headers =
 					entriesToRecord(form.headerKeys, form.headerVals) ?? undefined;
 			}
+			if (isOfficial && editTarget?.market_id) {
+				payload.market_id = editTarget.market_id;
+			}
 			const { data } = await mcpApi.testConnection(payload);
 			setTestResult(data);
+			if (data.success) {
+				setTestedEndpoint(form.endpoint);
+				setTestedHeaders(
+					JSON.stringify(form.headerKeys.concat(form.headerVals)),
+				);
+				handleListTools();
+			}
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : "请求失败";
 			setTestResult({ success: false, message: msg });
@@ -320,28 +436,8 @@ export default function McpPage() {
 		}
 	};
 
-	const resetForm = () => {
-		setForm({
-			name: "",
-			transport: "streamable",
-			command: "",
-			args: "",
-			endpoint: "",
-			toolList: "",
-			timeoutMs: 30000,
-			cwd: "",
-			envKeys: [""],
-			envVals: [""],
-			headerKeys: [""],
-			headerVals: [""],
-		});
-		setEditTarget(null);
-		setTestResult(null);
-		setAddOpen(false);
-		setToolsList([]);
-		setToolsOpen(false);
-		setSelectedTool(null);
-		setCallResult(null);
+	const handleClose = () => {
+		setDrawerOpen(false);
 	};
 
 	if (loading)
@@ -362,7 +458,7 @@ export default function McpPage() {
 						</p>
 					</div>
 					<Button
-						onClick={() => setAddOpen(true)}
+						onClick={() => openDrawer(null, "new")}
 						className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
 					>
 						<Plus className="w-4 h-4" />
@@ -401,19 +497,13 @@ export default function McpPage() {
 							) : (
 								market.map((mcp) => {
 									const installed = servers.some((s) => s.market_id === mcp.id);
-									const Icon = pickIcon(mcp.name);
 									return (
 										<div
 											key={mcp.id}
 											className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-all"
 										>
 											<div className="flex items-start gap-3 mb-3">
-												<div className="w-9 h-9 rounded-xl bg-violet-400/10 flex items-center justify-center shrink-0">
-													<Icon
-														className="w-4 h-4 text-violet-400"
-														strokeWidth={1.5}
-													/>
-												</div>
+												<LogoIcon name={mcp.name} icon={mcp.icon} />
 												<div className="flex-1 min-w-0">
 													<p className="font-medium text-sm text-white truncate">
 														{mcp.name}
@@ -446,6 +536,16 @@ export default function McpPage() {
 											<Button
 												size="sm"
 												disabled={installed}
+												onClick={async () => {
+													try {
+														const { data } = await mcpApi.servers.create({
+															market_id: mcp.id,
+														});
+														setServers((prev) => [...prev, data]);
+													} catch {
+														// ignore
+													}
+												}}
 												className={`h-7 w-full text-xs ${installed ? "border-zinc-700 text-zinc-400 cursor-default" : "bg-violet-600 hover:bg-violet-500 text-white"}`}
 												variant={installed ? "outline" : "default"}
 											>
@@ -479,21 +579,26 @@ export default function McpPage() {
 						) : (
 							<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 								{servers.map((s) => {
-									const Icon = pickIcon(s.name);
 									return (
 										<div
 											key={s.id}
-											className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-all group"
+											onClick={() => openDrawer(s, "edit")}
+											className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-all group cursor-pointer relative"
 										>
+											<button
+												onClick={(e) => {
+													e.stopPropagation();
+													removeServer(s.id);
+												}}
+												className="absolute top-3 right-3 text-zinc-500 hover:text-red-400 p-1 rounded hover:bg-red-400/10 transition-colors cursor-pointer"
+												title="删除"
+											>
+												<Trash2 className="w-3.5 h-3.5" />
+											</button>
 											<div className="flex items-center gap-3 mb-3">
-												<div className="w-9 h-9 rounded-xl bg-violet-400/10 flex items-center justify-center shrink-0">
-													<Icon
-														className="w-4 h-4 text-violet-400"
-														strokeWidth={1.5}
-													/>
-												</div>
+												<LogoIcon name={s.name} icon={s.icon} />
 												<div className="flex-1 min-w-0">
-													<p className="font-medium text-sm text-white truncate">
+													<p className="font-medium text-sm text-white truncate pr-6">
 														{s.name}
 													</p>
 													<p className="text-[11px] text-zinc-600 font-mono mt-0.5">
@@ -501,30 +606,26 @@ export default function McpPage() {
 													</p>
 												</div>
 											</div>
-											<p className="text-xs text-zinc-500 leading-relaxed mb-3 line-clamp-2">
+											<p className="text-xs text-zinc-500 leading-relaxed line-clamp-2">
 												{s.description || s.endpoint}
 											</p>
-											<div className="flex items-center justify-between">
-												{s.market_id && (
-													<span className="text-[10px] text-zinc-600">
-														来自市场
-													</span>
-												)}
-												<div className="flex gap-1 ml-auto">
-													<button
-														onClick={() => handleEdit(s)}
-														className="text-zinc-500 hover:text-zinc-300 p-1.5 rounded hover:bg-zinc-800 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
-													>
-														<Pencil className="w-3.5 h-3.5" />
-													</button>
-													<button
-														onClick={() => handleRemoveServer(s.id)}
-														className="text-zinc-500 hover:text-red-400 p-1.5 rounded hover:bg-red-400/10 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
-													>
-														<Trash2 className="w-3.5 h-3.5" />
-													</button>
+											{s.tags && s.tags.length > 0 && (
+												<div className="flex flex-wrap gap-1">
+													{s.tags.map((tag) => (
+														<span
+															key={tag}
+															className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50"
+														>
+															{tag}
+														</span>
+													))}
 												</div>
-											</div>
+											)}
+											{s.market_id && (
+												<span className="text-[10px] text-zinc-600">
+													来自市场
+												</span>
+											)}
 										</div>
 									);
 								})}
@@ -534,373 +635,207 @@ export default function McpPage() {
 				</Tabs>
 			</div>
 
-			<Dialog
-				open={addOpen}
-				onOpenChange={(open) => {
-					if (!open) resetForm();
-				}}
-			>
-				<DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-lg max-h-[80vh] overflow-y-auto">
-					<DialogHeader>
-						<DialogTitle className="text-white flex items-center gap-2">
-							<Cpu className="w-4 h-4 text-violet-400" />
-							{editTarget ? "编辑 MCP 服务器" : "添加自定义 MCP 服务器"}
-						</DialogTitle>
-					</DialogHeader>
-					<div className="space-y-4 py-2">
-						<Field label="名称">
-							<Input
-								value={form.name}
-								onChange={(e) =>
-									setForm((f) => ({ ...f, name: e.target.value }))
-								}
-								placeholder="my-mcp-server"
-								className={inp}
-							/>
-						</Field>
-						<Field label="传输协议">
-							<div className="flex gap-1.5">
-								{(["streamable", "sse"] as const).map((t) => (
-									<button
-										key={t}
-										type="button"
-										onClick={() => setForm((f) => ({ ...f, transport: t }))}
-										className={`flex-1 h-9 rounded-md text-sm font-mono border transition-colors cursor-pointer ${
-											form.transport === t
-												? "bg-violet-600 border-violet-500 text-white"
-												: "bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
-										}`}
-									>
-										{t}
-									</button>
-								))}
+			{/* ── Right‑side drawer: editor ── */}
+			<Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+				<SheetContent className="flex flex-col gap-0" style={{ padding: 0 }}>
+					<SheetHeader className="px-6 pt-6 pb-4 border-b border-zinc-800">
+						<div className="flex items-center gap-3">
+							<LogoIcon name={editTarget?.name} icon={editTarget?.icon} />{" "}
+							<div>
+								<SheetTitle>
+									{drawerMode === "new"
+										? "添加自定义 MCP 服务器"
+										: isOfficial
+											? editTarget?.name
+											: "编辑 MCP 服务器"}
+								</SheetTitle>
+								{isOfficial && (
+									<p className="text-[11px] text-zinc-500 mt-0.5">
+										官方 MCP · 部分配置由系统管理
+									</p>
+								)}
 							</div>
-						</Field>
-						{form.transport === "stdio" ? (
-							<>
-								<Field label="命令">
-									<Input
-										value={form.command}
-										onChange={(e) =>
-											setForm((f) => ({ ...f, command: e.target.value }))
-										}
-										placeholder="npx / python / uvx"
-										className={inp}
-									/>
-								</Field>
-								<Field label="参数（空格分隔）">
-									<Input
-										value={form.args}
-										onChange={(e) =>
-											setForm((f) => ({ ...f, args: e.target.value }))
-										}
-										placeholder="-y @modelcontextprotocol/server-filesystem /path"
-										className={inp}
-									/>
-								</Field>
-								<Field label="工作目录（可选）">
-									<Input
-										value={form.cwd}
-										onChange={(e) =>
-											setForm((f) => ({ ...f, cwd: e.target.value }))
-										}
-										placeholder="/data/mcp"
-										className={inp}
-									/>
-								</Field>
-								<div className="space-y-2">
-									<div className="flex items-center justify-between">
-										<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-											环境变量
-										</Label>
-										<button
-											onClick={addEnvRow}
-											className="text-[11px] text-violet-400 hover:text-violet-300 cursor-pointer"
-										>
-											+ 添加
-										</button>
+						</div>
+					</SheetHeader>
+
+					<div className="flex-1 overflow-y-auto">
+						<McpServerDetail
+							server={editTarget ?? ({ name: "" } as MCPServer)}
+							mode="edit"
+							form={form}
+							onFormChange={(key, val) =>
+								setForm((f) => ({ ...f, [key]: val }))
+							}
+							isOfficial={isOfficial}
+							toolsList={toolsList}
+							descPreview={descPreview}
+							onDescPreviewChange={setDescPreview}
+							addEnvRow={addEnvRow}
+							updateEnv={updateEnv}
+							addHeaderRow={addHeaderRow}
+							updateHeader={updateHeader}
+						/>
+
+						{/* ── Tool testing section ── */}
+						{testResult?.success && (
+							<div className="border-t border-zinc-800 px-6 pt-4 pb-4 space-y-3">
+								<div className="flex items-center justify-between">
+									<div className="flex items-center gap-2 text-xs text-zinc-400">
+										<Terminal className="w-3.5 h-3.5" strokeWidth={1.5} />
+										<span className="font-medium">体验工具</span>
+										{toolsLoading && (
+											<Loader2 className="w-3 h-3 animate-spin" />
+										)}
 									</div>
-									{form.envKeys.map((_, i) => (
-										<div key={i} className="flex gap-2">
-											<Input
-												value={form.envKeys[i]}
-												onChange={(e) =>
-													updateEnv(i, e.target.value, form.envVals[i])
-												}
-												placeholder="KEY"
-												className={`${inp} flex-1 font-mono text-xs`}
-											/>
-											<Input
-												value={form.envVals[i]}
-												onChange={(e) =>
-													updateEnv(i, form.envKeys[i], e.target.value)
-												}
-												placeholder="value"
-												className={`${inp} flex-1 font-mono text-xs`}
-											/>
-										</div>
-									))}
+									<button
+										type="button"
+										onClick={handleListTools}
+										className="text-[11px] text-violet-400 hover:text-violet-300 transition-colors flex items-center gap-1"
+										title="刷新工具列表"
+									>
+										<RefreshCw
+											className={`w-3 h-3 ${toolsLoading ? "animate-spin" : ""}`}
+										/>
+										刷新
+									</button>
 								</div>
-							</>
-						) : (
-							<>
-								<Field label="Endpoint">
-									<Input
-										value={form.endpoint}
-										onChange={(e) =>
-											setForm((f) => ({ ...f, endpoint: e.target.value }))
-										}
-										placeholder="https://api.example.com/mcp"
-										className={inp}
-									/>
-								</Field>
-								<div className="space-y-2">
-									<div className="flex items-center justify-between">
-										<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-											HTTP Headers
-										</Label>
-										<button
-											onClick={addHeaderRow}
-											className="text-[11px] text-violet-400 hover:text-violet-300 cursor-pointer"
-										>
-											+ 添加
-										</button>
+
+								{!toolsLoading && toolsList.length > 0 && (
+									<div className="space-y-2 max-h-80 overflow-y-auto">
+										{toolsList.map((tool) => (
+											<div
+												key={tool.name}
+												className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg overflow-hidden"
+											>
+												<button
+													type="button"
+													onClick={() =>
+														setSelectedTool(
+															selectedTool === tool.name ? null : tool.name,
+														)
+													}
+													className="flex items-center gap-2 w-full px-3 py-2 text-left cursor-pointer hover:bg-zinc-700/50 transition-colors"
+												>
+													<span className="text-xs font-mono text-violet-400 shrink-0">
+														{selectedTool === tool.name ? "▾" : "▸"}
+													</span>
+													<span className="text-xs text-white font-medium">
+														{tool.name}
+													</span>
+													{tool.description && (
+														<span className="text-[10px] text-zinc-500 truncate ml-2">
+															{tool.description}
+														</span>
+													)}
+												</button>
+
+												{selectedTool === tool.name && (
+													<div className="border-t border-zinc-700/50 px-3 py-2 space-y-2">
+														<ToolInputs
+															schema={tool.input_schema}
+															values={toolArgs[tool.name] ?? {}}
+															onChange={(key, val) =>
+																setToolArgs((prev) => ({
+																	...prev,
+																	[tool.name]: {
+																		...prev[tool.name],
+																		[key]: val,
+																	},
+																}))
+															}
+														/>
+														<div className="flex items-start gap-2">
+															<Button
+																size="sm"
+																onClick={handleCallTool}
+																disabled={calling}
+																className="bg-violet-600 hover:bg-violet-500 text-white h-7 text-[11px] px-3 gap-1 shrink-0"
+															>
+																{calling ? (
+																	<Loader2 className="w-3 h-3 animate-spin" />
+																) : (
+																	<Play className="w-3 h-3" />
+																)}
+																调用
+															</Button>
+															{callResult && (
+																<div className="flex-1 min-w-0">
+																	<ToolResult result={callResult} />
+																</div>
+															)}
+														</div>
+													</div>
+												)}
+											</div>
+										))}
 									</div>
-									{form.headerKeys.map((_, i) => (
-										<div key={i} className="flex gap-2">
-											<Input
-												value={form.headerKeys[i]}
-												onChange={(e) =>
-													updateHeader(i, e.target.value, form.headerVals[i])
-												}
-												placeholder="Header-Name"
-												className={`${inp} flex-1 font-mono text-xs`}
-											/>
-											<Input
-												value={form.headerVals[i]}
-												onChange={(e) =>
-													updateHeader(i, form.headerKeys[i], e.target.value)
-												}
-												placeholder="value"
-												className={`${inp} flex-1 font-mono text-xs`}
-											/>
-										</div>
-									))}
-								</div>
-							</>
+								)}
+
+								{toolsOpen && !toolsLoading && toolsList.length === 0 && (
+									<p className="text-xs text-zinc-600">未获取到工具列表</p>
+								)}
+							</div>
 						)}
-						<Field label="工具白名单（逗号分隔，留空=全部）">
-							<Input
-								value={form.toolList}
-								onChange={(e) =>
-									setForm((f) => ({ ...f, toolList: e.target.value }))
-								}
-								placeholder="read_file, write_file"
-								className={inp}
-							/>
-						</Field>
-						<Field label="超时 (ms)">
-							<Input
-								type="number"
-								min={0}
-								value={form.timeoutMs}
-								onChange={(e) =>
-									setForm((f) => ({ ...f, timeoutMs: +e.target.value }))
-								}
-								className={inp}
-							/>
-						</Field>
 					</div>
 
-					{/* ── Tool Testing Section ── */}
-					{testResult?.success && (
-						<div className="border-t border-zinc-800 pt-4 space-y-3">
-							<button
-								type="button"
-								onClick={() => {
-									if (toolsOpen) {
-										setToolsOpen(false);
-									} else {
-										handleListTools();
-									}
-								}}
-								className="flex items-center gap-2 text-xs text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer w-full"
-							>
-								<Terminal className="w-3.5 h-3.5" strokeWidth={1.5} />
-								<span className="font-medium">体验工具</span>
-								{toolsLoading ? (
-									<Loader2 className="w-3 h-3 animate-spin ml-auto" />
-								) : toolsOpen ? (
-									<ChevronDown
-										className="w-3.5 h-3.5 ml-auto"
-										strokeWidth={1.5}
-									/>
-								) : (
-									<ChevronRight
-										className="w-3.5 h-3.5 ml-auto"
-										strokeWidth={1.5}
-									/>
-								)}
-							</button>
-
-							{toolsOpen && !toolsLoading && toolsList.length > 0 && (
-								<div className="space-y-2 max-h-80 overflow-y-auto">
-									{toolsList.map((tool) => (
-										<div
-											key={tool.name}
-											className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg overflow-hidden"
-										>
-											<button
-												type="button"
-												onClick={() =>
-													setSelectedTool(
-														selectedTool === tool.name ? null : tool.name,
-													)
-												}
-												className="flex items-center gap-2 w-full px-3 py-2 text-left cursor-pointer hover:bg-zinc-700/50 transition-colors"
-											>
-												<span className="text-xs font-mono text-violet-400 shrink-0">
-													{selectedTool === tool.name ? "▾" : "▸"}
-												</span>
-												<span className="text-xs text-white font-medium">
-													{tool.name}
-												</span>
-												{tool.description && (
-													<span className="text-[10px] text-zinc-500 truncate ml-2">
-														{tool.description}
-													</span>
-												)}
-											</button>
-
-											{selectedTool === tool.name && (
-												<div className="border-t border-zinc-700/50 px-3 py-2 space-y-2">
-													{tool.input_schema?.properties ? (
-														<div className="text-[10px] text-zinc-500 space-y-0.5">
-															<span className="text-zinc-400">参数:</span>
-															{Object.entries(
-																tool.input_schema.properties as Record<
-																	string,
-																	unknown
-																>,
-															).map(([k, v]) => (
-																<div key={k} className="flex gap-2">
-																	<span className="font-mono text-zinc-300">
-																		{k}
-																	</span>
-																	<span className="text-zinc-600">
-																		{(v as Record<string, string>)
-																			.description ?? ""}
-																	</span>
-																</div>
-															))}
-														</div>
-													) : null}
-													<textarea
-														value={callArgs}
-														onChange={(e) => setCallArgs(e.target.value)}
-														className="w-full h-20 bg-zinc-900 border border-zinc-700 rounded text-[11px] font-mono text-zinc-300 p-2 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500 placeholder:text-zinc-600"
-														placeholder='{"key": "value"}'
-													/>
-													<div className="flex items-start gap-2">
-														<Button
-															size="sm"
-															onClick={handleCallTool}
-															disabled={calling}
-															className="bg-violet-600 hover:bg-violet-500 text-white h-7 text-[11px] px-3 gap-1"
-														>
-															{calling ? (
-																<Loader2 className="w-3 h-3 animate-spin" />
-															) : (
-																<Play className="w-3 h-3" />
-															)}
-															调用
-														</Button>
-														{callResult && (
-															<div
-																className={`flex-1 text-[11px] whitespace-pre-wrap break-all ${
-																	callResult.success
-																		? callResult.is_error
-																			? "text-amber-400"
-																			: "text-emerald-400"
-																		: "text-red-400"
-																}`}
-															>
-																{callResult.output || callResult.message}
-															</div>
-														)}
-													</div>
-												</div>
-											)}
-										</div>
-									))}
-								</div>
-							)}
-
-							{toolsOpen && !toolsLoading && toolsList.length === 0 && (
-								<p className="text-xs text-zinc-600">未获取到工具列表</p>
-							)}
-						</div>
-					)}
-
-					<DialogFooter className="flex items-center gap-3">
+					{/* ── Footer actions ── */}
+					<div className="border-t border-zinc-800 px-6 py-4 space-y-3">
 						{testResult && (
-							<span
-								className={`text-xs flex-1 ${testResult.success ? "text-emerald-400" : "text-red-400"}`}
+							<div
+								className={`text-xs ${testResult.success ? "text-emerald-400" : "text-red-400"}`}
 							>
 								{testResult.message}
-							</span>
+							</div>
 						)}
-						<Button
-							size="sm"
-							onClick={handleTestConnection}
-							disabled={testing || !form.name.trim()}
-							className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white gap-1.5"
-							variant="outline"
-						>
-							{testing ? (
-								<Loader2 className="w-3.5 h-3.5 animate-spin" />
-							) : (
-								<Cpu className="w-3.5 h-3.5" />
+						<div className="flex items-center gap-2">
+							{editTarget && (
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => removeServer(editTarget.id)}
+									className="border-zinc-700 text-red-400 hover:bg-red-400/10 hover:text-red-300 h-8 text-xs gap-1.5"
+								>
+									<Trash2 className="w-3.5 h-3.5" />
+									删除
+								</Button>
 							)}
-							测试连接
-						</Button>
-						<Button
-							variant="outline"
-							onClick={() => resetForm()}
-							className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
-						>
-							取消
-						</Button>
-						<Button
-							onClick={handleSave}
-							disabled={!form.name.trim()}
-							className="bg-violet-600 hover:bg-violet-500 text-white"
-						>
-							{editTarget ? "保存" : "添加"}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+							<Button
+								size="sm"
+								onClick={handleTestConnection}
+								disabled={testing || !form.name.trim()}
+								className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white gap-1.5"
+								variant="outline"
+							>
+								{testing ? (
+									<Loader2 className="w-3.5 h-3.5 animate-spin" />
+								) : (
+									<Cpu className="w-3.5 h-3.5" />
+								)}
+								测试连接
+							</Button>
+							<Button
+								variant="outline"
+								onClick={handleClose}
+								className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+							>
+								取消
+							</Button>
+							<Button
+								onClick={handleSave}
+								disabled={
+									!form.name.trim() ||
+									form.endpoint !== testedEndpoint ||
+									JSON.stringify(form.headerKeys.concat(form.headerVals)) !==
+										testedHeaders
+								}
+								className="bg-violet-600 hover:bg-violet-500 text-white ml-auto"
+							>
+								{drawerMode === "new" ? "添加" : "保存"}
+							</Button>
+						</div>
+					</div>
+				</SheetContent>
+			</Sheet>
 		</div>
 	);
 }
-
-function Field({
-	label,
-	children,
-}: {
-	label: string;
-	children: React.ReactNode;
-}) {
-	return (
-		<div className="space-y-1.5">
-			<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-				{label}
-			</Label>
-			{children}
-		</div>
-	);
-}
-
-const inp =
-	"bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-600 focus-visible:ring-violet-500 h-9";

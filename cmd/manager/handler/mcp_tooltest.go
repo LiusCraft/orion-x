@@ -19,6 +19,7 @@ type toolTestRequest struct {
 	Endpoint  string            `json:"endpoint,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
 	TimeoutMs int               `json:"timeout_ms,omitempty"`
+	MarketID  string            `json:"market_id,omitempty"`
 }
 
 type callToolRequest struct {
@@ -47,7 +48,7 @@ func (h *MCPHandler) ListTools(c *gin.Context) {
 		Env:       req.Env,
 		CWD:       req.CWD,
 		Endpoint:  req.Endpoint,
-		Headers:   req.Headers,
+		Headers:   mergeHeaders(strPtr(req.MarketID), h.markets, req.Headers),
 		TimeoutMs: timeout,
 	}
 
@@ -107,7 +108,7 @@ func (h *MCPHandler) CallTool(c *gin.Context) {
 		Env:       req.Env,
 		CWD:       req.CWD,
 		Endpoint:  req.Endpoint,
-		Headers:   req.Headers,
+		Headers:   mergeHeaders(strPtr(req.MarketID), h.markets, req.Headers),
 		TimeoutMs: timeout,
 	}
 

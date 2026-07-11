@@ -48,6 +48,12 @@ func (h *MCPHandler) ListServers(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Strip headers for market MCPs (official config not exposed to user)
+	for i := range list {
+		if list[i].MarketID != nil && *list[i].MarketID != "" {
+			list[i].Headers = nil
+		}
+	}
 	c.JSON(http.StatusOK, list)
 }
 
@@ -61,6 +67,10 @@ func (h *MCPHandler) GetServer(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// Strip headers for market MCPs
+	if s.MarketID != nil && *s.MarketID != "" {
+		s.Headers = nil
 	}
 	c.JSON(http.StatusOK, s)
 }
@@ -190,7 +200,7 @@ func (h *MCPHandler) CreateServer(c *gin.Context) {
 			Env:          jsonMapFromConfig(cfg, "env"),
 			CWD:          stringFromConfig(cfg, "cwd"),
 			Endpoint:     stringFromConfig(cfg, "endpoint"),
-			Headers:      jsonMapFromConfig(cfg, "headers"),
+			Headers:      nil, // official headers not stored on user server
 			ToolNameList: stringSliceFromConfig(cfg, "tool_name_list"),
 			TimeoutMs:    intFromConfig(cfg, "timeout_ms"),
 			Creator:      userID,
@@ -252,6 +262,8 @@ func (h *MCPHandler) CreateServer(c *gin.Context) {
 type updateServerRequest struct {
 	Name         *string            `json:"name,omitempty"`
 	Description  *string            `json:"description,omitempty"`
+	Icon         *string            `json:"icon,omitempty"`
+	Tags         *pq.StringArray    `json:"tags,omitempty"`
 	Transport    *string            `json:"transport,omitempty"`
 	Command      *string            `json:"command,omitempty"`
 	Args         *pq.StringArray    `json:"args,omitempty"`
@@ -316,6 +328,12 @@ func (h *MCPHandler) UpdateServer(c *gin.Context) {
 	}
 	if req.Description != nil {
 		updates["description"] = *req.Description
+	}
+	if req.Icon != nil {
+		updates["icon"] = *req.Icon
+	}
+	if req.Tags != nil {
+		updates["tags"] = *req.Tags
 	}
 	if req.Transport != nil {
 		updates["transport"] = *req.Transport
@@ -522,6 +540,34 @@ func (h *MCPHandler) checkVoicebotOwner(c *gin.Context, voicebotID string) error
 	return nil
 }
 
+// mergeHeaders merges market default headers with user override headers.
+// User headers take precedence over market defaults.
+func strPtr(s string) *string { return &s }
+
+func mergeHeaders(marketID *string, marketStore *store.MCPMarketStore, userHeaders map[string]string) map[string]string {
+	if marketID == nil || *marketID == "" {
+		return userHeaders
+	}
+	market, err := marketStore.GetByID(*marketID)
+	if err != nil {
+		return userHeaders
+	}
+	defaultHeaders := jsonMapFromConfig(market.Config, "headers")
+	if defaultHeaders == nil {
+		return userHeaders
+	}
+	merged := make(map[string]string, len(defaultHeaders)+len(userHeaders))
+	for k, v := range defaultHeaders {
+		if s, ok := v.(string); ok {
+			merged[k] = s
+		}
+	}
+	for k, v := range userHeaders {
+		merged[k] = v
+	}
+	return merged
+}
+
 func validMCPTransport(transport store.MCPTransport) bool {
 	switch transport {
 	case store.MCPTransportStdio, store.MCPTransportSSE, store.MCPTransportStreamable:
@@ -556,6 +602,7 @@ type testConnectionRequest struct {
 	Endpoint  string            `json:"endpoint,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
 	TimeoutMs int               `json:"timeout_ms,omitempty"`
+	MarketID  string            `json:"market_id,omitempty"`
 }
 
 type testConnectionResponse struct {
@@ -583,7 +630,7 @@ func (h *MCPHandler) TestConnection(c *gin.Context) {
 		Env:       req.Env,
 		CWD:       req.CWD,
 		Endpoint:  req.Endpoint,
-		Headers:   req.Headers,
+		Headers:   mergeHeaders(strPtr(req.MarketID), h.markets, req.Headers),
 		TimeoutMs: timeout,
 	}
 
