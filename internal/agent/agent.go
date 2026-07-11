@@ -19,6 +19,12 @@ type Agent struct {
 	systemPrompt string
 }
 
+// RegisterBuiltinTool adds a tool spec to the agent's registry.
+// Builtin tools are always available regardless of MCP configuration.
+func (a *Agent) RegisterBuiltinTool(spec tools.Spec) {
+	a.registry.Add(spec)
+}
+
 func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc memory.Service) (*Agent, error) {
 	normalized, err := normalizeConfig(cfg)
 	if err != nil {
