@@ -127,6 +127,12 @@ type MemoryConfig struct {
 	LongTermMaxResults   int     `json:"long_term_max_results"`
 	RetentionDays        int     `json:"retention_days"`
 	FTSMinScore          float64 `json:"fts_min_score"`
+	MemoryCharLimit      int     `json:"memory_char_limit"`
+	UserCharLimit        int     `json:"user_char_limit"`
+	Review               struct {
+		Enabled bool   `json:"enabled"`
+		Model   string `json:"model"`
+	} `json:"review"`
 }
 
 type MCPServerConfig struct {
@@ -224,8 +230,16 @@ func DefaultConfig() *AppConfig {
 			LongTermMaxResults:   6,
 			RetentionDays:        365,
 			FTSMinScore:          0,
+			MemoryCharLimit:      2200,
+			UserCharLimit:        1375,
+			Review: struct {
+						Enabled bool   `json:"enabled"`
+						Model   string `json:"model"`
+			}{
+						Enabled: true,
+			},
 		},
-	}
+}
 }
 
 func Load(path string) (*AppConfig, error) {
