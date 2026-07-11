@@ -62,8 +62,8 @@ func (h *TurnHandler) SearchTurns(c *gin.Context) {
 			"snippet":      truncate(t.UserText+" "+t.AssistantText, 200),
 			"matched_role": "user",
 			"messages": []gin.H{
-				{"id": t.ID, "role": "user", "content": t.UserText, "timestamp": t.CreatedAt},
-				{"id": t.ID + 1, "role": "assistant", "content": t.AssistantText, "timestamp": t.CreatedAt},
+				{"id": t.ID * 10, "role": "user", "content": t.UserText, "timestamp": t.CreatedAt},
+				{"id": t.ID*10 + 1, "role": "assistant", "content": t.AssistantText, "timestamp": t.CreatedAt},
 			},
 		})
 		if len(results) >= limit {
@@ -78,7 +78,13 @@ func (h *TurnHandler) GetSessionMessages(c *gin.Context) {
 	deviceID := c.Param("device_id")
 	sessionID := c.Param("session_id")
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if offset < 0 {
+		offset = 0
+	}
 	turns, err := h.store.ListBySession(deviceID, sessionID, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -91,7 +97,7 @@ func (h *TurnHandler) GetSessionMessages(c *gin.Context) {
 		})
 		if t.AssistantText != "" {
 			messages = append(messages, gin.H{
-				"id": t.ID + 1, "role": "assistant", "content": t.AssistantText, "timestamp": t.EndedAt,
+				"id": t.ID*10 + 1, "role": "assistant", "content": t.AssistantText, "timestamp": t.EndedAt,
 			})
 		}
 	}
