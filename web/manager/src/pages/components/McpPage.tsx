@@ -142,6 +142,9 @@ export default function McpPage() {
 	} | null>(null);
 	const [calling, setCalling] = useState(false);
 	const [form, setForm] = useState({ ...initialForm });
+	const [selectedMarket, setSelectedMarket] = useState<MCPMarketEntry | null>(
+		null,
+	);
 	const [descPreview, setDescPreview] = useState(true);
 
 	const isOfficial = editTarget?.market_id != null;
@@ -500,7 +503,8 @@ export default function McpPage() {
 									return (
 										<div
 											key={mcp.id}
-											className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-all"
+											onClick={() => setSelectedMarket(mcp)}
+											className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-all cursor-pointer"
 										>
 											<div className="flex items-start gap-3 mb-3">
 												<LogoIcon name={mcp.name} icon={mcp.icon} />
@@ -634,6 +638,106 @@ export default function McpPage() {
 					</TabsContent>
 				</Tabs>
 			</div>
+
+			{/* ── Market detail preview ── */}
+			<Sheet
+				open={!!selectedMarket}
+				onOpenChange={(v) => !v && setSelectedMarket(null)}
+			>
+				<SheetContent className="flex flex-col gap-0" style={{ padding: 0 }}>
+					<SheetHeader className="px-6 pt-6 pb-4 border-b border-zinc-800">
+						<div className="flex items-center gap-3">
+							<LogoIcon
+								name={selectedMarket?.name}
+								icon={selectedMarket?.icon}
+							/>
+							<div>
+								<SheetTitle>{selectedMarket?.name}</SheetTitle>
+								{selectedMarket?.provider && (
+									<p className="text-[11px] text-zinc-500 mt-0.5">
+										{selectedMarket.provider}
+										{selectedMarket.price ? ` · ${selectedMarket.price}` : ""}
+									</p>
+								)}
+							</div>
+						</div>
+					</SheetHeader>
+
+					{selectedMarket && (
+						<McpServerDetail
+							server={
+								{
+									id: selectedMarket.id,
+									name: selectedMarket.name,
+									description: selectedMarket.description || "",
+									icon: selectedMarket.icon || "",
+									tags: selectedMarket.tags || [],
+									transport:
+										(selectedMarket.config
+											?.transport as MCPServer["transport"]) || "streamable",
+									command: (selectedMarket.config?.command as string) || "",
+									args: (selectedMarket.config?.args as string[]) || [],
+									env:
+										(selectedMarket.config?.env as Record<string, string>) ||
+										{},
+									market_id: selectedMarket.id,
+									cwd: (selectedMarket.config?.cwd as string) || "",
+									endpoint: (selectedMarket.config?.endpoint as string) || "",
+									headers:
+										(selectedMarket.config?.headers as Record<
+											string,
+											string
+										>) || {},
+									timeout_ms:
+										(selectedMarket.config?.timeout_ms as number) || 30000,
+									created_at: selectedMarket.created_at,
+								} as MCPServer
+							}
+							mode="view"
+						/>
+					)}
+
+					<div className="border-t border-zinc-800 px-6 py-4">
+						<Button
+							size="sm"
+							disabled={
+								selectedMarket
+									? servers.some((s) => s.market_id === selectedMarket.id)
+									: false
+							}
+							onClick={async () => {
+								if (!selectedMarket) return;
+								try {
+									const { data } = await mcpApi.servers.create({
+										market_id: selectedMarket.id,
+									});
+									setServers((prev) => [...prev, data]);
+									setSelectedMarket(null);
+								} catch {
+									// ignore
+								}
+							}}
+							className={`h-8 w-full text-xs ${selectedMarket && servers.some((s) => s.market_id === selectedMarket.id) ? "border-zinc-700 text-zinc-400 cursor-default" : "bg-violet-600 hover:bg-violet-500 text-white"}`}
+							variant={
+								selectedMarket &&
+								servers.some((s) => s.market_id === selectedMarket.id)
+									? "outline"
+									: "default"
+							}
+						>
+							{selectedMarket &&
+							servers.some((s) => s.market_id === selectedMarket.id) ? (
+								<>
+									<CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+									已安装
+								</>
+							) : (
+								"安装"
+							)}
+						</Button>
+					</div>
+				</SheetContent>
+			</Sheet>
 
 			{/* ── Right‑side drawer: editor ── */}
 			<Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>

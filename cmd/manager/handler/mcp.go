@@ -36,6 +36,15 @@ func (h *MCPHandler) ListMarket(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	for i := range list {
+		if list[i].Config != nil {
+			delete(list[i].Config, "command")
+			delete(list[i].Config, "args")
+			delete(list[i].Config, "env")
+			delete(list[i].Config, "cwd")
+			delete(list[i].Config, "endpoint")
+		}
+	}
 	c.JSON(http.StatusOK, list)
 }
 
@@ -48,12 +57,7 @@ func (h *MCPHandler) ListServers(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Strip headers for market MCPs (official config not exposed to user)
-	for i := range list {
-		if list[i].MarketID != nil && *list[i].MarketID != "" {
-			list[i].Headers = nil
-		}
-	}
+	stripMarketConfig(list)
 	c.JSON(http.StatusOK, list)
 }
 
@@ -68,9 +72,12 @@ func (h *MCPHandler) GetServer(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Strip headers for market MCPs
-	if s.MarketID != nil && *s.MarketID != "" {
-		s.Headers = nil
+	if isMarket(*s) {
+		s.Command = ""
+		s.Args = nil
+		s.Env = nil
+		s.CWD = ""
+		s.Endpoint = ""
 	}
 	c.JSON(http.StatusOK, s)
 }
@@ -297,6 +304,17 @@ func (h *MCPHandler) UpdateServer(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	if isMarket(*s) {
+		// 市场 MCP 不允许修改连接配置
+		req.Transport = nil
+		req.Command = nil
+		req.Args = nil
+		req.Env = nil
+		req.CWD = nil
+		req.Endpoint = nil
+	}
+
 	nextTransport := s.Transport
 	if req.Transport != nil {
 		nextTransport = store.MCPTransport(*req.Transport)
@@ -566,6 +584,22 @@ func mergeHeaders(marketID *string, marketStore *store.MCPMarketStore, userHeade
 		merged[k] = v
 	}
 	return merged
+}
+
+func isMarket(s store.MCPServer) bool {
+	return s.MarketID != nil && *s.MarketID != ""
+}
+
+func stripMarketConfig(list []store.MCPServer) {
+	for i := range list {
+		if isMarket(list[i]) {
+			list[i].Command = ""
+			list[i].Args = nil
+			list[i].Env = nil
+			list[i].CWD = ""
+			list[i].Endpoint = ""
+		}
+	}
 }
 
 func validMCPTransport(transport store.MCPTransport) bool {
