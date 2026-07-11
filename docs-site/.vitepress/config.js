@@ -33,8 +33,11 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: '首页', link: '/' },
-      { text: '快速开始', link: '/guide/getting-started' },
-      { text: '架构设计', link: '/architecture/overview' },
+      { text: '产品功能', link: '/features/' },
+      { text: '应用场景', link: '/use-cases/' },
+      { text: '定价', link: '/pricing/' },
+      { text: '文档', link: '/guide/getting-started' },
+      { text: '控制台', link: 'https://github.com/LiusCraft/orion-x' },
       { text: 'GitHub', link: 'https://github.com/LiusCraft/orion-x' }
     ],
 
