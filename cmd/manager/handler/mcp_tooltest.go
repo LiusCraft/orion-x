@@ -56,7 +56,7 @@ func (h *MCPHandler) ListTools(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": fmt.Sprintf("连接失败: %v", err)})
 		return
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	result, err := session.ListTools(c.Request.Context(), &mcp.ListToolsParams{})
 	if err != nil {
@@ -116,7 +116,7 @@ func (h *MCPHandler) CallTool(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": fmt.Sprintf("连接失败: %v", err)})
 		return
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	result, err := session.CallTool(c.Request.Context(), &mcp.CallToolParams{
 		Name:      req.ToolName,

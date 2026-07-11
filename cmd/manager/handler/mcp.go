@@ -592,7 +592,7 @@ func (h *MCPHandler) TestConnection(c *gin.Context) {
 		c.JSON(http.StatusOK, testConnectionResponse{Success: false, Message: fmt.Sprintf("连接失败: %v", err)})
 		return
 	}
-	session.Close()
+	_ = session.Close()
 
 	c.JSON(http.StatusOK, testConnectionResponse{Success: true, Message: "连接成功：MCP 握手完成"})
 }
