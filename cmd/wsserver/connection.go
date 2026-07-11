@@ -290,20 +290,6 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		devMCP = newDeviceMCPClient(safeConn, sessionID, connMgr.Registry())
 	}
 
-	connAgentCfg := agent.Config{
-		Provider:     connCfg.Provider.LLM.Type,
-		APIKey:       connCfg.Provider.LLM.OpenAI.APIKey,
-		BaseURL:      connCfg.Provider.LLM.OpenAI.BaseURL,
-		Model:        connCfg.Provider.LLM.OpenAI.Model,
-		SystemPrompt: connCfg.Provider.LLM.OpenAI.Prompt,
-		ExtraFields:  connCfg.Provider.LLM.OpenAI.ExtraFields,
-	}
-	connAgent, err := agent.New(ctx, connAgentCfg, connMgr, s.memorySvc)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("create per-connection agent: %w", err)
-	}
-
 	// Per-connection memory service with per-device CuratedStore
 	deviceID := hello.DeviceID
 	memSvc, err := memory.NewService(memory.Config{
@@ -320,7 +306,26 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		memSvc = nil
 	}
 
-	// Register builtin tools (memory, session_search) from per-connection CuratedStore
+	connAgentCfg := agent.Config{
+		Provider:     connCfg.Provider.LLM.Type,
+		APIKey:       connCfg.Provider.LLM.OpenAI.APIKey,
+		BaseURL:      connCfg.Provider.LLM.OpenAI.BaseURL,
+		Model:        connCfg.Provider.LLM.OpenAI.Model,
+		SystemPrompt: connCfg.Provider.LLM.OpenAI.Prompt,
+		ExtraFields:  connCfg.Provider.LLM.OpenAI.ExtraFields,
+	}
+	var connAgent *agent.Agent
+	if memSvc != nil {
+		connAgent, err = agent.New(ctx, connAgentCfg, connMgr, memSvc)
+	} else {
+		connAgent, err = agent.New(ctx, connAgentCfg, connMgr, s.memorySvc)
+	}
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("create per-connection agent: %w", err)
+	}
+
+	// Register builtin tools from per-connection CuratedStore
 	if memSvc != nil && memSvc.CuratedStore() != nil {
 		store := memSvc.CuratedStore()
 		connAgent.RegisterBuiltinTool(tools.MemoryToolSpec(store))

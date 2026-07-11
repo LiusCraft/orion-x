@@ -1,7 +1,11 @@
 package memory
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -25,6 +29,9 @@ type Service struct {
 	compressor    *Compressor
 	sessionBuffer []Turn // local buffer for recent turns
 	systemPrompt  string
+	managerURL    string
+	deviceID      string
+	httpClient    *http.Client
 	now           func() time.Time
 }
 
@@ -46,6 +53,9 @@ func NewService(cfg Config, opts Options) (*Service, error) {
 		review:       review,
 		compressor:   compressor,
 		systemPrompt: strings.TrimSpace(opts.SystemPrompt),
+		managerURL:   strings.TrimRight(opts.ManagerURL, "/"),
+		deviceID:     opts.DeviceID,
+		httpClient:   &http.Client{},
 		now:          opts.Now,
 	}
 
@@ -94,8 +104,8 @@ func (s *Service) RecordTurn(ctx context.Context, turn Turn) error {
 		s.sessionBuffer = s.sessionBuffer[len(s.sessionBuffer)-50:]
 	}
 
-	// Async: save turn to Manager via HTTP (TODO: wire up)
-	// POST /internal/devices/{device_id}/turns
+	// Save turn to Manager via HTTP (async, best-effort)
+	s.saveTurnAsync(ctx, turn)
 
 	// Trigger background review
 	snapshot := s.store.FormatForSystemPrompt("memory")
@@ -124,6 +134,41 @@ func (s *Service) RecordTurn(ctx context.Context, turn Turn) error {
 	}
 
 	return nil
+}
+
+// saveTurnAsync persists a turn to the Manager via HTTP. Best-effort, logs errors.
+func (s *Service) saveTurnAsync(ctx context.Context, turn Turn) {
+	if s.deviceID == "" || s.managerURL == "" {
+		return
+	}
+	go func() {
+		body, err := json.Marshal(map[string]interface{}{
+			"session_id":     turn.SessionID,
+			"turn_id":        turn.TurnID,
+			"user_text":      turn.UserText,
+			"assistant_text": turn.AssistantText,
+			"started_at":     turn.StartedAt,
+			"ended_at":       turn.EndedAt,
+			"aborted":        turn.Aborted,
+		})
+		if err != nil {
+			logging.Errorf("RecordTurn[%s]: marshal: %v", s.deviceID, err)
+			return
+		}
+		url := fmt.Sprintf("%s/internal/devices/%s/turns", s.managerURL, s.deviceID)
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+		if err != nil {
+			logging.Errorf("RecordTurn[%s]: create request: %v", s.deviceID, err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			logging.Errorf("RecordTurn[%s]: HTTP POST: %v", s.deviceID, err)
+			return
+		}
+		_ = resp.Body.Close()
+	}()
 }
 
 func (s *Service) Close() error {

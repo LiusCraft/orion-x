@@ -8,6 +8,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/llm"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/session"
 )
 
@@ -62,6 +63,7 @@ func (a *Agent) runLoop(ctx context.Context, sess *session.Session, emit func(Ag
 
 		if len(result.toolCalls) == 0 {
 			logging.Infof("Agent: done (no tool calls), total time=%v", time.Since(processStart))
+			a.recordTurn(ctx, sess, processStart)
 			emit(&FinishedEvent{Error: nil})
 			return
 		}
@@ -80,8 +82,47 @@ func (a *Agent) runLoop(ctx context.Context, sess *session.Session, emit func(Ag
 		}
 	}
 
+	a.recordTurn(ctx, sess, processStart)
 	logging.Infof("Agent: reached max steps (%d)", a.maxSteps)
 	emit(&FinishedEvent{Error: fmt.Errorf("reached max steps (%d)", a.maxSteps)})
+}
+
+// recordTurn captures the last user/assistant pair from the session and saves it to memory.
+func (a *Agent) recordTurn(ctx context.Context, sess *session.Session, start time.Time) {
+	if a.memorySvc == nil {
+		return
+	}
+	msgs := sess.Messages
+	if len(msgs) < 2 {
+		return
+	}
+	// Find the last user message and its following assistant message.
+	var userText, assistantText string
+	for i := len(msgs) - 1; i >= 1; i-- {
+		if string(msgs[i].Role) == "assistant" && string(msgs[i-1].Role) == "user" {
+			assistantText = msgs[i].Content
+			userText = msgs[i-1].Content
+			break
+		}
+	}
+	if userText == "" {
+		return
+	}
+
+	memCtx, _ := memory.FromContext(ctx)
+	turn := memory.Turn{
+		TurnID:        int64(len(msgs)),
+		UserText:      userText,
+		AssistantText: assistantText,
+		StartedAt:     start,
+		EndedAt:       time.Now(),
+		SessionID:     sess.ID,
+		DeviceID:      memCtx.DeviceID,
+		UserID:        memCtx.UserID,
+	}
+	if err := a.memorySvc.RecordTurn(ctx, turn); err != nil {
+		logging.Warnf("Agent: record turn: %v", err)
+	}
 }
 
 // isContextErr 判断错误是否源自 ctx 取消/超时——这类错误不应产生 FinishedEvent，
