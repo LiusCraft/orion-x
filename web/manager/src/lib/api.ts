@@ -287,13 +287,30 @@ export interface VoicebotMCPServer extends MCPServer {
 	enabled: boolean;
 }
 
+export interface PaginatedResponse<T> {
+	data: T[];
+	total: number;
+	page: number;
+}
+
+export interface PaginationParams {
+	page?: number;
+	page_size?: number;
+}
+
 export const mcpApi = {
 	market: {
-		list: () => http.get<MCPMarketEntry[]>("/mcp/market"),
+		list: (params?: PaginationParams) =>
+			http.get<PaginatedResponse<MCPMarketEntry>>("/mcp/market", {
+				params,
+			}),
 	},
 	// User-level MCP server CRUD
 	servers: {
-		list: () => http.get<MCPServer[]>("/mcp/servers"),
+		list: (params?: PaginationParams) =>
+			http.get<PaginatedResponse<MCPServer>>("/mcp/servers", {
+				params,
+			}),
 		get: (id: string) => http.get<MCPServer>(`/mcp/servers/${id}`),
 		create: (data: {
 			market_id?: string;

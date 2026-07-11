@@ -23,6 +23,17 @@ func (s *MCPMarketStore) List() ([]MCPMarketEntry, error) {
 	return list, nil
 }
 
+func (s *MCPMarketStore) ListPaginated(page, pageSize int) ([]MCPMarketEntry, int64, error) {
+	var list []MCPMarketEntry
+	var total int64
+	s.db.Model(&MCPMarketEntry{}).Count(&total)
+	offset := (page - 1) * pageSize
+	if err := s.db.Order("created_at asc").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+		return nil, 0, fmt.Errorf("mcp market store: list paginated: %w", err)
+	}
+	return list, total, nil
+}
+
 func (s *MCPMarketStore) GetByID(id string) (*MCPMarketEntry, error) {
 	var m MCPMarketEntry
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
@@ -44,6 +55,18 @@ func (s *MCPServerStore) ListByOwner(userID string) ([]MCPServer, error) {
 		return nil, fmt.Errorf("mcp server store: list: %w", err)
 	}
 	return list, nil
+}
+
+func (s *MCPServerStore) ListByOwnerPaginated(userID string, page, pageSize int) ([]MCPServer, int64, error) {
+	var list []MCPServer
+	var total int64
+	s.db.Model(&MCPServer{}).Where("owner_id = ? OR owner_id = ''", userID).Count(&total)
+	offset := (page - 1) * pageSize
+	if err := s.db.Where("owner_id = ? OR owner_id = ''", userID).
+		Order("created_at asc").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+		return nil, 0, fmt.Errorf("mcp server store: list paginated: %w", err)
+	}
+	return list, total, nil
 }
 
 func (s *MCPServerStore) GetByID(id string) (*MCPServer, error) {

@@ -202,6 +202,8 @@ export default function AgentDetailPage() {
 	const [mcpFilter, setMcpFilter] = useState<"all" | "bound" | "unbound">(
 		"all",
 	);
+	const [mcpPage, setMcpPage] = useState(1);
+	const [mcpPageSize, setMcpPageSize] = useState(12);
 	const [detailMcp, setDetailMcp] = useState<MCPServer | null>(null);
 	const [devAdding, setDevAdding] = useState(false);
 	const [devErr, setDevErr] = useState("");
@@ -218,7 +220,10 @@ export default function AgentDetailPage() {
 				deviceApi.list(id),
 				languageApi.list(),
 				modelApi.list(),
-				mcpApi.servers.list(),
+				mcpApi.servers.list({
+					page: 1,
+					page_size: 9999,
+				}) /* ponytail: fetches all for binding visibility, paginated client-side */,
 				mcpApi.bindings.list(id),
 			]);
 			const parsed = parseCfg(b.data.config_json);
@@ -227,7 +232,7 @@ export default function AgentDetailPage() {
 			setDevices(d.data);
 			setLanguages(langs.data);
 			setLlmModels(llm.data);
-			setMcpServers(mcpSv.data);
+			setMcpServers(mcpSv.data.data);
 			setMcpBindings(mcpBd.data.filter((m) => m.bound));
 
 			const res = await availableResourcesApi.list(
@@ -321,13 +326,23 @@ export default function AgentDetailPage() {
 
 	const boundIds = new Set(mcpBindings.filter((b) => b.bound).map((b) => b.id));
 
-	const filteredMcps = mcpServers.filter((s) => {
+	const allFiltered = mcpServers.filter((s) => {
 		if (mcpFilter === "bound" && !boundIds.has(s.id)) return false;
 		if (mcpFilter === "unbound" && boundIds.has(s.id)) return false;
 		if (mcpSearch && !s.name.toLowerCase().includes(mcpSearch.toLowerCase()))
 			return false;
 		return true;
 	});
+
+	const mcpTotalPages = Math.max(
+		1,
+		Math.ceil(allFiltered.length / mcpPageSize),
+	);
+	const safePage = Math.min(mcpPage, mcpTotalPages);
+	const filteredMcps = allFiltered.slice(
+		(safePage - 1) * mcpPageSize,
+		safePage * mcpPageSize,
+	);
 
 	const handleUnbindMcp = async (serverId: string) => {
 		if (!id) return;
@@ -1038,6 +1053,50 @@ export default function AgentDetailPage() {
 											</div>
 										);
 									})}
+								</div>
+							)}
+							{allFiltered.length > mcpPageSize && (
+								<div className="flex items-center justify-between mt-4">
+									<span className="text-xs text-zinc-500">
+										共 {allFiltered.length} 条
+									</span>
+									<div className="flex items-center gap-2">
+										<select
+											value={mcpPageSize}
+											onChange={(e) => {
+												setMcpPageSize(Number(e.target.value));
+												setMcpPage(1);
+											}}
+											className="h-7 text-xs bg-zinc-800 border border-zinc-700 rounded px-2 text-zinc-300 focus:outline-none focus:ring-1 focus:ring-violet-500 cursor-pointer"
+										>
+											{[12, 24, 48].map((n) => (
+												<option key={n} value={n}>
+													{n} 条/页
+												</option>
+											))}
+										</select>
+										<div className="flex items-center gap-1">
+											<button
+												onClick={() => setMcpPage((p) => Math.max(1, p - 1))}
+												disabled={safePage <= 1}
+												className="h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+											>
+												上一页
+											</button>
+											<span className="text-xs text-zinc-400 px-1">
+												{safePage} / {mcpTotalPages}
+											</span>
+											<button
+												onClick={() =>
+													setMcpPage((p) => Math.min(mcpTotalPages, p + 1))
+												}
+												disabled={safePage >= mcpTotalPages}
+												className="h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+											>
+												下一页
+											</button>
+										</div>
+									</div>
 								</div>
 							)}
 							<div className="border-t border-zinc-800 pt-3">

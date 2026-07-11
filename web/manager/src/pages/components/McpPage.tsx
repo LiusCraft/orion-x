@@ -105,6 +105,97 @@ const initialForm = {
 	headerVals: [""] as string[],
 };
 
+function PaginationBar({
+	total,
+	page,
+	pageSize,
+	onPageChange,
+	onPageSizeChange,
+}: {
+	total: number;
+	page: number;
+	pageSize: number;
+	onPageChange: (p: number) => void;
+	onPageSizeChange: (s: number) => void;
+}) {
+	const totalPages = Math.max(1, Math.ceil(total / pageSize));
+	return (
+		<div className="flex items-center justify-between mt-4">
+			<span className="text-xs text-zinc-500">共 {total} 条</span>
+			<div className="flex items-center gap-2">
+				<select
+					value={pageSize}
+					onChange={(e) => onPageSizeChange(Number(e.target.value))}
+					className="h-7 text-xs bg-zinc-800 border border-zinc-700 rounded px-2 text-zinc-300 focus:outline-none focus:ring-1 focus:ring-violet-500 cursor-pointer"
+				>
+					{[10, 20, 30, 50].map((n) => (
+						<option key={n} value={n}>
+							{n} 条/页
+						</option>
+					))}
+				</select>
+				<div className="flex items-center gap-1">
+					<button
+						onClick={() => onPageChange(page - 1)}
+						disabled={page <= 1}
+						className="h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+					>
+						上一页
+					</button>
+					{page > 2 && (
+						<>
+							<button
+								onClick={() => onPageChange(1)}
+								className="h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 transition-colors cursor-pointer"
+							>
+								1
+							</button>
+							<span className="text-xs text-zinc-600 px-0.5">...</span>
+						</>
+					)}
+					{page > 1 && (
+						<button
+							onClick={() => onPageChange(page - 1)}
+							className="h-7 w-7 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 transition-colors cursor-pointer"
+						>
+							{page - 1}
+						</button>
+					)}
+					<button className="h-7 w-7 text-xs rounded bg-violet-600 border border-violet-500 text-white cursor-default">
+						{page}
+					</button>
+					{page < totalPages && (
+						<button
+							onClick={() => onPageChange(page + 1)}
+							className="h-7 w-7 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 transition-colors cursor-pointer"
+						>
+							{page + 1}
+						</button>
+					)}
+					{page + 1 < totalPages && (
+						<>
+							<span className="text-xs text-zinc-600 px-0.5">...</span>
+							<button
+								onClick={() => onPageChange(totalPages)}
+								className="h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 transition-colors cursor-pointer"
+							>
+								{totalPages}
+							</button>
+						</>
+					)}
+					<button
+						onClick={() => onPageChange(page + 1)}
+						disabled={page >= totalPages}
+						className="h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+					>
+						下一页
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 export default function McpPage() {
 	const [market, setMarket] = useState<MCPMarketEntry[]>([]);
 	const [servers, setServers] = useState<MCPServer[]>([]);
@@ -215,14 +306,27 @@ export default function McpPage() {
 		return has ? rec : undefined;
 	};
 
+	const [marketPage, setMarketPage] = useState(1);
+	const [marketTotal, setMarketTotal] = useState(0);
+	const [serverPage, setServerPage] = useState(1);
+	const [serverTotal, setServerTotal] = useState(0);
+	const [pageSize, setPageSize] = useState(20);
+
+	const fetchAll = (page: number, ps: number) => {
+		Promise.all([
+			mcpApi.market.list({ page, page_size: ps }),
+			mcpApi.servers.list({ page, page_size: ps }),
+		]).then(([mk, sv]) => {
+			setMarket(mk.data.data);
+			setMarketTotal(mk.data.total);
+			setServers(sv.data.data);
+			setServerTotal(sv.data.total);
+			setLoading(false);
+		});
+	};
+
 	useEffect(() => {
-		Promise.all([mcpApi.market.list(), mcpApi.servers.list()]).then(
-			([mk, sv]) => {
-				setMarket(mk.data);
-				setServers(sv.data);
-				setLoading(false);
-			},
-		);
+		fetchAll(1, pageSize);
 	}, []);
 
 	const removeServer = async (serverId: string) => {
@@ -481,32 +585,35 @@ export default function McpPage() {
 							Model Context Protocol 服务管理，安装后可被智能体引用
 						</p>
 					</div>
-					<Button
-						onClick={() => openDrawer(null, "new")}
-						className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
-					>
-						<Plus className="w-4 h-4" />
-						自定义 MCP
-					</Button>
+					<div /> {/* placeholder for layout */}
 				</div>
 			</div>
 
 			<div className="px-8 py-6">
 				<Tabs defaultValue="market">
-					<TabsList className="bg-zinc-900 border border-zinc-800 h-9 p-0.5 mb-3">
-						<TabsTrigger
-							value="market"
-							className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
+					<div className="flex items-center justify-between mb-3">
+						<TabsList className="bg-zinc-900 border border-zinc-800 h-9 p-0.5">
+							<TabsTrigger
+								value="market"
+								className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
+							>
+								市场
+							</TabsTrigger>
+							<TabsTrigger
+								value="mine"
+								className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
+							>
+								已开通 ({servers.length})
+							</TabsTrigger>
+						</TabsList>
+						<Button
+							onClick={() => openDrawer(null, "new")}
+							className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20 shrink-0"
 						>
-							市场
-						</TabsTrigger>
-						<TabsTrigger
-							value="mine"
-							className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
-						>
-							已开通 ({servers.length})
-						</TabsTrigger>
-					</TabsList>
+							<Plus className="w-4 h-4" />
+							自定义 MCP
+						</Button>
+					</div>
 
 					<TabsContent value="market">
 						<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -537,10 +644,12 @@ export default function McpPage() {
 														return;
 													}
 													try {
-														const { data } = await mcpApi.servers.create({
+														const resp = await mcpApi.servers.create({
 															market_id: mcp.id,
 														});
-														setServers((prev) => [...prev, data]);
+														const { data: newServer } = resp;
+														setServers((prev) => [...prev, newServer]);
+														setServerTotal((t) => t + 1);
 													} catch {
 														// ignore
 													}
@@ -586,6 +695,30 @@ export default function McpPage() {
 								})
 							)}
 						</div>
+						{marketTotal > pageSize && (
+							<PaginationBar
+								total={marketTotal}
+								page={marketPage}
+								pageSize={pageSize}
+								onPageChange={(p) => {
+									setMarketPage(p);
+									mcpApi.market
+										.list({ page: p, page_size: pageSize })
+										.then((res) => {
+											setMarket(res.data.data);
+											setMarketTotal(res.data.total);
+										});
+								}}
+								onPageSizeChange={(s) => {
+									setPageSize(s);
+									setMarketPage(1);
+									mcpApi.market.list({ page: 1, page_size: s }).then((res) => {
+										setMarket(res.data.data);
+										setMarketTotal(res.data.total);
+									});
+								}}
+							/>
+						)}
 					</TabsContent>
 
 					<TabsContent value="mine">
@@ -655,6 +788,30 @@ export default function McpPage() {
 									);
 								})}
 							</div>
+						)}
+						{serverTotal > pageSize && (
+							<PaginationBar
+								total={serverTotal}
+								page={serverPage}
+								pageSize={pageSize}
+								onPageChange={(p) => {
+									setServerPage(p);
+									mcpApi.servers
+										.list({ page: p, page_size: pageSize })
+										.then((res) => {
+											setServers(res.data.data);
+											setServerTotal(res.data.total);
+										});
+								}}
+								onPageSizeChange={(s) => {
+									setPageSize(s);
+									setServerPage(1);
+									mcpApi.servers.list({ page: 1, page_size: s }).then((res) => {
+										setServers(res.data.data);
+										setServerTotal(res.data.total);
+									});
+								}}
+							/>
 						)}
 					</TabsContent>
 				</Tabs>

@@ -31,9 +31,36 @@ func NewMCPHandler(markets *store.MCPMarketStore, servers *store.MCPServerStore,
 
 // ── Market ──
 
+type PaginatedQuery struct {
+	Page     int `form:"page"`
+	PageSize int `form:"page_size"`
+}
+
+type PaginatedResponse struct {
+	Data  any   `json:"data"`
+	Total int64 `json:"total"`
+	Page  int   `json:"page"`
+}
+
+func parsePagination(c *gin.Context) (page, pageSize int) {
+	page = 1
+	pageSize = 20
+	var q PaginatedQuery
+	if c.ShouldBindQuery(&q) == nil {
+		if q.Page > 0 {
+			page = q.Page
+		}
+		if q.PageSize > 0 && q.PageSize <= 100 {
+			pageSize = q.PageSize
+		}
+	}
+	return
+}
+
 // GET /api/mcp/market
 func (h *MCPHandler) ListMarket(c *gin.Context) {
-	list, err := h.markets.List()
+	page, pageSize := parsePagination(c)
+	list, total, err := h.markets.ListPaginated(page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -45,26 +72,26 @@ func (h *MCPHandler) ListMarket(c *gin.Context) {
 			delete(list[i].Config, "env")
 			delete(list[i].Config, "cwd")
 			delete(list[i].Config, "endpoint")
-			// 有 HeaderMeta 时 headers 由前端通过 header_meta 渲染，不再暴露原始值
 			if list[i].HeaderMeta != nil {
 				delete(list[i].Config, "headers")
 			}
 		}
 	}
-	c.JSON(http.StatusOK, list)
+	c.JSON(http.StatusOK, PaginatedResponse{Data: list, Total: total, Page: page})
 }
 
 // ── MCP Server CRUD ──
 
 // GET /api/mcp/servers
 func (h *MCPHandler) ListServers(c *gin.Context) {
-	list, err := h.servers.ListByOwner(middleware.UserID(c))
+	page, pageSize := parsePagination(c)
+	list, total, err := h.servers.ListByOwnerPaginated(middleware.UserID(c), page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	stripMarketConfig(list)
-	c.JSON(http.StatusOK, list)
+	c.JSON(http.StatusOK, PaginatedResponse{Data: list, Total: total, Page: page})
 }
 
 // GET /api/mcp/servers/:serverID
