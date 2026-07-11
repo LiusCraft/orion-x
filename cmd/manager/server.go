@@ -21,6 +21,8 @@ func newRouter(
 	mcpServers *store.MCPServerStore,
 	mcpBindings *store.VoicebotMCPBindingStore,
 	signToken func(userID string) (string, error),
+	memStore *store.MemoryEntryStore,
+	turnStore *store.TurnStore,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -50,6 +52,8 @@ func newRouter(
 	mcpH := handler.NewMCPHandler(mcpMarket, mcpServers, mcpBindings, voicebots)
 	internalH := handler.NewInternalHandler(voicebots, devices, models, voices, mcpBindings)
 	availableH := handler.NewAvailableHandler(providers, models, voices)
+	memH := handler.NewMemoryHandler(memStore)
+	turnH := handler.NewTurnHandler(turnStore)
 
 	api := r.Group("/api")
 	{
@@ -129,13 +133,22 @@ func newRouter(
 
 	// Internal routes — intended for service-to-service calls within the same
 	// network, not exposed to end users (no JWT required).
-	r.GET("/internal/device-config", internalH.DeviceConfig)
-	r.POST("/internal/voices", voiceH.AdminCreate)
-	r.PATCH("/internal/voices/:id", voiceH.AdminUpdate)
-	r.GET("/internal/languages", langH.List)
-	r.POST("/internal/languages", langH.AdminCreate)
-	r.PUT("/internal/languages/:code", langH.AdminUpdate)
-	r.DELETE("/internal/languages/:code", langH.AdminDelete)
+	internal := r.Group("/internal")
+	{
+		internal.GET("/device-config", internalH.DeviceConfig)
+		internal.POST("/voices", voiceH.AdminCreate)
+		internal.PATCH("/voices/:id", voiceH.AdminUpdate)
+		internal.GET("/languages", langH.List)
+		internal.POST("/languages", langH.AdminCreate)
+		internal.PUT("/languages/:code", langH.AdminUpdate)
+		internal.DELETE("/languages/:code", langH.AdminDelete)
+
+		internal.GET("/devices/:device_id/memory", memH.GetMemory)
+		internal.PUT("/devices/:device_id/memory", memH.PutMemory)
+		internal.POST("/devices/:device_id/turns", turnH.CreateTurn)
+		internal.GET("/devices/:device_id/turns", turnH.SearchTurns)
+		internal.GET("/devices/:device_id/sessions/:session_id", turnH.GetSessionMessages)
+	}
 
 	return r
 }
