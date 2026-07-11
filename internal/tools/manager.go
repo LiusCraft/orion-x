@@ -74,6 +74,29 @@ func (m *Manager) Clone() *Manager {
 	}
 }
 
+// RegisterMCPServers connects to the given MCP server configs, loads their
+// tool specs, and registers them in this manager's registry.  The manager
+// tracks the sessions and closes them on Manager.Close().
+func (m *Manager) RegisterMCPServers(ctx context.Context, servers []MCPServerConfig) error {
+	for _, cfg := range servers {
+		specs, session, err := loadMCPSpecs(ctx, cfg)
+		if err != nil {
+			return fmt.Errorf("register MCP server %s: %w", cfg.ID, err)
+		}
+		m.sessions = append(m.sessions, session)
+		for _, spec := range specs {
+			m.registry.Add(spec)
+		}
+		logging.Infof("[Tools] Registered MCP server %q with %d tools", cfg.ID, len(specs))
+	}
+
+	if len(servers) > 0 {
+		defs := m.registry.Definitions()
+		logging.Infof("[Tools] After MCP registration — total tools: %d", len(defs))
+	}
+	return nil
+}
+
 func (m *Manager) Close() error {
 	var errs []error
 	for _, s := range m.sessions {

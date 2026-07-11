@@ -17,6 +17,9 @@ func newRouter(
 	models *store.AIModelStore,
 	voices *store.ModelVoiceStore,
 	langH *handler.LanguageHandler,
+	mcpMarket *store.MCPMarketStore,
+	mcpServers *store.MCPServerStore,
+	mcpBindings *store.VoicebotMCPBindingStore,
 	signToken func(userID string) (string, error),
 ) *gin.Engine {
 	r := gin.New()
@@ -24,7 +27,11 @@ func newRouter(
 
 	// CORS — 前端开发时允许跨域
 	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.Request.Header.Get("Origin")
+		allowed := origin == "http://localhost:5173" || origin == "http://localhost:3000" || origin == "http://127.0.0.1:5173"
+		if allowed {
+			c.Header("Access-Control-Allow-Origin", origin)
+		}
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if c.Request.Method == "OPTIONS" {
@@ -40,7 +47,8 @@ func newRouter(
 	providerH := handler.NewProviderHandler(providers)
 	modelH := handler.NewModelHandler(models)
 	voiceH := handler.NewVoiceHandler(voices)
-	internalH := handler.NewInternalHandler(voicebots, devices, models, voices)
+	mcpH := handler.NewMCPHandler(mcpMarket, mcpServers, mcpBindings, voicebots)
+	internalH := handler.NewInternalHandler(voicebots, devices, models, voices, mcpBindings)
 	availableH := handler.NewAvailableHandler(providers, models, voices)
 
 	api := r.Group("/api")
@@ -96,6 +104,23 @@ func newRouter(
 		api.GET("/sessions", jwtMw, func(c *gin.Context) {
 			c.JSON(200, []any{})
 		})
+
+		// MCP 市场 & 用户级 MCP server CRUD
+		api.GET("/mcp/market", jwtMw, mcpH.ListMarket)
+		api.GET("/mcp/servers", jwtMw, mcpH.ListServers)
+		api.POST("/mcp/servers", jwtMw, mcpH.CreateServer)
+		api.POST("/mcp/test-connection", jwtMw, mcpH.TestConnection)
+		api.POST("/mcp/list-tools", jwtMw, mcpH.ListTools)
+		api.POST("/mcp/call-tool", jwtMw, mcpH.CallTool)
+		api.GET("/mcp/servers/:serverID", jwtMw, mcpH.GetServer)
+		api.PUT("/mcp/servers/:serverID", jwtMw, mcpH.UpdateServer)
+		api.DELETE("/mcp/servers/:serverID", jwtMw, mcpH.DeleteServer)
+
+		// voicebot MCP 绑定
+		bots.GET("/:id/mcps", mcpH.ListVoicebotMCPServers)
+		bots.POST("/:id/mcps", mcpH.BindMCP)
+		bots.DELETE("/:id/mcps/:serverID", mcpH.UnbindMCP)
+		bots.PATCH("/:id/mcps/:serverID/toggle", mcpH.ToggleBinding)
 
 		// 语言字典（只读）
 		api.GET("/languages", jwtMw, langH.List)

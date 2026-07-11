@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -21,6 +22,21 @@ type mcpSessionData struct {
 	session *mcp.ClientSession
 }
 
+type headerRoundTripper struct {
+	base    http.RoundTripper
+	headers map[string]string
+}
+
+func (t headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	cloned := req.Clone(req.Context())
+	for key, value := range t.headers {
+		if strings.TrimSpace(key) != "" {
+			cloned.Header.Set(key, value)
+		}
+	}
+	return t.base.RoundTrip(cloned)
+}
+
 func (s *mcpSessionData) Close() error {
 	return s.session.Close()
 }
@@ -28,7 +44,7 @@ func (s *mcpSessionData) Close() error {
 func loadMCPSpecs(ctx context.Context, cfg MCPServerConfig) ([]Spec, *mcpSession, error) {
 	logging.Infof("[Tools] Loading MCP tools from: %s (transport: %s)", cfg.ID, cfg.Transport)
 
-	session, err := connectMCP(ctx, cfg)
+	session, err := ConnectMCP(ctx, cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect MCP server: %w", err)
 	}
@@ -101,25 +117,22 @@ func loadMCPSpecs(ctx context.Context, cfg MCPServerConfig) ([]Spec, *mcpSession
 	return specs, mcpSess, nil
 }
 
-func connectMCP(ctx context.Context, cfg MCPServerConfig) (*mcp.ClientSession, error) {
+func ConnectMCP(ctx context.Context, cfg MCPServerConfig) (*mcp.ClientSession, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "orion-x", Version: "1.0.0"}, nil)
 	transport, err := buildMCPTransport(cfg)
 	if err != nil {
 		return nil, err
 	}
-	timeout := time.Duration(cfg.TimeoutMs) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	connectCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return client.Connect(connectCtx, transport, nil)
+	// Pass the caller's context directly — the SDK uses it for the session's
+	// jsonrpc2 lifecycle.  The caller (handler with HTTP request context) is
+	// responsible for timeout/cancellation.
+	return client.Connect(ctx, transport, nil)
 }
 
 func buildMCPTransport(cfg MCPServerConfig) (mcp.Transport, error) {
 	transportType := strings.ToLower(strings.TrimSpace(cfg.Transport))
 	if transportType == "" {
-		transportType = "sse"
+		transportType = "streamable"
 	}
 
 	switch transportType {
@@ -129,19 +142,42 @@ func buildMCPTransport(cfg MCPServerConfig) (mcp.Transport, error) {
 			return nil, errors.New("mcp stdio command is required")
 		}
 		cmd := exec.Command(command, cfg.Args...)
-		cmd.Env = append(cmd.Environ(), flattenMCPEnv(cfg.Env)...)
+		cmd.Env = append(cmd.Environ(), flattenMCPEnv(expandMCPVars(cfg.Env))...)
 		if cwd := strings.TrimSpace(cfg.CWD); cwd != "" {
 			cmd.Dir = cwd
 		}
 		return &mcp.CommandTransport{Command: cmd}, nil
-	case "sse", "streamable", "stream_http":
+	case "sse", "streamable":
 		endpoint := strings.TrimSpace(cfg.Endpoint)
 		if endpoint == "" {
 			return nil, errors.New("mcp endpoint is required")
 		}
-		return &mcp.StreamableClientTransport{Endpoint: endpoint}, nil
+		return &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: mcpHTTPClient(expandMCPVars(cfg.Headers))}, nil
 	default:
 		return nil, fmt.Errorf("unsupported mcp transport: %s", cfg.Transport)
+	}
+}
+
+func expandMCPVars(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = os.ExpandEnv(value)
+	}
+	return out
+}
+
+func mcpHTTPClient(headers map[string]string) *http.Client {
+	if len(headers) == 0 {
+		return nil
+	}
+	return &http.Client{
+		Transport: headerRoundTripper{
+			base:    http.DefaultTransport,
+			headers: headers,
+		},
 	}
 }
 

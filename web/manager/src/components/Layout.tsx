@@ -6,7 +6,7 @@ import { useTheme } from './ThemeProvider'
 import {
   Bot, Store, Cpu, Puzzle, Zap, Brain, BookOpen, Database,
   Mic2, Wand2, Music, Activity, Layers, BarChart3, CreditCard,
-  Key, LogOut, Building2, Sun, Moon, Bell,
+  Key, Building2, Sun, Moon, Bell,
   Copy, Check, User, Wallet, ChevronRight, Shield,
 } from 'lucide-react'
 
@@ -96,12 +96,12 @@ function PCard({ children, className = '' }: { children: React.ReactNode; classN
 
 function UserPopover({ username, userId, onLogout }: { username: string | null; userId: string | null; onLogout: () => void }) {
   const [open, setOpen] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout>>()
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hoverRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
   const enter = () => {
-    clearTimeout(timerRef.current)
+    if (timerRef.current) clearTimeout(timerRef.current)
     setOpen(true)
   }
 

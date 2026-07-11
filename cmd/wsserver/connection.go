@@ -251,6 +251,38 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		_ = rawConn.Close()
 	}()
 
+	// Load MCP servers from device config into the per-connection manager
+	mcpCfgs := connCfg.Tools.MCP
+	if len(mcpCfgs) > 0 {
+		names := make([]string, len(mcpCfgs))
+		toolCfgs := make([]tools.MCPServerConfig, len(mcpCfgs))
+		for i, m := range mcpCfgs {
+			names[i] = m.ID
+			toolCfgs[i] = tools.MCPServerConfig{
+				ID:           m.ID,
+				Transport:    m.Transport,
+				Command:      m.Command,
+				Args:         m.Args,
+				Env:          m.Env,
+				CWD:          m.CWD,
+				Endpoint:     m.Endpoint,
+				Headers:      m.Headers,
+				ToolNameList: m.ToolNameList,
+				TimeoutMs:    m.TimeoutMs,
+			}
+		}
+		logging.Infof("wsserver[%s]: device config has %d MCP servers: %v", sessionID, len(mcpCfgs), names)
+		if err := connMgr.RegisterMCPServers(ctx, toolCfgs); err != nil {
+			cancel()
+			logging.Errorf("wsserver[%s]: failed to register MCP servers: %v", sessionID, err)
+			// Don't fail the connection — continue with available tools
+		}
+		defs := connMgr.Registry().Definitions()
+		logging.Infof("wsserver[%s]: MCP registration complete — total tools: %d", sessionID, len(defs))
+	} else {
+		logging.Infof("wsserver[%s]: device config has NO MCP servers, total tools: %d", sessionID, len(connMgr.Registry().Definitions()))
+	}
+
 	// If the client declared "mcp" support, create the device-MCP client and
 	// kick off the initialize handshake after the pipeline starts.
 	if hello.Features["mcp"] {

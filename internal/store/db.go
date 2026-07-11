@@ -17,10 +17,10 @@ func Open(dsn string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: open db: %w", err)
 	}
-	if err := db.AutoMigrate(&User{}, &Voicebot{}, &Device{}, &Provider{}, &AIModel{}, &ModelVoice{}, &Language{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &Voicebot{}, &Device{}, &Provider{}, &AIModel{}, &ModelVoice{}, &Language{}, &MCPMarketEntry{}, &MCPServer{}, &VoicebotMCPBinding{}); err != nil {
 		return nil, fmt.Errorf("store: migrate: %w", err)
 	}
-	logging.Infof("store: migration done (users, voicebots, devices, providers, ai_models, model_voices, languages)")
+	logging.Infof("store: migration done (users, voicebots, devices, providers, ai_models, model_voices, languages, mcp_market_entries, mcp_servers, voicebot_mcp_bindings)")
 
 	if err := seedLanguages(db); err != nil {
 		return nil, fmt.Errorf("store: seed languages: %w", err)
