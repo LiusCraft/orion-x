@@ -15,6 +15,8 @@ import (
 // to the global appConfig).
 type DeviceConfigLoader interface {
 	LoadConfig(deviceID string) (*config.AppConfig, error)
+	// ManagerURL returns the base URL of the manager service.
+	ManagerURL() string
 }
 
 // httpDeviceConfigLoader fetches device config from the manager service via
@@ -30,6 +32,10 @@ func newHTTPDeviceConfigLoader(managerURL string) *httpDeviceConfigLoader {
 		managerURL: managerURL,
 		client:     &http.Client{Timeout: 3 * time.Second},
 	}
+}
+
+func (l *httpDeviceConfigLoader) ManagerURL() string {
+	return l.managerURL
 }
 
 func (l *httpDeviceConfigLoader) LoadConfig(deviceID string) (*config.AppConfig, error) {

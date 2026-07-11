@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/agent"
-	"github.com/liuscraft/orion-x/internal/config"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
@@ -55,30 +54,13 @@ func main() {
 
 	baseCtx := context.Background()
 
-	// process-level memory / tool / agent — shared across connections
-	// Each connection gets its own AppConfig (from manager), Session, ASR/TTS.
-	// Memory and tools use a placeholder AppConfig for initialization only;
-	// per-connection agent is constructed with the device's actual config.
-	placeholderCfg := config.DefaultConfig()
-	llmCfg := placeholderCfg.Provider.LLM.OpenAI
-
-	memCfg := memory.Config{
-		Mode:                 memory.Mode(strings.TrimSpace(placeholderCfg.Memory.Mode)),
-		SessionMaxTurns:      placeholderCfg.Memory.SessionMaxTurns,
-		SessionSummaryEveryN: placeholderCfg.Memory.SessionSummaryEveryN,
-		LongTermDBPath:       placeholderCfg.Memory.LongTermDBPath,
-		LongTermMaxResults:   placeholderCfg.Memory.LongTermMaxResults,
-		RetentionDays:        placeholderCfg.Memory.RetentionDays,
-		FTSMinScore:          placeholderCfg.Memory.FTSMinScore,
-	}
-	memorySvc, err := memory.NewService(memCfg, memory.Options{
+	// process-level memory / tool / agent — shared across connections.
+	// Per-connection memory service is created in newConnection.
+	memorySvc, err := memory.NewService(memory.Config{}, memory.Options{
 		SystemPrompt: agent.DefaultSystemPrompt(),
-		LLM: memory.LLMConfig{
-			Provider: placeholderCfg.Provider.LLM.Type,
-			APIKey:   llmCfg.APIKey,
-			BaseURL:  llmCfg.BaseURL,
-			Model:    llmCfg.Model,
-		},
+		ManagerURL:   managerURL,
+		DeviceID:     "",
+		ReviewConfig: memory.ReviewConfig{Enabled: false},
 	})
 	if err != nil {
 		logging.Fatalf("Failed to create memory service: %v", err)

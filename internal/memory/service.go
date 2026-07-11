@@ -2,8 +2,6 @@ package memory
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -13,191 +11,126 @@ import (
 
 type Options struct {
 	SystemPrompt string
-	LLM          LLMConfig
-	Store        Store
+	LLM          llm.Client
+	ManagerURL   string
+	DeviceID     string
+	ReviewConfig ReviewConfig
+	CompressCfg  CompressionConfig
 	Now          func() time.Time
 }
 
-type serviceImpl struct {
-	cfg          Config
-	systemPrompt string
-	store        Store
-	session      *SessionBuffer
-	extractor    *llmExtractor
-	now          func() time.Time
+type Service struct {
+	store         *CuratedStore
+	review        *BackgroundReview
+	compressor    *Compressor
+	sessionBuffer []Turn // local buffer for recent turns
+	systemPrompt  string
+	now           func() time.Time
 }
 
-func NewService(cfg Config, opts Options) (Service, error) {
-	cfg = normalizeConfig(cfg)
+func NewService(cfg Config, opts Options) (*Service, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
 
-	svc := &serviceImpl{
-		cfg:          cfg,
+	store := NewCuratedStore(opts.ManagerURL, opts.DeviceID, cfg.MemoryCharLimit, cfg.UserCharLimit)
+	review := NewBackgroundReview(store, opts.ReviewConfig)
+
+	var compressor *Compressor
+	if opts.LLM != nil {
+		compressor = NewCompressor(opts.LLM, opts.CompressCfg)
+	}
+
+	svc := &Service{
+		store:        store,
+		review:       review,
+		compressor:   compressor,
 		systemPrompt: strings.TrimSpace(opts.SystemPrompt),
-		store:        opts.Store,
 		now:          opts.Now,
 	}
 
-	if cfg.Mode == ModeSession || cfg.Mode == ModeLongTerm {
-		var summarizer Summarizer
-		model, err := newLLMModel(context.Background(), opts.LLM)
-		if err != nil {
-			return nil, err
-		}
-		if model != nil && cfg.SessionSummaryEveryN > 0 {
-			summarizer = &llmSummarizer{model: model}
-		}
-		svc.session = NewSessionBuffer(cfg.SessionMaxTurns, cfg.SessionSummaryEveryN, summarizer)
-
-		if cfg.Mode == ModeLongTerm && model != nil {
-			svc.extractor = &llmExtractor{
-				model:             model,
-				now:               opts.Now,
-				retentionDays:     cfg.RetentionDays,
-				defaultType:       "fact",
-				defaultImportance: 3,
-			}
-		}
-	}
-
-	if cfg.Mode == ModeLongTerm {
-		if svc.store == nil {
-			if strings.TrimSpace(cfg.LongTermDBPath) == "" {
-				return nil, errors.New("memory.long_term_db_path is required")
-			}
-			store, err := NewSQLiteStore(cfg.LongTermDBPath)
-			if err != nil {
-				return nil, err
-			}
-			svc.store = store
-		}
-		if cfg.RetentionDays > 0 {
-			if err := svc.store.Purge(opts.Now(), cfg.RetentionDays); err != nil {
-				logging.Warnf("Memory: purge failed: %v", err)
-			}
-		}
+	// Load memory from Manager
+	if err := store.Load(context.Background()); err != nil {
+		logging.Warnf("Memory: failed to load curated store: %v", err)
 	}
 
 	return svc, nil
 }
 
-func (s *serviceImpl) BuildContextMessages(ctx context.Context, userText string) ([]*llm.Message, error) {
-	messages := make([]*llm.Message, 0, 8)
+// BuildContextMessages assembles messages for the LLM: system prompt + frozen snapshot + history.
+func (s *Service) BuildContextMessages(ctx context.Context, history []*llm.Message) []*llm.Message {
+	messages := make([]*llm.Message, 0, 16)
 	if s.systemPrompt != "" {
 		messages = append(messages, &llm.Message{Role: "system", Content: s.systemPrompt})
 	}
 
-	var queryErr error
-	if s.cfg.Mode == ModeLongTerm && s.store != nil {
-		memCtx, ok := FromContext(ctx)
-		if ok && strings.TrimSpace(memCtx.UserID) != "" && strings.TrimSpace(userText) != "" {
-			items, err := s.store.Query(memCtx.UserID, userText, s.cfg.LongTermMaxResults, s.cfg.FTSMinScore)
+	memoryBlock := s.store.FormatForSystemPrompt("memory")
+	userBlock := s.store.FormatForSystemPrompt("user")
+	if memoryBlock != "" || userBlock != "" {
+		var b strings.Builder
+		if memoryBlock != "" {
+			b.WriteString(memoryBlock)
+		}
+		if userBlock != "" {
+			if b.Len() > 0 {
+				b.WriteString("\n\n")
+			}
+			b.WriteString(userBlock)
+		}
+		messages = append(messages, &llm.Message{Role: "system", Content: b.String()})
+	}
+
+	messages = append(messages, history...)
+	return messages
+}
+
+// RecordTurn saves a turn and triggers background review.
+func (s *Service) RecordTurn(ctx context.Context, turn Turn) error {
+	if turn.Aborted {
+		return nil
+	}
+	s.sessionBuffer = append(s.sessionBuffer, turn)
+	if len(s.sessionBuffer) > 50 {
+		s.sessionBuffer = s.sessionBuffer[len(s.sessionBuffer)-50:]
+	}
+
+	// Async: save turn to Manager via HTTP (TODO: wire up)
+	// POST /internal/devices/{device_id}/turns
+
+	// Trigger background review
+	snapshot := s.store.FormatForSystemPrompt("memory")
+	s.review.Spawn(ctx, s.sessionBuffer, snapshot)
+
+	// Check compression (best effort)
+	if s.compressor != nil {
+		if s.compressor.ShouldCompress(s.sessionBuffer, 500, 8192) {
+			result, err := s.compressor.Compress(ctx, s.sessionBuffer)
 			if err != nil {
-				queryErr = err
-			} else if len(items) > 0 {
-				messages = append(messages, &llm.Message{Role: "system", Content: formatLongTermMemory(items)})
+				logging.Warnf("Memory: compression failed: %v", err)
+			} else {
+				compressedTurns := []Turn{{
+					TurnID:        -1,
+					UserText:      "[摘要]",
+					AssistantText: result.Summary,
+					StartedAt:     turn.StartedAt,
+					EndedAt:       turn.EndedAt,
+				}}
+				compressedTurns = append(compressedTurns, result.TailTurns...)
+				s.sessionBuffer = compressedTurns
+				logging.Infof("Memory: compression done, %d turns → %d turns + summary",
+					len(s.sessionBuffer), len(result.TailTurns))
 			}
 		}
 	}
 
-	if s.session != nil {
-		messages = append(messages, s.session.Messages()...)
-	}
-
-	messages = append(messages, &llm.Message{Role: "user", Content: userText})
-	return messages, queryErr
-}
-
-func (s *serviceImpl) RecordTurn(ctx context.Context, turn Turn) error {
-	if s.cfg.Mode == ModeNone {
-		return nil
-	}
-	if turn.Aborted {
-		return nil
-	}
-	if s.session != nil {
-		s.session.Add(ctx, turn)
-	}
-	if s.cfg.Mode != ModeLongTerm || s.store == nil {
-		return nil
-	}
-
-	memCtx, ok := FromContext(ctx)
-	if ok {
-		turn.UserID = memCtx.UserID
-		turn.SessionID = memCtx.SessionID
-		turn.DeviceID = memCtx.DeviceID
-	}
-	if strings.TrimSpace(turn.UserID) == "" {
-		return nil
-	}
-
-	if err := s.store.SaveTurn(turn); err != nil {
-		return err
-	}
-
-	if s.extractor == nil {
-		return nil
-	}
-	items, err := s.extractor.Extract(ctx, turn)
-	if err != nil {
-		return err
-	}
-	if len(items) == 0 {
-		return nil
-	}
-	for i := range items {
-		items[i].UserID = turn.UserID
-		if items[i].CreatedAt.IsZero() {
-			items[i].CreatedAt = s.now()
-		}
-	}
-	return s.store.SaveItems(items)
-}
-
-func (s *serviceImpl) Close() error {
-	if s.store != nil {
-		return s.store.Close()
-	}
 	return nil
 }
 
-func normalizeConfig(cfg Config) Config {
-	if cfg.Mode == "" {
-		cfg.Mode = ModeSession
-	}
-	if cfg.SessionMaxTurns <= 0 {
-		cfg.SessionMaxTurns = 10
-	}
-	if cfg.SessionSummaryEveryN < 0 {
-		cfg.SessionSummaryEveryN = 0
-	}
-	if cfg.LongTermMaxResults <= 0 {
-		cfg.LongTermMaxResults = 6
-	}
-	if cfg.RetentionDays < 0 {
-		cfg.RetentionDays = 0
-	}
-	return cfg
+func (s *Service) Close() error {
+	return nil
 }
 
-func formatLongTermMemory(items []MemoryItem) string {
-	var b strings.Builder
-	b.WriteString("以下是用户长期记忆（仅供参考，不确定时请向用户确认）：")
-	for _, item := range items {
-		content := strings.TrimSpace(item.Content)
-		if content == "" {
-			continue
-		}
-		typeLabel := strings.TrimSpace(item.Type)
-		if typeLabel != "" {
-			typeLabel = fmt.Sprintf("[%s] ", typeLabel)
-		}
-		b.WriteString("\n- ")
-		b.WriteString(typeLabel)
-		b.WriteString(content)
-	}
-	return b.String()
+// CuratedStore exposes the underlying store for tool handlers.
+func (s *Service) CuratedStore() *CuratedStore {
+	return s.store
 }

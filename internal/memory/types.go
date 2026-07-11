@@ -3,8 +3,6 @@ package memory
 import (
 	"context"
 	"time"
-
-	"github.com/liuscraft/orion-x/internal/llm"
 )
 
 type Mode string
@@ -23,6 +21,8 @@ type Config struct {
 	LongTermMaxResults   int
 	RetentionDays        int
 	FTSMinScore          float64
+	MemoryCharLimit      int
+	UserCharLimit        int
 }
 
 type Context struct {
@@ -38,33 +38,26 @@ type Turn struct {
 	StartedAt     time.Time
 	EndedAt       time.Time
 	Aborted       bool
-
-	UserID    string
-	SessionID string
-	DeviceID  string
+	UserID        string
+	SessionID     string
+	DeviceID      string
 }
 
-type MemoryItem struct {
-	ID         int64
-	UserID     string
-	Content    string
-	Type       string
-	Importance int
-	CreatedAt  time.Time
-	ExpiresAt  *time.Time
-	Score      float64
+type contextKey struct{}
+
+// WithContext 将记忆上下文写入 context。
+func WithContext(ctx context.Context, memCtx Context) context.Context {
+	return context.WithValue(ctx, contextKey{}, memCtx)
 }
 
-type Store interface {
-	SaveTurn(turn Turn) error
-	SaveItems(items []MemoryItem) error
-	Query(userID, query string, limit int, minScore float64) ([]MemoryItem, error)
-	Purge(now time.Time, retentionDays int) error
-	Close() error
+// FromContext 从 context 读取记忆上下文。
+func FromContext(ctx context.Context) (Context, bool) {
+	value := ctx.Value(contextKey{})
+	if value == nil {
+		return Context{}, false
+	}
+	memCtx, ok := value.(Context)
+	return memCtx, ok
 }
 
-type Service interface {
-	BuildContextMessages(ctx context.Context, userText string) ([]*llm.Message, error)
-	RecordTurn(ctx context.Context, turn Turn) error
-	Close() error
-}
+

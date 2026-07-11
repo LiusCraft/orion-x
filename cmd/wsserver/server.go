@@ -33,7 +33,7 @@ const helloTimeout = 10 * time.Second
 // connections, TTSProcessor dispatchers, etc. would leak).
 type Server struct {
 	toolsMgr  *tools.Manager
-	memorySvc memory.Service
+	memorySvc *memory.Service
 	deviceCfg DeviceConfigLoader
 	upgrader  websocket.Upgrader
 
@@ -42,7 +42,7 @@ type Server struct {
 	connWG     sync.WaitGroup
 }
 
-func NewServer(toolsMgr *tools.Manager, memorySvc memory.Service, deviceCfg DeviceConfigLoader) *Server {
+func NewServer(toolsMgr *tools.Manager, memorySvc *memory.Service, deviceCfg DeviceConfigLoader) *Server {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	return &Server{
 		toolsMgr:   toolsMgr,

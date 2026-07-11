@@ -14,7 +14,7 @@ type Agent struct {
 	client       llm.Client
 	registry     *tools.Registry
 	model        string
-	memorySvc    memory.Service
+	memorySvc    *memory.Service
 	maxSteps     int
 	systemPrompt string
 }
@@ -25,7 +25,7 @@ func (a *Agent) RegisterBuiltinTool(spec tools.Spec) {
 	a.registry.Add(spec)
 }
 
-func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc memory.Service) (*Agent, error) {
+func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc *memory.Service) (*Agent, error) {
 	normalized, err := normalizeConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -49,7 +49,7 @@ func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc memory.S
 }
 
 // newWithClient 使用已构造好的 llm.Client 组装 Agent，供测试注入 fake client。
-func newWithClient(client llm.Client, registry *tools.Registry, model string, memorySvc memory.Service, systemPrompt string) *Agent {
+func newWithClient(client llm.Client, registry *tools.Registry, model string, memorySvc *memory.Service, systemPrompt string) *Agent {
 	return &Agent{
 		client:       client,
 		registry:     registry,

@@ -75,12 +75,9 @@ func main() {
 	}
 	memorySvc, err := memory.NewService(memCfg, memory.Options{
 		SystemPrompt: agent.DefaultSystemPrompt(),
-		LLM: memory.LLMConfig{
-			Provider: appConfig.Provider.LLM.Type,
-			APIKey:   llmCfg.APIKey,
-			BaseURL:  llmCfg.BaseURL,
-			Model:    llmCfg.Model,
-		},
+		ManagerURL:   "",
+		DeviceID:     "local",
+		ReviewConfig: memory.ReviewConfig{Enabled: false},
 	})
 	if err != nil {
 		logging.Fatalf("Failed to create memory service: %v", err)

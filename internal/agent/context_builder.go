@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/liuscraft/orion-x/internal/llm"
-	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/session"
 )
 
@@ -19,12 +18,8 @@ func (a *Agent) buildContextMessages(ctx context.Context, sess *session.Session)
 	}
 
 	if a.memorySvc != nil {
-		memMsgs, err := a.memorySvc.BuildContextMessages(ctx, "")
-		if err != nil {
-			logging.Warnf("Agent: build memory context failed: %v", err)
-		} else {
-			return mergeSystemAndHistory(filterSystemMessages(memMsgs), history)
-		}
+		memMsgs := a.memorySvc.BuildContextMessages(ctx, nil)
+		return mergeSystemAndHistory(filterSystemMessages(memMsgs), history)
 	}
 
 	return mergeSystemAndHistory([]llm.Message{{Role: "system", Content: defaultSystemPrompt}}, history)

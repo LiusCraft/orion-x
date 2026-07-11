@@ -91,6 +91,7 @@ type wsConnection struct {
 
 	connMgr   *tools.Registry
 	connAgent *agent.Agent
+	memSvc    *memory.Service
 	iotMgr    *iotManager
 	deviceMCP *deviceMCPClient
 
@@ -303,6 +304,30 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		return nil, fmt.Errorf("create per-connection agent: %w", err)
 	}
 
+	// Per-connection memory service with per-device CuratedStore
+	deviceID := hello.DeviceID
+	memSvc, err := memory.NewService(memory.Config{
+		MemoryCharLimit: connCfg.Memory.MemoryCharLimit,
+		UserCharLimit:   connCfg.Memory.UserCharLimit,
+	}, memory.Options{
+		SystemPrompt: agent.DefaultSystemPrompt(),
+		ManagerURL:   s.deviceCfg.ManagerURL(),
+		DeviceID:     deviceID,
+		ReviewConfig: memory.ReviewConfig{Enabled: true},
+	})
+	if err != nil {
+		logging.Warnf("wsserver[%s]: memory init: %v", sessionID, err)
+		memSvc = nil
+	}
+
+	// Register builtin tools (memory, session_search) from per-connection CuratedStore
+	if memSvc != nil && memSvc.CuratedStore() != nil {
+		store := memSvc.CuratedStore()
+		connAgent.RegisterBuiltinTool(tools.MemoryToolSpec(store))
+		connAgent.RegisterBuiltinTool(tools.SessionSearchToolSpec(s.deviceCfg.ManagerURL(), deviceID))
+		logging.Infof("wsserver[%s]: registered memory system tools", sessionID)
+	}
+
 	if err := ttsProc.Start(ctx); err != nil {
 		cancel()
 		return nil, err
@@ -364,6 +389,7 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		audioSrc:  audioSrc,
 		connMgr:   connMgr.Registry(),
 		connAgent: connAgent,
+		memSvc:    memSvc,
 		iotMgr:    iotMgr,
 		deviceMCP: devMCP,
 		ctx:       ctx,
@@ -456,6 +482,9 @@ func (c *wsConnection) close() {
 	}
 	if c.audioSrc != nil {
 		_ = c.audioSrc.Close()
+	}
+	if c.memSvc != nil {
+		_ = c.memSvc.Close()
 	}
 	if c.cancel != nil {
 		c.cancel()
