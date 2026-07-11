@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { Puzzle, Plus, Globe, Trash2, Edit2, CheckCircle2, Lock, Key, Zap } from 'lucide-react'
+import { Puzzle, Plus, Globe, Trash2, Edit2, CheckCircle2, Lock, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'

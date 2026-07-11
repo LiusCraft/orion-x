@@ -38,7 +38,7 @@ func (l *httpDeviceConfigLoader) LoadConfig(deviceID string) (*config.AppConfig,
 	if err != nil {
 		return nil, fmt.Errorf("device config loader: GET %s: %w", u, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, nil // device not registered → caller uses fallback

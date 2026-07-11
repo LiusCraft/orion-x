@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { Search, Bot, Sparkles, Wrench, Palette, Globe, HeartPulse, BookOpen, MoreHorizontal } from 'lucide-react'
+import { Search, Bot, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 
 const CATEGORIES = ['全部', '对话助手', '工具专家', '创意创作', '知识问答', '生活服务', '医疗健康']

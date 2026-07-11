@@ -1,24 +1,14 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { voicebotApi, deviceApi, languageApi, availableResourcesApi, modelApi, type Device, type Language, type AvailableResources, type AIModel } from '@/lib/api'
+import { voicebotApi, deviceApi, languageApi, availableResourcesApi, modelApi, mcpApi, type Device, type Language, type AvailableResources, type AIModel, type MCPServer, type VoicebotMCPServer } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { ChevronLeft, Plus, Trash2, Play } from 'lucide-react'
+import { ChevronLeft, Plus, Play } from 'lucide-react'
 import QuickChat from './QuickChat'
-
-interface MCPServer {
-  id: string
-  transport: 'stdio' | 'sse' | 'streamable'
-  command: string
-  args: string[]
-  endpoint: string
-  tool_name_list: string[]
-  timeout_ms: number
-}
 
 interface BotConfig {
   language: string
@@ -27,17 +17,15 @@ interface BotConfig {
   llm: { model_id: string; prompt: string }
   audio: { sample_rate: number }
   memory: { mode: string; session_max_turns: number; session_summary_every_n: number; long_term_db_path: string; long_term_max_results: number; retention_days: number }
-  mcp: MCPServer[]
 }
 
 const DC: BotConfig = {
   language: 'zh-CN',
   asr: { model_id: '', vad_mode: 'auto', vad_threshold: 0.5, vad_min_silence_ms: 500, vad_speech_pad_ms: 300 },
   tts: { model_id: '', voice_id: '', volume: 50, rate: 1.0, pitch: 1.0 },
-  llm: { model_id: '' },
+  llm: { model_id: '', prompt: '' },
   audio: { sample_rate: 16000 },
   memory: { mode: 'session', session_max_turns: 10, session_summary_every_n: 20, long_term_db_path: 'data/memory.db', long_term_max_results: 6, retention_days: 365 },
-  mcp: [],
 }
 
 const EMOTIONS = ['happy', 'sad', 'angry', 'calm', 'excited'] as const
@@ -60,7 +48,6 @@ function parseCfg(json: string): BotConfig {
         llm: { ...DC.llm, ...c.llm },
         audio: { ...DC.audio, ...c.audio },
         memory: { ...DC.memory, ...c.memory },
-        mcp: Array.isArray(c.mcp) ? c.mcp : [],
       }
     }
     return {
@@ -82,7 +69,6 @@ function parseCfg(json: string): BotConfig {
   llm: { model_id: '', prompt: '' },
       audio: { sample_rate: c.audio?.in_pipe?.sample_rate ?? DC.audio.sample_rate },
       memory: { ...DC.memory, ...c.memory },
-      mcp: Array.isArray(c.tools?.mcp) ? c.tools.mcp : [],
     }
   } catch { return structuredClone(DC) }
 }
@@ -117,11 +103,10 @@ export default function AgentDetailPage() {
   const [voiceGenderFilter, setVoiceGenderFilter] = useState('')
   const [voiceTagFilter, setVoiceTagFilter] = useState('')
 
-  // Dialog states
-  const [mcpOpen, setMcpOpen] = useState(false)
-  const [newMcp, setNewMcp] = useState<MCPServer>({ id: '', transport: 'stdio', command: '', args: [], endpoint: '', tool_name_list: [], timeout_ms: 30000 })
-  const [mcpArgsStr, setMcpArgsStr] = useState('')
-  const [mcpToolsStr, setMcpToolsStr] = useState('')
+  // MCP servers & bindings
+  const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
+  const [mcpBindings, setMcpBindings] = useState<VoicebotMCPServer[]>([])
+  const [mcpAddOpen, setMcpAddOpen] = useState(false)
   const [devOpen, setDevOpen] = useState(false)
   const [newDevId, setNewDevId] = useState('')
   const [newDevName, setNewDevName] = useState('')
@@ -135,12 +120,15 @@ export default function AgentDetailPage() {
   useEffect(() => {
     if (!id) return
     ;(async () => {
-      const [b, d, langs, llm] = await Promise.all([
+      const [b, d, langs, llm, mcpSv, mcpBd] = await Promise.all([
         voicebotApi.get(id), deviceApi.list(id), languageApi.list(), modelApi.list(),
+        mcpApi.servers.list(), mcpApi.bindings.list(id),
       ])
       const parsed = parseCfg(b.data.config_json)
       setName(b.data.name); setCfg(parsed); setDevices(d.data)
       setLanguages(langs.data); setLlmModels(llm.data)
+      setMcpServers(mcpSv.data)
+      setMcpBindings(mcpBd.data.filter((m) => m.bound))
 
       const res = await availableResourcesApi.list(parsed.language || undefined)
       setResources(res.data)
@@ -200,11 +188,20 @@ export default function AgentDetailPage() {
     } finally { setSaving(false) }
   }
 
-  const handleAddMcp = () => {
-    setCfg(c => ({ ...c, mcp: [...c.mcp, { ...newMcp, args: mcpArgsStr.trim() ? mcpArgsStr.split(/\s+/) : [], tool_name_list: mcpToolsStr.trim() ? mcpToolsStr.split(',').map(s => s.trim()).filter(Boolean) : [] }] }))
-    setMcpOpen(false)
-    setNewMcp({ id: '', transport: 'stdio', command: '', args: [], endpoint: '', tool_name_list: [], timeout_ms: 30000 })
-    setMcpArgsStr(''); setMcpToolsStr('')
+  const boundIds = new Set(mcpBindings.filter((b) => b.bound).map((b) => b.id))
+
+  const handleUnbindMcp = async (serverId: string) => {
+    if (!id) return
+    await mcpApi.bindings.unbind(id, serverId)
+    setMcpBindings((prev) => prev.filter((b) => b.id !== serverId))
+  }
+
+  const handleAddMcpBinding = async (serverId: string) => {
+    if (!id) return
+    await mcpApi.bindings.bind(id, serverId)
+    const { data } = await mcpApi.bindings.list(id)
+    setMcpBindings(data.filter((m) => m.bound))
+    setMcpAddOpen(false)
   }
 
   const handleAddDevice = async () => {
@@ -276,7 +273,7 @@ export default function AgentDetailPage() {
             <div className="flex flex-wrap gap-4">
               <div className="shrink-0">
                 <Field label="语言">
-                  <Select value={cfg.language} onValueChange={v => setCfg(c => ({ ...c, language: v }))}>
+                  <Select value={cfg.language} onValueChange={v => setCfg(c => ({ ...c, language: v ?? DC.language }))}>
                 <SelectTrigger>
                   <span className="text-left flex-1 truncate">
                     {languages.find(l => l.code === cfg.language)?.name || cfg.language}
@@ -292,7 +289,7 @@ export default function AgentDetailPage() {
               </div>
               <div className="shrink-0">
                 <Field label="聊天模型">
-                  <Select value={llm.model_id} onValueChange={v => setLlm({ model_id: v })}>
+                  <Select value={llm.model_id} onValueChange={v => setLlm({ model_id: v ?? '' })}>
                     <SelectTrigger>
                       <span className="text-left flex-1 truncate">
                         {llmModels.filter(m => llmTypes.has(m.type)).find(m => m.id === llm.model_id)?.name || <span className="text-zinc-500">选择模型</span>}
@@ -318,7 +315,7 @@ export default function AgentDetailPage() {
           {/* ── ASR ── */}
           <TabsContent value="asr" className="space-y-5 pt-1">
             <Field label="语音识别模型">
-              <Select value={asr.model_id} onValueChange={v => setAsr({ model_id: v })}>
+              <Select value={asr.model_id} onValueChange={v => setAsr({ model_id: v ?? '' })}>
                 <SelectTrigger>
                   <span className="text-left flex-1 truncate">
                     {asrModels.find(m => m.id === asr.model_id)?.name || <span className="text-zinc-500">选择语音识别模型</span>}
@@ -509,7 +506,7 @@ export default function AgentDetailPage() {
           {/* ── 记忆 ── */}
           <TabsContent value="memory" className="space-y-5 pt-1">
             <Field label="记忆模式">
-              <Select value={mem.mode} onValueChange={v => setMem({ mode: v })}>
+              <Select value={mem.mode} onValueChange={v => setMem({ mode: v ?? 'session' })}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -551,39 +548,38 @@ export default function AgentDetailPage() {
           {/* ── MCP ── */}
           <TabsContent value="mcp" className="space-y-4 pt-1">
             <div className="flex justify-end">
-              <Button onClick={() => setMcpOpen(true)}
+              <Button onClick={() => setMcpAddOpen(true)} disabled={mcpServers.length === 0}
                 className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-3 text-sm gap-1.5">
-                <Plus className="w-3.5 h-3.5" />添加 MCP 服务
+                <Plus className="w-3.5 h-3.5" />添加 MCP
               </Button>
             </div>
-            {cfg.mcp.length === 0 ? (
+            {mcpBindings.length === 0 ? (
               <div className="text-center py-14 border border-dashed border-zinc-800 rounded-xl">
-                <p className="text-zinc-500 text-sm">暂无 MCP 工具</p>
+                <p className="text-zinc-500 text-sm">暂未绑定 MCP</p>
+                <p className="text-zinc-600 text-xs mt-1">点击添加从已开通的 MCP 中选择</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {cfg.mcp.map(m => (
-                  <div key={m.id} className="flex items-start justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3">
-                    <div className="space-y-1 min-w-0">
+                {mcpBindings.map((b) => (
+                  <div key={b.id} className="flex items-start justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3">
+                    <div className="space-y-1 min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-mono text-white">{m.id}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">{m.transport}</span>
+                        <span className="text-sm font-medium text-white">{b.name}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 font-mono">{b.transport}</span>
                       </div>
-                      <p className="text-xs text-zinc-500 truncate">
-                        {m.transport === 'stdio' ? `${m.command} ${m.args.join(' ')}` : m.endpoint}
-                      </p>
-                      {m.tool_name_list.length > 0 && (
-                        <p className="text-xs text-zinc-600">工具：{m.tool_name_list.join(', ')}</p>
-                      )}
+                      <p className="text-xs text-zinc-500 line-clamp-1">{b.description || b.endpoint}</p>
                     </div>
-                    <button onClick={() => setCfg(c => ({ ...c, mcp: c.mcp.filter(x => x.id !== m.id) }))}
-                      className="text-zinc-600 hover:text-red-400 transition-colors p-1.5 ml-3 shrink-0">
-                      <Trash2 className="w-3.5 h-3.5" />
+                    <button onClick={() => handleUnbindMcp(b.id)}
+                      className="text-zinc-500 hover:text-red-400 text-xs px-2 py-1 rounded hover:bg-red-400/10 transition-colors shrink-0 ml-3 cursor-pointer">
+                      解除
                     </button>
                   </div>
                 ))}
               </div>
             )}
+            <div className="border-t border-zinc-800 pt-3">
+              <a href="/components/mcp" className="text-xs text-violet-400 hover:text-violet-300">管理 MCP 服务器 →</a>
+            </div>
           </TabsContent>
 
           {/* ── 设备 ── */}
@@ -628,66 +624,6 @@ export default function AgentDetailPage() {
         </div>
       </div>
 
-      {/* MCP Dialog */}
-      <Dialog open={mcpOpen} onOpenChange={setMcpOpen}>
-        <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-white">添加 MCP 服务</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="ID">
-                <Input value={newMcp.id} onChange={e => setNewMcp(m => ({ ...m, id: e.target.value }))}
-                  placeholder="my-mcp-server" className={inp} />
-              </Field>
-              <Field label="Transport">
-                <Select value={newMcp.transport} onValueChange={v => setNewMcp(m => ({ ...m, transport: v as MCPServer['transport'] }))}>
-                  <SelectTrigger className="bg-zinc-800 border-zinc-600">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-800 border-zinc-600">
-                    <SelectItem value="stdio">stdio</SelectItem>
-                    <SelectItem value="sse">sse</SelectItem>
-                    <SelectItem value="streamable">streamable</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
-            {newMcp.transport === 'stdio' ? (
-              <>
-                <Field label="Command">
-                  <Input value={newMcp.command} onChange={e => setNewMcp(m => ({ ...m, command: e.target.value }))}
-                    placeholder="npx / python / ..." className={inp} />
-                </Field>
-                <Field label="Args（空格分隔）">
-                  <Input value={mcpArgsStr} onChange={e => setMcpArgsStr(e.target.value)}
-                    placeholder="-y @modelcontextprotocol/server-filesystem /path" className={inp} />
-                </Field>
-              </>
-            ) : (
-              <Field label="Endpoint">
-                <Input value={newMcp.endpoint} onChange={e => setNewMcp(m => ({ ...m, endpoint: e.target.value }))}
-                  placeholder="https://..." className={inp} />
-              </Field>
-            )}
-            <Field label="工具白名单（逗号分隔，留空=全部）">
-              <Input value={mcpToolsStr} onChange={e => setMcpToolsStr(e.target.value)}
-                placeholder="read_file, write_file" className={inp} />
-            </Field>
-            <Field label="超时 (ms)">
-              <Input type="number" min={0} value={newMcp.timeout_ms}
-                onChange={e => setNewMcp(m => ({ ...m, timeout_ms: +e.target.value }))} className={inp} />
-            </Field>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setMcpOpen(false)}
-              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">取消</Button>
-            <Button onClick={handleAddMcp} disabled={!newMcp.id.trim() || (newMcp.transport === 'stdio' ? !newMcp.command.trim() : !newMcp.endpoint.trim())}
-              className="bg-violet-600 hover:bg-violet-500 text-white">添加</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Device Dialog */}
       <Dialog open={devOpen} onOpenChange={setDevOpen}>
         <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-md">
@@ -712,6 +648,36 @@ export default function AgentDetailPage() {
               className="bg-violet-600 hover:bg-violet-500 text-white">
               {devAdding ? '绑定中...' : '绑定'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MCP 添加弹窗 */}
+      <Dialog open={mcpAddOpen} onOpenChange={setMcpAddOpen}>
+        <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white">选择要绑定的 MCP</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-2 max-h-80 overflow-y-auto">
+            {mcpServers.filter((s) => !boundIds.has(s.id)).length === 0 ? (
+              <p className="text-xs text-zinc-500 text-center py-8">所有 MCP 已绑定，或暂无可用 MCP</p>
+            ) : (
+              mcpServers.filter((s) => !boundIds.has(s.id)).map((s) => (
+                <div key={s.id}
+                  className="flex items-center justify-between bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 hover:border-zinc-600 transition-all cursor-pointer"
+                  onClick={() => handleAddMcpBinding(s.id)}>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-white">{s.name}</p>
+                    <p className="text-xs text-zinc-500 truncate mt-0.5">{s.description || s.endpoint}</p>
+                  </div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-400 border border-zinc-600 font-mono shrink-0 ml-2">{s.transport}</span>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMcpAddOpen(false)}
+              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">取消</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

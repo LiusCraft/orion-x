@@ -119,8 +119,27 @@ func TestParseClientMessage_Abort(t *testing.T) {
 	}
 }
 
+func TestParseClientMessage_MCP(t *testing.T) {
+	data := []byte(`{"type":"mcp","session_id":"s1","payload":{"jsonrpc":"2.0","id":1,"result":{"ok":true}}}`)
+
+	msg, err := ParseClientMessage(data)
+	if err != nil {
+		t.Fatalf("ParseClientMessage failed: %v", err)
+	}
+	mcp, ok := msg.(*MCPMessage)
+	if !ok {
+		t.Fatalf("expected *MCPMessage, got %T", msg)
+	}
+	if mcp.SessionID != "s1" {
+		t.Errorf("unexpected session id: %q", mcp.SessionID)
+	}
+	if mcp.Payload == nil {
+		t.Fatal("expected payload")
+	}
+}
+
 func TestParseClientMessage_UnsupportedType(t *testing.T) {
-	for _, typ := range []string{"iot", "mcp", "server", "ping", "unknown"} {
+	for _, typ := range []string{"server", "ping", "unknown"} {
 		data := []byte(`{"type": "` + typ + `"}`)
 		if _, err := ParseClientMessage(data); err == nil {
 			t.Errorf("expected error for unsupported type %q", typ)

@@ -46,7 +46,7 @@ export default function MyModelsPage() {
   useEffect(() => { load() }, [])
 
   const openAdd = (type?: ModelType) => {
-    setForm({ provider_id: '', name: '', type: (activeType === 'all' ? 'text' : activeType) as ModelType, base_url: '', model_id: '' })
+    setForm({ provider_id: '', name: '', type: type ?? (activeType === 'all' ? 'text' : activeType) as ModelType, base_url: '', model_id: '' })
     setShowKey(false)
     setAddOpen(true)
   }

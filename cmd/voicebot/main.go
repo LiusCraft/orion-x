@@ -352,7 +352,10 @@ func toToolsMCPServers(cfgs []config.MCPServerConfig) []tools.MCPServerConfig {
 			Transport:    cfg.Transport,
 			Command:      cfg.Command,
 			Args:         cfg.Args,
+			Env:          cfg.Env,
+			CWD:          cfg.CWD,
 			Endpoint:     cfg.Endpoint,
+			Headers:      cfg.Headers,
 			ToolNameList: cfg.ToolNameList,
 			TimeoutMs:    cfg.TimeoutMs,
 		})

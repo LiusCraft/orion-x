@@ -130,3 +130,57 @@ type ModelVoice struct {
 	Extra          datatypes.JSONMap `gorm:"type:jsonb" json:"extra,omitempty"`
 	BaseModel
 }
+
+// MCPTransport MCP 传输协议类型
+type MCPTransport string
+
+const (
+	MCPTransportStdio      MCPTransport = "stdio"
+	MCPTransportSSE        MCPTransport = "sse"
+	MCPTransportStreamable MCPTransport = "streamable"
+)
+
+// MCPMarketEntry 系统预置的 MCP 市场条目
+type MCPMarketEntry struct {
+	ID          string         `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	Name        string         `gorm:"not null;type:varchar(128)" json:"name"`
+	Description string         `gorm:"type:text" json:"description,omitempty"`
+	Icon        string         `gorm:"type:varchar(64)" json:"icon,omitempty"`
+	Tags        pq.StringArray `gorm:"type:text[]" json:"tags,omitempty"`
+	Provider    string         `gorm:"type:varchar(64)" json:"provider,omitempty"`
+	Billing     string         `gorm:"type:varchar(64)" json:"billing,omitempty"`
+	Price       string         `gorm:"type:varchar(64)" json:"price,omitempty"`
+	// Config 是默认 MCPServerConfig JSON，安装时预填
+	Config datatypes.JSONMap `gorm:"type:jsonb;not null" json:"config"`
+	BaseModel
+}
+
+// MCPServer 独立的 MCP 服务器定义，被多个 voicebot 引用
+type MCPServer struct {
+	ID           string            `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	OwnerID      string            `gorm:"type:varchar(36);index" json:"owner_id,omitempty"` // 用户 ID，系统预置为空
+	MarketID     *string           `gorm:"type:varchar(36)" json:"market_id,omitempty"`      // 来自市场的条目 ID
+	Name         string            `gorm:"not null;type:varchar(128)" json:"name"`
+	Description  string            `gorm:"type:text" json:"description,omitempty"`
+	Icon         string            `gorm:"type:varchar(64)" json:"icon,omitempty"`
+	Tags         pq.StringArray    `gorm:"type:text[]" json:"tags,omitempty"`
+	Transport    MCPTransport      `gorm:"not null;type:varchar(32)" json:"transport"`
+	Command      string            `gorm:"type:text" json:"command,omitempty"`
+	Args         pq.StringArray    `gorm:"type:text[]" json:"args,omitempty"`
+	Env          datatypes.JSONMap `gorm:"type:jsonb" json:"env,omitempty"`
+	CWD          string            `gorm:"type:varchar(512)" json:"cwd,omitempty"`
+	Endpoint     string            `gorm:"type:varchar(512)" json:"endpoint,omitempty"`
+	Headers      datatypes.JSONMap `gorm:"type:jsonb" json:"headers,omitempty"`
+	ToolNameList pq.StringArray    `gorm:"type:text[]" json:"tool_name_list,omitempty"`
+	TimeoutMs    int               `gorm:"not null;default:30000" json:"timeout_ms"`
+	BaseModel
+}
+
+// VoicebotMCPBinding voicebot 与 MCP 服务器的多对多绑定关系
+type VoicebotMCPBinding struct {
+	VoicebotID  string    `gorm:"primaryKey;type:varchar(36)" json:"voicebot_id"`
+	MCPServerID string    `gorm:"primaryKey;type:varchar(36)" json:"mcp_server_id"`
+	Enabled     bool      `gorm:"not null;default:true" json:"enabled"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+	Creator     string    `gorm:"type:varchar(36)" json:"creator"`
+}

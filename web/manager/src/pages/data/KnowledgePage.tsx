@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BookOpen, Plus, Trash2, Upload, FileText, FileSpreadsheet, File, Search, CheckCircle2, Clock, AlertCircle } from 'lucide-react'
+import { BookOpen, Trash2, Upload, FileText, FileSpreadsheet, File, Search, CheckCircle2, Clock, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'

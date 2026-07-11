@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/agent"
+	"github.com/liuscraft/orion-x/internal/config"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
 	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
 	"github.com/liuscraft/orion-x/internal/tools"
-	"github.com/liuscraft/orion-x/internal/config"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -136,20 +136,4 @@ func main() {
 	logging.Sync()
 
 	_, _, _ = syscall.Syscall(syscall.SYS_EXIT, 0, 0, 0)
-}
-
-func toToolsMCPServers(cfgs []config.MCPServerConfig) []tools.MCPServerConfig {
-	servers := make([]tools.MCPServerConfig, 0, len(cfgs))
-	for _, c := range cfgs {
-		servers = append(servers, tools.MCPServerConfig{
-			ID:           c.ID,
-			Transport:    c.Transport,
-			Command:      c.Command,
-			Args:         c.Args,
-			Endpoint:     c.Endpoint,
-			ToolNameList: c.ToolNameList,
-			TimeoutMs:    c.TimeoutMs,
-		})
-	}
-	return servers
 }

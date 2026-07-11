@@ -17,10 +17,11 @@ type InternalHandler struct {
 	devices   *store.DeviceStore
 	models    *store.AIModelStore
 	voices    *store.ModelVoiceStore
+	mcpBinds  *store.VoicebotMCPBindingStore
 }
 
-func NewInternalHandler(voicebots *store.VoicebotStore, devices *store.DeviceStore, models *store.AIModelStore, voices *store.ModelVoiceStore) *InternalHandler {
-	return &InternalHandler{voicebots: voicebots, devices: devices, models: models, voices: voices}
+func NewInternalHandler(voicebots *store.VoicebotStore, devices *store.DeviceStore, models *store.AIModelStore, voices *store.ModelVoiceStore, mcpBinds *store.VoicebotMCPBindingStore) *InternalHandler {
+	return &InternalHandler{voicebots: voicebots, devices: devices, models: models, voices: voices, mcpBinds: mcpBinds}
 }
 
 // GET /internal/device-config?device_id=xxx
@@ -49,7 +50,7 @@ func (h *InternalHandler) DeviceConfig(c *gin.Context) {
 
 	var agentCfg AgentConfig
 	if err := json.Unmarshal([]byte(v.ConfigJSON), &agentCfg); err == nil && agentCfg.ASR.ModelID != "" {
-		full, err := h.assembleConfig(agentCfg)
+		full, err := h.assembleConfig(agentCfg, v.ID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -76,7 +77,17 @@ func effectiveBaseURL2(m store.AIModel) string {
 	return ""
 }
 
-func (h *InternalHandler) assembleConfig(ac AgentConfig) (*config.AppConfig, error) {
+func jsonbToSS(m map[string]any) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
+func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*config.AppConfig, error) {
 	full := config.DefaultConfig()
 
 	// ── ASR ──
@@ -157,7 +168,32 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig) (*config.AppConfig, err
 	if ac.Memory.Mode != "" {
 		full.Memory = ac.Memory
 	}
-	if len(ac.MCP) > 0 {
+	// MCP: 从 voicebot_mcp_bindings + mcp_servers 加载（仅 enabled）
+	if h.mcpBinds != nil {
+		dbList, err := h.mcpBinds.ListByVoicebotWithServers(voicebotID)
+		if err != nil {
+			return nil, err
+		}
+		if len(dbList) > 0 {
+			var mcpCfgs []config.MCPServerConfig
+			for _, m := range dbList {
+				mcpCfgs = append(mcpCfgs, config.MCPServerConfig{
+					ID:           m.ID,
+					Transport:    string(m.Transport),
+					Command:      m.Command,
+					Args:         m.Args,
+					Env:          jsonbToSS(m.Env),
+					CWD:          m.CWD,
+					Endpoint:     m.Endpoint,
+					Headers:      jsonbToSS(m.Headers),
+					ToolNameList: m.ToolNameList,
+					TimeoutMs:    m.TimeoutMs,
+				})
+			}
+			full.Tools.MCP = mcpCfgs
+		}
+	}
+	if len(ac.MCP) > 0 && len(full.Tools.MCP) == 0 {
 		full.Tools.MCP = ac.MCP
 	}
 	if ac.Audio.SampleRate > 0 {

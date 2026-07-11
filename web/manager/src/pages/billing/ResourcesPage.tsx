@@ -1,4 +1,4 @@
-import { CreditCard, Globe, Music, Package } from 'lucide-react'
+import { Globe, Music, Package } from 'lucide-react'
 
 const RESOURCES = [
   {

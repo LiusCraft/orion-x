@@ -59,6 +59,9 @@ func main() {
 	models := store.NewAIModelStore(db)
 	languages := store.NewLanguageStore(db)
 	voices := store.NewModelVoiceStore(db, languages)
+	mcpMarket := store.NewMCPMarketStore(db)
+	mcpServers := store.NewMCPServerStore(db)
+	mcpBindings := store.NewVoicebotMCPBindingStore(db)
 
 	if pass := strings.TrimSpace(cfg.Admin.Password); pass != "" {
 		if _, err := users.GetByUsername(cfg.Admin.Username); errors.Is(err, store.ErrNotFound) {
@@ -78,7 +81,7 @@ func main() {
 
 	langH := handler.NewLanguageHandler(languages)
 
-	r := newRouter(secret, users, voicebots, devices, providers, models, voices, langH, sign)
+	r := newRouter(secret, users, voicebots, devices, providers, models, voices, langH, mcpMarket, mcpServers, mcpBindings, sign)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {

@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Brain, Trash2, Search, Filter, ChevronUp, ChevronDown } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Brain, Trash2, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 
 const IMPORTANCE_MAP = {
@@ -21,7 +20,6 @@ const MOCK_MEMORIES = [
 export default function MemoryPage() {
   const [memories, setMemories] = useState(MOCK_MEMORIES)
   const [query, setQuery] = useState('')
-  const [deleteId, setDeleteId] = useState<string | null>(null)
 
   const filtered = memories.filter(
     (m) => !query || m.agent.includes(query) || m.summary.includes(query)

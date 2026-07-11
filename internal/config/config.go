@@ -130,13 +130,16 @@ type MemoryConfig struct {
 }
 
 type MCPServerConfig struct {
-	ID           string   `json:"id"`
-	Transport    string   `json:"transport"` // stdio | sse | streamable
-	Command      string   `json:"command"`
-	Args         []string `json:"args"`
-	Endpoint     string   `json:"endpoint"`
-	ToolNameList []string `json:"tool_name_list"`
-	TimeoutMs    int      `json:"timeout_ms"`
+	ID           string            `json:"id"`
+	Transport    string            `json:"transport"` // stdio | sse | streamable
+	Command      string            `json:"command"`
+	Args         []string          `json:"args"`
+	Env          map[string]string `json:"env,omitempty"`
+	CWD          string            `json:"cwd,omitempty"`
+	Endpoint     string            `json:"endpoint"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	ToolNameList []string          `json:"tool_name_list"`
+	TimeoutMs    int               `json:"timeout_ms"`
 }
 
 // ---------- Provider config ----------
@@ -338,7 +341,7 @@ func (c *AppConfig) Validate() error {
 
 		transport := strings.ToLower(strings.TrimSpace(server.Transport))
 		switch transport {
-		case "stdio", "sse", "streamable":
+		case "stdio", "sse", "streamable", "stream_http":
 		default:
 			return fmt.Errorf("invalid tools.mcp[%d].transport: %s", i, server.Transport)
 		}
