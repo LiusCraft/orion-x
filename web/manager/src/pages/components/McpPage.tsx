@@ -145,7 +145,28 @@ export default function McpPage() {
 	const [selectedMarket, setSelectedMarket] = useState<MCPMarketEntry | null>(
 		null,
 	);
+	const [marketHeaderValues, setMarketHeaderValues] = useState<
+		Record<string, string>
+	>({});
 	const [descPreview, setDescPreview] = useState(true);
+
+	// 打开 market 详情时初始化 header 表单值
+	const openMarketDetail = (mcp: MCPMarketEntry) => {
+		setSelectedMarket(mcp);
+		if (mcp.header_meta) {
+			const init: Record<string, string> = {};
+			for (const [key, meta] of Object.entries(mcp.header_meta)) {
+				if (meta.kind === "optional") {
+					init[key] = meta.default || "";
+				} else if (meta.kind === "required") {
+					init[key] = "";
+				}
+			}
+			setMarketHeaderValues(init);
+		} else {
+			setMarketHeaderValues({});
+		}
+	};
 
 	const isOfficial = editTarget?.market_id != null;
 
@@ -472,7 +493,7 @@ export default function McpPage() {
 
 			<div className="px-8 py-6">
 				<Tabs defaultValue="market">
-					<TabsList className="bg-zinc-900 border border-zinc-800 h-9 p-0.5 mb-6">
+					<TabsList className="bg-zinc-900 border border-zinc-800 h-9 p-0.5 mb-3">
 						<TabsTrigger
 							value="market"
 							className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
@@ -503,44 +524,18 @@ export default function McpPage() {
 									return (
 										<div
 											key={mcp.id}
-											onClick={() => setSelectedMarket(mcp)}
-											className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-all cursor-pointer"
+											onClick={() => openMarketDetail(mcp)}
+											className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-all cursor-pointer relative"
 										>
-											<div className="flex items-start gap-3 mb-3">
-												<LogoIcon name={mcp.name} icon={mcp.icon} />
-												<div className="flex-1 min-w-0">
-													<p className="font-medium text-sm text-white truncate">
-														{mcp.name}
-													</p>
-													<p className="text-[11px] text-zinc-600 mt-0.5">
-														{mcp.price || mcp.billing}
-													</p>
-												</div>
-												{mcp.provider === "官方" && (
-													<span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-600/20 text-violet-400 border border-violet-500/20 shrink-0">
-														官方
-													</span>
-												)}
-											</div>
-											<p className="text-xs text-zinc-500 leading-relaxed mb-3 line-clamp-2">
-												{mcp.description}
-											</p>
-											<div className="flex flex-wrap gap-1 mb-4">
-												{(mcp.tags || [])
-													.filter((t) => t !== mcp.provider)
-													.map((tag) => (
-														<span
-															key={tag}
-															className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50"
-														>
-															{tag}
-														</span>
-													))}
-											</div>
 											<Button
 												size="sm"
 												disabled={installed}
-												onClick={async () => {
+												onClick={async (e) => {
+													e.stopPropagation();
+													if (mcp.header_meta) {
+														openMarketDetail(mcp);
+														return;
+													}
 													try {
 														const { data } = await mcpApi.servers.create({
 															market_id: mcp.id,
@@ -550,7 +545,7 @@ export default function McpPage() {
 														// ignore
 													}
 												}}
-												className={`h-7 w-full text-xs ${installed ? "border-zinc-700 text-zinc-400 cursor-default" : "bg-violet-600 hover:bg-violet-500 text-white"}`}
+												className={`absolute top-3 right-3 h-7 text-xs ${installed ? "border-zinc-700 text-zinc-500 cursor-default" : "bg-violet-600 hover:bg-violet-500 text-white"}`}
 												variant={installed ? "outline" : "default"}
 											>
 												{installed ? (
@@ -562,6 +557,30 @@ export default function McpPage() {
 													"安装"
 												)}
 											</Button>
+											<div className="flex items-start gap-3 mb-3">
+												<LogoIcon name={mcp.name} icon={mcp.icon} />
+												<div className="flex-1 min-w-0">
+													<p className="font-medium text-sm text-white truncate pr-14">
+														{mcp.name}
+													</p>
+													<p className="text-[11px] text-zinc-600 mt-0.5">
+														{mcp.price || mcp.billing}
+													</p>
+												</div>
+											</div>
+											<p className="text-xs text-zinc-500 leading-relaxed mb-3 line-clamp-2">
+												{mcp.description}
+											</p>
+											<div className="flex flex-wrap gap-1">
+												{(mcp.tags || []).map((tag) => (
+													<span
+														key={tag}
+														className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50"
+													>
+														{tag}
+													</span>
+												))}
+											</div>
 										</div>
 									);
 								})
@@ -605,8 +624,15 @@ export default function McpPage() {
 													<p className="font-medium text-sm text-white truncate pr-6">
 														{s.name}
 													</p>
-													<p className="text-[11px] text-zinc-600 font-mono mt-0.5">
-														{s.transport}
+													<p className="text-[11px] text-zinc-600 mt-0.5 flex items-center gap-1.5">
+														<span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50 font-mono">
+															{s.transport}
+														</span>
+														{s.market_id && (
+															<span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-600/20 text-violet-400 border border-violet-500/20">
+																市场
+															</span>
+														)}
 													</p>
 												</div>
 											</div>
@@ -624,11 +650,6 @@ export default function McpPage() {
 														</span>
 													))}
 												</div>
-											)}
-											{s.market_id && (
-												<span className="text-[10px] text-zinc-600">
-													来自市场
-												</span>
 											)}
 										</div>
 									);
@@ -652,7 +673,14 @@ export default function McpPage() {
 								icon={selectedMarket?.icon}
 							/>
 							<div>
-								<SheetTitle>{selectedMarket?.name}</SheetTitle>
+								<SheetTitle className="flex items-center gap-2">
+									{selectedMarket?.name}
+									{selectedMarket?.provider === "官方" && (
+										<span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-600/20 text-violet-400 border border-violet-500/20 font-normal shrink-0">
+											市场
+										</span>
+									)}
+								</SheetTitle>
 								{selectedMarket?.provider && (
 									<p className="text-[11px] text-zinc-500 mt-0.5">
 										{selectedMarket.provider}
@@ -694,6 +722,25 @@ export default function McpPage() {
 								} as MCPServer
 							}
 							mode="view"
+							headerMeta={
+								servers.some((s) => s.market_id === selectedMarket.id)
+									? undefined
+									: selectedMarket.header_meta
+							}
+							headerValues={
+								servers.some((s) => s.market_id === selectedMarket.id)
+									? undefined
+									: marketHeaderValues
+							}
+							onHeaderValueChange={
+								servers.some((s) => s.market_id === selectedMarket.id)
+									? undefined
+									: (key: string, val: string) =>
+											setMarketHeaderValues((prev) => ({
+												...prev,
+												[key]: val,
+											}))
+							}
 						/>
 					)}
 
@@ -702,17 +749,33 @@ export default function McpPage() {
 							size="sm"
 							disabled={
 								selectedMarket
-									? servers.some((s) => s.market_id === selectedMarket.id)
+									? servers.some((s) => s.market_id === selectedMarket.id) ||
+										(selectedMarket.header_meta
+											? Object.entries(selectedMarket.header_meta)
+													.filter(([_, m]) => m.kind === "required")
+													.some(([key]) => !marketHeaderValues[key]?.trim())
+											: false)
 									: false
 							}
 							onClick={async () => {
 								if (!selectedMarket) return;
 								try {
+									const headers: Record<string, string> = {};
+									const hasHeaders = Object.values(marketHeaderValues).some(
+										(v) => v.trim(),
+									);
+									if (hasHeaders) {
+										for (const [k, v] of Object.entries(marketHeaderValues)) {
+											if (v.trim()) headers[k] = v.trim();
+										}
+									}
 									const { data } = await mcpApi.servers.create({
 										market_id: selectedMarket.id,
+										headers: hasHeaders ? headers : undefined,
 									});
 									setServers((prev) => [...prev, data]);
 									setSelectedMarket(null);
+									setMarketHeaderValues({});
 								} catch {
 									// ignore
 								}

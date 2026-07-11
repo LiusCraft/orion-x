@@ -238,6 +238,15 @@ export interface AvailableResources {
 	voices: VoiceResource[];
 }
 
+export interface HeaderMetaItem {
+	kind: "required" | "optional" | "auto";
+	label?: string;
+	description?: string;
+	placeholder?: string;
+	default?: string;
+	value?: string;
+}
+
 export interface MCPMarketEntry {
 	id: string;
 	name: string;
@@ -248,6 +257,7 @@ export interface MCPMarketEntry {
 	billing?: string;
 	price?: string;
 	config: Record<string, unknown>;
+	header_meta?: Record<string, HeaderMetaItem>;
 	created_at: string;
 }
 

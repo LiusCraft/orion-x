@@ -152,6 +152,11 @@ type MCPMarketEntry struct {
 	Price       string         `gorm:"type:varchar(64)" json:"price,omitempty"`
 	// Config 是默认 MCPServerConfig JSON，安装时预填
 	Config datatypes.JSONMap `gorm:"type:jsonb;not null" json:"config"`
+	// HeaderMeta 描述 Config.headers 中每个 header 的安装形态（required/optional/auto）
+	// required: 用户安装时必须填写
+	// optional: 可填可不填，有默认值
+	// auto: 用户不用填写，系统自动注入
+	HeaderMeta datatypes.JSONMap `gorm:"type:jsonb" json:"header_meta,omitempty"`
 	BaseModel
 }
 

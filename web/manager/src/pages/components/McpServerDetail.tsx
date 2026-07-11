@@ -506,6 +506,9 @@ export function McpServerDetail({
 	updateEnv,
 	addHeaderRow,
 	updateHeader,
+	headerMeta,
+	headerValues,
+	onHeaderValueChange,
 }: {
 	server: MCPServer;
 	mode?: "view" | "edit";
@@ -519,6 +522,19 @@ export function McpServerDetail({
 	updateEnv?: (i: number, key: string, val: string) => void;
 	addHeaderRow?: () => void;
 	updateHeader?: (i: number, key: string, val: string) => void;
+	headerMeta?: Record<
+		string,
+		{
+			kind: string;
+			label?: string;
+			description?: string;
+			placeholder?: string;
+			default?: string;
+			value?: string;
+		}
+	>;
+	headerValues?: Record<string, string>;
+	onHeaderValueChange?: (key: string, value: string) => void;
 }) {
 	if (mode === "view") {
 		return (
@@ -533,14 +549,7 @@ export function McpServerDetail({
 						</div>
 					</div>
 				)}
-				{server.market_id && server.transport !== "stdio" ? (
-					<div>
-						<p className="text-xs text-zinc-400 uppercase tracking-wide mb-1.5">
-							Endpoint
-						</p>
-						<p className="text-sm text-zinc-500">系统配置 · 不可见</p>
-					</div>
-				) : server.transport === "stdio" ? (
+				{server.market_id ? null : server.transport === "stdio" ? (
 					<div>
 						<p className="text-xs text-zinc-400 uppercase tracking-wide mb-1.5">
 							命令
@@ -599,28 +608,59 @@ export function McpServerDetail({
 						</div>
 					</div>
 				)}
-				<div>
-					<p className="text-xs text-zinc-400 uppercase tracking-wide mb-1.5">
-						超时
-					</p>
-					<p className="text-sm text-zinc-300">{server.timeout_ms}ms</p>
-				</div>
-				{server.market_id && (
-					<div>
-						<p className="text-xs text-zinc-400 uppercase tracking-wide mb-1.5">
-							来源
+
+				{headerMeta && (
+					<div className="border-t border-zinc-800 pt-4 space-y-4">
+						<p className="text-xs text-zinc-400 uppercase tracking-wide">
+							连接配置
 						</p>
-						<p className="text-sm text-zinc-300">来自市场</p>
+						{Object.entries(headerMeta)
+							.filter(([_, meta]) => meta.kind !== "auto")
+							.map(([key, meta]) => (
+								<div key={key} className="space-y-1.5">
+									<Label className="text-xs text-zinc-400">
+										{meta.label || key}
+										{meta.kind === "required" && (
+											<span className="text-red-400 ml-1">*</span>
+										)}
+									</Label>
+									{meta.description && (
+										<p className="text-[10px] text-zinc-500">
+											{meta.description}
+										</p>
+									)}
+									<Input
+										value={headerValues?.[key] || ""}
+										onChange={(e) => onHeaderValueChange?.(key, e.target.value)}
+										placeholder={
+											meta.placeholder || `输入 ${meta.label || key}`
+										}
+										className={inp}
+									/>
+								</div>
+							))}
+						{Object.entries(headerMeta).filter(
+							([_, meta]) => meta.kind === "auto",
+						).length > 0 && (
+							<div className="space-y-2 bg-zinc-800/30 rounded-lg px-3 py-2.5">
+								<p className="text-[10px] text-zinc-500 uppercase tracking-wide">
+									自动配置（无需填写）
+								</p>
+								{Object.entries(headerMeta)
+									.filter(([_, meta]) => meta.kind === "auto")
+									.map(([key, meta]) => (
+										<div key={key} className="flex items-center gap-2 text-xs">
+											<span className="font-mono text-zinc-500">{key}</span>
+											<span className="text-zinc-600">:</span>
+											<span className="text-zinc-400">
+												{meta.value || meta.default || "-"}
+											</span>
+										</div>
+									))}
+							</div>
+						)}
 					</div>
 				)}
-				<div>
-					<p className="text-xs text-zinc-400 uppercase tracking-wide mb-1.5">
-						创建时间
-					</p>
-					<p className="text-sm text-zinc-300">
-						{new Date(server.created_at).toLocaleString()}
-					</p>
-				</div>
 			</div>
 		);
 	}

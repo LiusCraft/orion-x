@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
@@ -12,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
+	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/store"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
@@ -43,6 +45,10 @@ func (h *MCPHandler) ListMarket(c *gin.Context) {
 			delete(list[i].Config, "env")
 			delete(list[i].Config, "cwd")
 			delete(list[i].Config, "endpoint")
+			// 有 HeaderMeta 时 headers 由前端通过 header_meta 渲染，不再暴露原始值
+			if list[i].HeaderMeta != nil {
+				delete(list[i].Config, "headers")
+			}
 		}
 	}
 	c.JSON(http.StatusOK, list)
@@ -188,6 +194,21 @@ func (h *MCPHandler) CreateServer(c *gin.Context) {
 			return
 		}
 
+		// Resolve headers: required/optional/auto 三分类处理
+		userHeaders := make(map[string]string)
+		if req.Headers != nil {
+			for k, v := range req.Headers {
+				if s, ok := v.(string); ok {
+					userHeaders[k] = s
+				}
+			}
+		}
+		resolvedHeaders, err := resolveMarketHeaders(market, userHeaders)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		cfg := market.Config
 		transportRaw := stringFromConfig(cfg, "transport")
 		if transportRaw == "" {
@@ -207,7 +228,7 @@ func (h *MCPHandler) CreateServer(c *gin.Context) {
 			Env:          jsonMapFromConfig(cfg, "env"),
 			CWD:          stringFromConfig(cfg, "cwd"),
 			Endpoint:     stringFromConfig(cfg, "endpoint"),
-			Headers:      nil, // official headers not stored on user server
+			Headers:      nil,
 			ToolNameList: stringSliceFromConfig(cfg, "tool_name_list"),
 			TimeoutMs:    intFromConfig(cfg, "timeout_ms"),
 			Creator:      userID,
@@ -216,6 +237,19 @@ func (h *MCPHandler) CreateServer(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+
+		// Store resolved headers separately
+		if len(resolvedHeaders) > 0 {
+			dt := datatypes.JSONMap{}
+			for k, v := range resolvedHeaders {
+				dt[k] = v
+			}
+			if _, err := h.servers.Update(server.ID, map[string]any{"headers": dt}); err != nil {
+				logging.Errorf("[MCP] Failed to store resolved headers for server %s: %v", server.ID, err)
+			}
+			server.Headers = dt
+		}
+
 		c.JSON(http.StatusCreated, server)
 		return
 	}
@@ -556,6 +590,90 @@ func (h *MCPHandler) checkVoicebotOwner(c *gin.Context, voicebotID string) error
 		return err
 	}
 	return nil
+}
+
+// resolveMarketHeaders 根据市场条目的 header_meta 和 config.headers，对用户提供的 headers
+// 做三分类处理：
+//   - auto:  自动注入，用户无需填写，值来自 meta.value 或 config.headers
+//   - required: 用户必须提供，否则返回错误
+//   - optional: 有默认值，用户可覆盖
+//
+// 若 header_meta 为空则向后兼容：直接合并 config.headers 和 userHeaders。
+func resolveMarketHeaders(market *store.MCPMarketEntry, userHeaders map[string]string) (map[string]string, error) {
+	defaultHeaders := jsonMapFromConfig(market.Config, "headers")
+	meta := market.HeaderMeta
+
+	// 无 header_meta → 向后兼容：config.headers + userHeaders
+	if meta == nil {
+		merged := make(map[string]string, len(defaultHeaders)+len(userHeaders))
+		for k, v := range defaultHeaders {
+			if s, ok := v.(string); ok {
+				merged[k] = s
+			}
+		}
+		for k, v := range userHeaders {
+			merged[k] = v
+		}
+		return merged, nil
+	}
+
+	autoVals := make(map[string]string)
+	requiredKeys := make(map[string]bool)
+	optionalDefaults := make(map[string]string)
+
+	for key, metaRaw := range meta {
+		m, _ := metaRaw.(map[string]any)
+		if m == nil {
+			continue
+		}
+		kind, _ := m["kind"].(string)
+		switch kind {
+		case "auto":
+			val, _ := m["value"].(string)
+			if val == "" {
+				if dv, ok := defaultHeaders[key].(string); ok {
+					val = dv
+				}
+			}
+			autoVals[key] = val
+		case "required":
+			requiredKeys[key] = true
+		case "optional":
+			def, _ := m["default"].(string)
+			if def == "" {
+				if dv, ok := defaultHeaders[key].(string); ok {
+					def = dv
+				}
+			}
+			optionalDefaults[key] = def
+		}
+	}
+
+	// 校验 required headers
+	for key := range requiredKeys {
+		val, ok := userHeaders[key]
+		if !ok || strings.TrimSpace(val) == "" {
+			return nil, fmt.Errorf("required header %q is missing", key)
+		}
+	}
+
+	// 组装最终 headers
+	merged := make(map[string]string, len(autoVals)+len(requiredKeys)+len(optionalDefaults))
+	for k, v := range autoVals {
+		merged[k] = v
+	}
+	for k := range requiredKeys {
+		merged[k] = userHeaders[k]
+	}
+	for k, def := range optionalDefaults {
+		if uv, ok := userHeaders[k]; ok {
+			merged[k] = uv
+		} else {
+			merged[k] = def
+		}
+	}
+
+	return merged, nil
 }
 
 // mergeHeaders merges market default headers with user override headers.
