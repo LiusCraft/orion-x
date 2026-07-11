@@ -56,11 +56,6 @@ Two entry points:
 
 Design docs in `docs/` -- read before modifying major modules.
 
-## Diagnostics
-
-- Default: `lens_diagnostics mode=delta` only. Do NOT run mode=all or mode=full unless explicitly told "跑".
-- The user is called **piagent**. Always address them as piagent.
-
 ## Quirks
 
 - **Mock convention**: inline mock structs in `*_test.go` files, no mock generator.
