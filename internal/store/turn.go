@@ -13,6 +13,7 @@ type SessionTurn struct {
 	TurnID        int64     `gorm:"not null" json:"turn_id"`
 	UserText      string    `gorm:"type:text" json:"user_text"`
 	AssistantText string    `gorm:"type:text" json:"assistant_text"`
+	ToolsJSON     string    `gorm:"type:text" json:"tools_json,omitempty"`
 	StartedAt     time.Time `json:"started_at"`
 	EndedAt       time.Time `json:"ended_at"`
 	Aborted       bool      `gorm:"not null;default:false" json:"aborted"`

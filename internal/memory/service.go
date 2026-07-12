@@ -162,6 +162,7 @@ func (s *Service) saveTurnAsync(_ context.Context, turn Turn) {
 			"turn_id":        turn.TurnID,
 			"user_text":      turn.UserText,
 			"assistant_text": turn.AssistantText,
+			"tools_json":     turn.ToolsJSON,
 			"started_at":     turn.StartedAt,
 			"ended_at":       turn.EndedAt,
 			"aborted":        turn.Aborted,

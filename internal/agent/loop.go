@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -87,7 +88,17 @@ func (a *Agent) runLoop(ctx context.Context, sess *session.Session, emit func(Ag
 	emit(&FinishedEvent{Error: fmt.Errorf("reached max steps (%d)", a.maxSteps)})
 }
 
-// recordTurn captures the last user/assistant pair from the session and saves it to memory.
+// toolCallRecord holds one tool invocation + its result for turn persistence.
+// This intentionally mirrors session.ToolCall but adds the execution result
+// so the Manager can display tool usage without re-playing the conversation.
+type toolCallRecord struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	Result    string `json:"result"`
+}
+
+// recordTurn captures the last user/assistant pair from the session, including
+// any intermediate tool calls, and saves it to memory.
 func (a *Agent) recordTurn(ctx context.Context, sess *session.Session, start time.Time) {
 	if a.memorySvc == nil {
 		return
@@ -96,24 +107,85 @@ func (a *Agent) recordTurn(ctx context.Context, sess *session.Session, start tim
 	if len(msgs) < 2 {
 		return
 	}
-	// Find the last user message and its following assistant message.
-	var userText, assistantText string
-	for i := len(msgs) - 1; i >= 1; i-- {
-		if string(msgs[i].Role) == "assistant" && string(msgs[i-1].Role) == "user" {
-			assistantText = msgs[i].Content
-			userText = msgs[i-1].Content
+
+	// Find the last user message.
+	lastUserIdx := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == session.RoleUser {
+			lastUserIdx = i
 			break
 		}
 	}
-	if userText == "" {
+	if lastUserIdx < 0 {
 		return
+	}
+	userText := msgs[lastUserIdx].Content
+
+	// Find the first assistant message after lastUserIdx that has no tool calls
+	// (the "final" response). The intermediate assistant message(s) with
+	// tool_calls are skipped because they are not the actual answer.
+	var (
+		assistantText     string
+		finalAssistantIdx = -1
+	)
+	for i := lastUserIdx + 1; i < len(msgs); i++ {
+		if msgs[i].Role == session.RoleAssistant && len(msgs[i].ToolCalls) == 0 {
+			assistantText = msgs[i].Content
+			finalAssistantIdx = i
+			break
+		}
+	}
+	if assistantText == "" {
+		return
+	}
+
+	// Collect tool calls between the user message and the final assistant
+	// response. Each assistant(tool_calls) message carries the invocation;
+	// the immediately following RoleTool messages carry the results keyed by
+	// ToolCallID.
+	var toolRecords []toolCallRecord
+	for i := lastUserIdx + 1; i < finalAssistantIdx; i++ {
+		if msgs[i].Role == session.RoleAssistant && len(msgs[i].ToolCalls) > 0 {
+			for _, tc := range msgs[i].ToolCalls {
+				// Find the matching tool result message.
+				var result string
+				for j := i + 1; j < finalAssistantIdx; j++ {
+					if msgs[j].Role == session.RoleTool && msgs[j].ToolCallID == tc.ID {
+						result = msgs[j].Content
+						break
+					}
+				}
+				toolRecords = append(toolRecords, toolCallRecord{
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+					Result:    result,
+				})
+			}
+		}
+	}
+
+	var toolsJSON string
+	if len(toolRecords) > 0 {
+		data, _ := json.Marshal(toolRecords)
+		toolsJSON = string(data)
+	}
+
+	// Use the count of user messages as the sequential turn number.
+	// This is correct even when tool-call messages inflate len(msgs),
+	// because each conversation turn produces exactly one user message.
+	var turnSeq int64
+	for _, m := range msgs {
+		if m.Role == session.RoleUser {
+			turnSeq++
+		}
 	}
 
 	memCtx, _ := memory.FromContext(ctx)
 	turn := memory.Turn{
-		TurnID:        int64(len(msgs)),
+		TurnID:        turnSeq,
 		UserText:      userText,
 		AssistantText: assistantText,
+		ToolsJSON:     toolsJSON,
 		StartedAt:     start,
 		EndedAt:       time.Now(),
 		SessionID:     sess.ID,

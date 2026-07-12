@@ -20,6 +20,7 @@ type Turn struct {
 	TurnID        int64
 	UserText      string
 	AssistantText string
+	ToolsJSON     string `json:"tools_json,omitempty"` // serialized tool call info (name+arguments+result)
 	StartedAt     time.Time
 	EndedAt       time.Time
 	Aborted       bool
