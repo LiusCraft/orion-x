@@ -12,12 +12,13 @@ var (
 )
 
 type Config struct {
-	Provider     string
-	APIKey       string
-	BaseURL      string
-	Model        string
-	SystemPrompt string
-	ExtraFields  map[string]any
+	Provider    string
+	APIKey      string
+	BaseURL     string
+	Model       string
+	SoulPrompt  string // 身份设定，来自 Manager 下发；空 = 代码内置默认值
+	RulesPrompt string // 行为规则，来自 Manager 下发；空 = 代码内置默认值
+	ExtraFields map[string]any
 }
 
 func normalizeConfig(cfg Config) (Config, error) {

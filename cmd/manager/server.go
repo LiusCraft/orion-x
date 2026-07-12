@@ -25,6 +25,7 @@ func newRouter(
 	turnStore *store.TurnStore,
 ) *gin.Engine {
 	r := gin.New()
+	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 
 	// CORS — 前端开发时允许跨域

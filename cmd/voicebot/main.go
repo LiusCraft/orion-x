@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/gordonklaus/portaudio"
@@ -65,16 +64,10 @@ func main() {
 	})
 
 	memCfg := memory.Config{
-		Mode:                 memory.Mode(strings.TrimSpace(appConfig.Memory.Mode)),
-		SessionMaxTurns:      appConfig.Memory.SessionMaxTurns,
-		SessionSummaryEveryN: appConfig.Memory.SessionSummaryEveryN,
-		LongTermDBPath:       appConfig.Memory.LongTermDBPath,
-		LongTermMaxResults:   appConfig.Memory.LongTermMaxResults,
-		RetentionDays:        appConfig.Memory.RetentionDays,
-		FTSMinScore:          appConfig.Memory.FTSMinScore,
+		MemoryCharLimit: appConfig.Memory.MemoryCharLimit,
+		UserCharLimit:   appConfig.Memory.UserCharLimit,
 	}
 	memorySvc, err := memory.NewService(memCfg, memory.Options{
-		SystemPrompt: agent.DefaultSystemPrompt(),
 		ManagerURL:   "",
 		DeviceID:     "local",
 		ReviewConfig: memory.ReviewConfig{Enabled: false},
@@ -88,12 +81,13 @@ func main() {
 		}
 	}()
 	agentCfg := agent.Config{
-		Provider:     appConfig.Provider.LLM.Type,
-		APIKey:       llmCfg.APIKey,
-		BaseURL:      llmCfg.BaseURL,
-		Model:        llmCfg.Model,
-		SystemPrompt: llmCfg.Prompt,
-		ExtraFields:  llmCfg.ExtraFields,
+		Provider:    appConfig.Provider.LLM.Type,
+		APIKey:      llmCfg.APIKey,
+		BaseURL:     llmCfg.BaseURL,
+		Model:       llmCfg.Model,
+		SoulPrompt:  llmCfg.SoulPrompt,
+		RulesPrompt: llmCfg.RulesPrompt,
+		ExtraFields: llmCfg.ExtraFields,
 	}
 	toolCfg := tools.ManagerConfig{
 		MCPServers: toToolsMCPServers(appConfig.Tools.MCP),

@@ -5,24 +5,9 @@ import (
 	"time"
 )
 
-type Mode string
-
-const (
-	ModeNone     Mode = "none"
-	ModeSession  Mode = "session"
-	ModeLongTerm Mode = "long_term"
-)
-
 type Config struct {
-	Mode                 Mode
-	SessionMaxTurns      int
-	SessionSummaryEveryN int
-	LongTermDBPath       string
-	LongTermMaxResults   int
-	RetentionDays        int
-	FTSMinScore          float64
-	MemoryCharLimit      int
-	UserCharLimit        int
+	MemoryCharLimit int
+	UserCharLimit   int
 }
 
 type Context struct {

@@ -160,12 +160,15 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 			}
 		}
 	}
-	if ac.LLM.Prompt != "" {
-		full.Provider.LLM.OpenAI.Prompt = ac.LLM.Prompt
+	if ac.LLM.SoulPrompt != "" {
+		full.Provider.LLM.OpenAI.SoulPrompt = ac.LLM.SoulPrompt
+	}
+	if ac.LLM.RulesPrompt != "" {
+		full.Provider.LLM.OpenAI.RulesPrompt = ac.LLM.RulesPrompt
 	}
 
 	// ── Memory / MCP / Audio ──
-	if ac.Memory.Mode != "" {
+	if ac.Memory.MemoryCharLimit > 0 {
 		full.Memory = ac.Memory
 	}
 	// MCP: 从 voicebot_mcp_bindings + mcp_servers 加载（仅 enabled）

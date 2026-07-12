@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
@@ -27,6 +28,7 @@ func (h *TurnHandler) CreateTurn(c *gin.Context) {
 	}
 	turn.DeviceID = deviceID
 	if err := h.store.Create(&turn); err != nil {
+		logging.Errorf("CreateTurn device=%s: %v", deviceID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -47,6 +49,7 @@ func (h *TurnHandler) SearchTurns(c *gin.Context) {
 	}
 	turns, err := h.store.Search(deviceID, query, limit)
 	if err != nil {
+		logging.Errorf("SearchTurns device=%s q=%q: %v", deviceID, query, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -87,6 +90,7 @@ func (h *TurnHandler) GetSessionMessages(c *gin.Context) {
 	}
 	turns, err := h.store.ListBySession(deviceID, sessionID, limit, offset)
 	if err != nil {
+		logging.Errorf("GetSessionMessages device=%s session=%s: %v", deviceID, sessionID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -111,6 +115,7 @@ func (h *TurnHandler) listSessions(c *gin.Context, deviceID string) {
 	}
 	sessions, err := h.store.ListSessions(deviceID, limit)
 	if err != nil {
+		logging.Errorf("ListSessions device=%s: %v", deviceID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

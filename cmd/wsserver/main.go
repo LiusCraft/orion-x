@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/liuscraft/orion-x/internal/agent"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
@@ -57,7 +56,6 @@ func main() {
 	// process-level memory / tool / agent — shared across connections.
 	// Per-connection memory service is created in newConnection.
 	memorySvc, err := memory.NewService(memory.Config{}, memory.Options{
-		SystemPrompt: agent.DefaultSystemPrompt(),
 		ManagerURL:   managerURL,
 		DeviceID:     "",
 		ReviewConfig: memory.ReviewConfig{Enabled: false},

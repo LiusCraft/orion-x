@@ -296,7 +296,7 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		MemoryCharLimit: connCfg.Memory.MemoryCharLimit,
 		UserCharLimit:   connCfg.Memory.UserCharLimit,
 	}, memory.Options{
-		SystemPrompt: agent.DefaultSystemPrompt(),
+		// SystemPrompt 留空 → memory service 从 data/prompts/soul.md + rules.md 读取
 		ManagerURL:   s.deviceCfg.ManagerURL(),
 		DeviceID:     deviceID,
 		ReviewConfig: memory.ReviewConfig{Enabled: true},
@@ -307,12 +307,13 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 	}
 
 	connAgentCfg := agent.Config{
-		Provider:     connCfg.Provider.LLM.Type,
-		APIKey:       connCfg.Provider.LLM.OpenAI.APIKey,
-		BaseURL:      connCfg.Provider.LLM.OpenAI.BaseURL,
-		Model:        connCfg.Provider.LLM.OpenAI.Model,
-		SystemPrompt: connCfg.Provider.LLM.OpenAI.Prompt,
-		ExtraFields:  connCfg.Provider.LLM.OpenAI.ExtraFields,
+		Provider:    connCfg.Provider.LLM.Type,
+		APIKey:      connCfg.Provider.LLM.OpenAI.APIKey,
+		BaseURL:     connCfg.Provider.LLM.OpenAI.BaseURL,
+		Model:       connCfg.Provider.LLM.OpenAI.Model,
+		SoulPrompt:  connCfg.Provider.LLM.OpenAI.SoulPrompt,
+		RulesPrompt: connCfg.Provider.LLM.OpenAI.RulesPrompt,
+		ExtraFields: connCfg.Provider.LLM.OpenAI.ExtraFields,
 	}
 	var connAgent *agent.Agent
 	if memSvc != nil {

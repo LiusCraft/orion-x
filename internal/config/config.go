@@ -50,7 +50,8 @@ type LLMConfig struct {
 	APIKey      string         `json:"api_key"`
 	BaseURL     string         `json:"base_url"`
 	Model       string         `json:"model"`
-	Prompt      string         `json:"prompt,omitempty"`
+	SoulPrompt  string         `json:"soul_prompt,omitempty"`
+	RulesPrompt string         `json:"rules_prompt,omitempty"`
 	ExtraFields map[string]any `json:"extra_fields,omitempty"`
 }
 
@@ -374,29 +375,11 @@ func (c *AppConfig) Validate() error {
 		}
 	}
 
-	memoryMode := strings.TrimSpace(c.Memory.Mode)
-	if memoryMode == "" {
-		memoryMode = "session"
+	if c.Memory.MemoryCharLimit < 0 {
+		return errors.New("memory.memory_char_limit must be >= 0")
 	}
-	switch memoryMode {
-	case "none", "session", "long_term":
-	default:
-		return fmt.Errorf("memory.mode must be none, session, or long_term")
-	}
-	if c.Memory.SessionMaxTurns < 0 {
-		return errors.New("memory.session_max_turns must be >= 0")
-	}
-	if c.Memory.SessionSummaryEveryN < 0 {
-		return errors.New("memory.session_summary_every_n must be >= 0")
-	}
-	if c.Memory.LongTermMaxResults < 0 {
-		return errors.New("memory.long_term_max_results must be >= 0")
-	}
-	if c.Memory.RetentionDays < 0 {
-		return errors.New("memory.retention_days must be >= 0")
-	}
-	if memoryMode == "long_term" && strings.TrimSpace(c.Memory.LongTermDBPath) == "" {
-		return errors.New("memory.long_term_db_path must not be empty when long_term mode")
+	if c.Memory.UserCharLimit < 0 {
+		return errors.New("memory.user_char_limit must be >= 0")
 	}
 
 	return nil

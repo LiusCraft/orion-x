@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
@@ -26,6 +27,7 @@ func (h *MemoryHandler) GetMemory(c *gin.Context) {
 	deviceID := c.Param("device_id")
 	entries, err := h.store.ListByDevice(deviceID)
 	if err != nil {
+		logging.Errorf("GetMemory device=%s: %v", deviceID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -79,6 +81,7 @@ func (h *MemoryHandler) PutMemory(c *gin.Context) {
 	}
 
 	if err := h.store.ReplaceAll(deviceID, entries); err != nil {
+		logging.Errorf("PutMemory device=%s: %v", deviceID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

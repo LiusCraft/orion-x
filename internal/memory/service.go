@@ -14,7 +14,6 @@ import (
 )
 
 type Options struct {
-	SystemPrompt string
 	LLM          llm.Client
 	ManagerURL   string
 	DeviceID     string
@@ -28,7 +27,6 @@ type Service struct {
 	review        *BackgroundReview
 	compressor    *Compressor
 	sessionBuffer []Turn // local buffer for recent turns
-	systemPrompt  string
 	managerURL    string
 	deviceID      string
 	httpClient    *http.Client
@@ -49,14 +47,13 @@ func NewService(cfg Config, opts Options) (*Service, error) {
 	}
 
 	svc := &Service{
-		store:        store,
-		review:       review,
-		compressor:   compressor,
-		systemPrompt: strings.TrimSpace(opts.SystemPrompt),
-		managerURL:   strings.TrimRight(opts.ManagerURL, "/"),
-		deviceID:     opts.DeviceID,
-		httpClient:   &http.Client{},
-		now:          opts.Now,
+		store:      store,
+		review:     review,
+		compressor: compressor,
+		managerURL: strings.TrimRight(opts.ManagerURL, "/"),
+		deviceID:   opts.DeviceID,
+		httpClient: &http.Client{},
+		now:        opts.Now,
 	}
 
 	// Load memory from Manager
@@ -67,13 +64,26 @@ func NewService(cfg Config, opts Options) (*Service, error) {
 	return svc, nil
 }
 
-// BuildContextMessages assembles messages for the LLM: system prompt + frozen snapshot + history.
-func (s *Service) BuildContextMessages(ctx context.Context, history []*llm.Message) []*llm.Message {
+// BuildContextMessages assembles messages for the LLM using the same three-tier
+// order as Hermes: stable (soul → rules) → volatile (memory+user history).
+func (s *Service) BuildContextMessages(ctx context.Context, history []*llm.Message, soulPrompt, rulesPrompt string) []*llm.Message {
 	messages := make([]*llm.Message, 0, 16)
-	if s.systemPrompt != "" {
-		messages = append(messages, &llm.Message{Role: "system", Content: s.systemPrompt})
+
+	// T1: Stable — soul identity + behavioral rules
+	if soulPrompt != "" {
+		messages = append(messages, &llm.Message{
+			Role:    "system",
+			Content: "═══════════════════ 身份设定 (SOUL) ═══════════════════\n" + soulPrompt,
+		})
+	}
+	if rulesPrompt != "" {
+		messages = append(messages, &llm.Message{
+			Role:    "system",
+			Content: rulesPrompt,
+		})
 	}
 
+	// T2: Volatile — curated memory snapshot + user profile snapshot
 	memoryBlock := s.store.FormatForSystemPrompt("memory")
 	userBlock := s.store.FormatForSystemPrompt("user")
 	if memoryBlock != "" || userBlock != "" {
@@ -137,11 +147,16 @@ func (s *Service) RecordTurn(ctx context.Context, turn Turn) error {
 }
 
 // saveTurnAsync persists a turn to the Manager via HTTP. Best-effort, logs errors.
-func (s *Service) saveTurnAsync(ctx context.Context, turn Turn) {
+// Uses context.Background with a timeout — the caller's context may be canceled
+// before the async goroutine runs.
+func (s *Service) saveTurnAsync(_ context.Context, turn Turn) {
 	if s.deviceID == "" || s.managerURL == "" {
 		return
 	}
 	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		body, err := json.Marshal(map[string]interface{}{
 			"session_id":     turn.SessionID,
 			"turn_id":        turn.TurnID,

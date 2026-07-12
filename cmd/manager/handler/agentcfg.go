@@ -32,8 +32,9 @@ type TTSAgentConfig struct {
 }
 
 type LLMAgentConfig struct {
-	ModelID string `json:"model_id"`
-	Prompt  string `json:"prompt,omitempty"`
+	ModelID     string `json:"model_id"`
+	SoulPrompt  string `json:"soul_prompt,omitempty"`
+	RulesPrompt string `json:"rules_prompt,omitempty"`
 }
 
 type AudioAgentConfig struct {

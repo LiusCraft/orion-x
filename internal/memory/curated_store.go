@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/liuscraft/orion-x/internal/logging"
 )
@@ -54,6 +56,7 @@ type memoryGetResponse struct {
 type CuratedStore struct {
 	deviceID   string
 	managerURL string
+	localPath  string // local JSON file path (only set when managerURL is empty)
 	httpClient *http.Client
 
 	mu             sync.RWMutex
@@ -74,9 +77,14 @@ func NewCuratedStore(managerURL, deviceID string, memoryLimit, userLimit int) *C
 	if userLimit <= 0 {
 		userLimit = DefaultUserLimit
 	}
+	localPath := ""
+	if strings.TrimRight(managerURL, "/") == "" {
+		localPath = "data/memory_local.json"
+	}
 	return &CuratedStore{
 		deviceID:        deviceID,
 		managerURL:      strings.TrimRight(managerURL, "/"),
+		localPath:       localPath,
 		httpClient:      &http.Client{},
 		memoryCharLimit: memoryLimit,
 		userCharLimit:   userLimit,
@@ -84,10 +92,27 @@ func NewCuratedStore(managerURL, deviceID string, memoryLimit, userLimit int) *C
 }
 
 // Load fetches memory from Manager and builds frozen snapshot.
+// When managerURL is empty (local mode), reads from local JSON file.
 func (c *CuratedStore) Load(ctx context.Context) error {
-	if c.deviceID == "" {
+	if c.managerURL == "" || c.deviceID == "" {
+		if c.localPath != "" {
+			if data, err := os.ReadFile(c.localPath); err == nil {
+				var local struct {
+					Memory []string `json:"memory"`
+					User   []string `json:"user"`
+				}
+				if err := json.Unmarshal(data, &local); err == nil {
+					c.mu.Lock()
+					c.memoryEntries = local.Memory
+					c.userEntries = local.User
+					c.buildSnapshot()
+					c.mu.Unlock()
+					return nil
+				}
+			}
+		}
 		c.buildSnapshot()
-		return nil // skip HTTP call for empty deviceID
+		return nil
 	}
 	url := fmt.Sprintf("%s/internal/devices/%s/memory", c.managerURL, c.deviceID)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -303,11 +328,21 @@ func (c *CuratedStore) usageStr(target string, entries []string, limit int) stri
 	return fmt.Sprintf("%d/%d", charCount(entries), limit)
 }
 
-// goSync async-flushes to manager. Best-effort, logs errors.
+// goSync async-flushes to manager or persists locally.
 func (c *CuratedStore) goSync() {
+	if c.managerURL == "" && c.localPath != "" {
+		c.localPersist()
+		return
+	}
+	if c.managerURL == "" {
+		return
+	}
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
 		c.mu.RLock()
 		memEntries := copySlice(c.memoryEntries)
@@ -330,7 +365,7 @@ func (c *CuratedStore) goSync() {
 			return
 		}
 		url := fmt.Sprintf("%s/internal/devices/%s/memory", c.managerURL, c.deviceID)
-		req, err := http.NewRequest("PUT", url, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(body))
 		if err != nil {
 			logging.Errorf("CuratedStore[%s]: goSync create request: %v", c.deviceID, err)
 			return
@@ -343,6 +378,27 @@ func (c *CuratedStore) goSync() {
 		}
 		_ = resp.Body.Close()
 	}()
+}
+
+// localPersist writes entries to a local JSON file.
+func (c *CuratedStore) localPersist() {
+	c.mu.RLock()
+	data, err := json.Marshal(map[string][]string{
+		"memory": c.memoryEntries,
+		"user":   c.userEntries,
+	})
+	c.mu.RUnlock()
+	if err != nil {
+		logging.Errorf("CuratedStore[%s]: localPersist marshal: %v", c.deviceID, err)
+		return
+	}
+	if err := os.MkdirAll("data", 0755); err != nil {
+		logging.Errorf("CuratedStore[%s]: localPersist mkdir: %v", c.deviceID, err)
+		return
+	}
+	if err := os.WriteFile(c.localPath, data, 0644); err != nil {
+		logging.Errorf("CuratedStore[%s]: localPersist write: %v", c.deviceID, err)
+	}
 }
 
 // WaitForSync blocks until all pending goSync goroutines complete.

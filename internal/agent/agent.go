@@ -11,12 +11,13 @@ import (
 )
 
 type Agent struct {
-	client       llm.Client
-	registry     *tools.Registry
-	model        string
-	memorySvc    *memory.Service
-	maxSteps     int
-	systemPrompt string
+	client      llm.Client
+	registry    *tools.Registry
+	model       string
+	memorySvc   *memory.Service
+	maxSteps    int
+	soulPrompt  string
+	rulesPrompt string
 }
 
 // RegisterBuiltinTool adds a tool spec to the agent's registry.
@@ -45,18 +46,19 @@ func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc *memory.
 		return nil, err
 	}
 
-	return newWithClient(client, mgr.Registry(), normalized.Model, memorySvc, normalized.SystemPrompt), nil
+	return newWithClient(client, mgr.Registry(), normalized.Model, memorySvc, normalized.SoulPrompt, normalized.RulesPrompt), nil
 }
 
 // newWithClient 使用已构造好的 llm.Client 组装 Agent，供测试注入 fake client。
-func newWithClient(client llm.Client, registry *tools.Registry, model string, memorySvc *memory.Service, systemPrompt string) *Agent {
+func newWithClient(client llm.Client, registry *tools.Registry, model string, memorySvc *memory.Service, soulPrompt, rulesPrompt string) *Agent {
 	return &Agent{
-		client:       client,
-		registry:     registry,
-		model:        model,
-		memorySvc:    memorySvc,
-		maxSteps:     10,
-		systemPrompt: systemPrompt,
+		client:      client,
+		registry:    registry,
+		model:       model,
+		memorySvc:   memorySvc,
+		maxSteps:    10,
+		soulPrompt:  soulPrompt,
+		rulesPrompt: rulesPrompt,
 	}
 }
 

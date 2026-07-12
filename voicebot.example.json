@@ -43,7 +43,9 @@
             "openai": {
                 "api_key": "",
                 "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
-                "model": "glm-4-flash"
+                "model": "glm-4-flash",
+                "soul_prompt": "",
+                "rules_prompt": ""
             }
         }
     },
@@ -91,12 +93,7 @@
         }
     },
     "memory": {
-        "mode": "session",
-        "session_max_turns": 10,
-        "session_summary_every_n": 20,
-        "long_term_db_path": "data/memory.db",
-        "long_term_max_results": 6,
-        "retention_days": 365,
-        "fts_min_score": 0
+        "memory_char_limit": 2200,
+        "user_char_limit": 1375
     }
 }

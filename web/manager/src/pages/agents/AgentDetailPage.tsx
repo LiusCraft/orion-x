@@ -29,12 +29,12 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { Search, CheckCircle2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
-	SelectValue,
 } from "@/components/ui/select";
 import {
 	Dialog,
@@ -62,15 +62,12 @@ interface BotConfig {
 		rate: number;
 		pitch: number;
 	};
-	llm: { model_id: string; prompt: string };
+	llm: { model_id: string; soul_prompt: string; rules_prompt: string };
 	audio: { sample_rate: number };
 	memory: {
-		mode: string;
-		session_max_turns: number;
-		session_summary_every_n: number;
-		long_term_db_path: string;
-		long_term_max_results: number;
-		retention_days: number;
+		memory_char_limit: number;
+		user_char_limit: number;
+		review_enabled: boolean;
 	};
 }
 
@@ -84,15 +81,12 @@ const DC: BotConfig = {
 		vad_speech_pad_ms: 300,
 	},
 	tts: { model_id: "", voice_id: "", volume: 50, rate: 1.0, pitch: 1.0 },
-	llm: { model_id: "", prompt: "" },
+	llm: { model_id: "", soul_prompt: "", rules_prompt: "" },
 	audio: { sample_rate: 16000 },
 	memory: {
-		mode: "session",
-		session_max_turns: 10,
-		session_summary_every_n: 20,
-		long_term_db_path: "data/memory.db",
-		long_term_max_results: 6,
-		retention_days: 365,
+		memory_char_limit: 2200,
+		user_char_limit: 1375,
+		review_enabled: true,
 	},
 };
 
@@ -142,7 +136,7 @@ function parseCfg(json: string): BotConfig {
 				rate: c.provider?.tts?.aliyun?.rate ?? DC.tts.rate,
 				pitch: c.provider?.tts?.aliyun?.pitch ?? DC.tts.pitch,
 			},
-			llm: { model_id: "", prompt: "" },
+			llm: { model_id: "", soul_prompt: "", rules_prompt: "" },
 			audio: {
 				sample_rate: c.audio?.in_pipe?.sample_rate ?? DC.audio.sample_rate,
 			},
@@ -462,12 +456,20 @@ export default function AgentDetailPage() {
 									className={inp}
 								/>
 							</Field>
-							<Field label="角色提示词">
+							<Field label="身份设定 (SOUL)">
 								<textarea
-									value={llm.prompt}
-									onChange={(e) => setLlm({ prompt: e.target.value })}
-									placeholder="设置智能体的角色、行为规范、回答风格等..."
-									className="bg-zinc-800 border border-zinc-700 text-white placeholder:text-zinc-600 focus-visible:ring-violet-500 rounded-lg px-3 py-2 text-sm w-full resize-none h-24"
+									value={llm.soul_prompt}
+									onChange={(e) => setLlm({ soul_prompt: e.target.value })}
+									placeholder="智能体的身份、人格、交流风格... 留空则使用默认"
+									className="bg-zinc-800 border border-zinc-700 text-white placeholder:text-zinc-600 focus-visible:ring-violet-500 rounded-lg px-3 py-2 text-sm w-full resize-none h-20"
+								/>
+							</Field>
+							<Field label="行为规则 (RULES)">
+								<textarea
+									value={llm.rules_prompt}
+									onChange={(e) => setLlm({ rules_prompt: e.target.value })}
+									placeholder="工具使用规则、对话约束... 留空则使用默认"
+									className="bg-zinc-800 border border-zinc-700 text-white placeholder:text-zinc-600 focus-visible:ring-violet-500 rounded-lg px-3 py-2 text-sm w-full resize-none h-20"
 								/>
 							</Field>
 							<div className="flex flex-wrap gap-4">
@@ -857,81 +859,41 @@ export default function AgentDetailPage() {
 
 						{/* ── 记忆 ── */}
 						<TabsContent value="memory" className="space-y-5 pt-1">
-							<Field label="记忆模式">
-								<Select
-									value={mem.mode}
-									onValueChange={(v) => setMem({ mode: v ?? "session" })}
-								>
-									<SelectTrigger>
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="none">无记忆</SelectItem>
-										<SelectItem value="session">会话记忆</SelectItem>
-										<SelectItem value="long_term">长期记忆</SelectItem>
-									</SelectContent>
-								</Select>
-							</Field>
 							<div className="grid grid-cols-2 gap-4">
-								<Field label="会话最大轮数">
+								<Field label="记忆字符上限">
 									<Input
 										type="number"
 										min={0}
-										value={mem.session_max_turns}
+										value={mem.memory_char_limit}
 										onChange={(e) =>
-											setMem({ session_max_turns: +e.target.value })
+											setMem({ memory_char_limit: +e.target.value })
 										}
 										className={inp}
 									/>
 								</Field>
-								<Field label="每 N 轮摘要">
+								<Field label="用户画像字符上限">
 									<Input
 										type="number"
 										min={0}
-										value={mem.session_summary_every_n}
+										value={mem.user_char_limit}
 										onChange={(e) =>
-											setMem({ session_summary_every_n: +e.target.value })
+											setMem({ user_char_limit: +e.target.value })
 										}
 										className={inp}
 									/>
+								</Field>
+								<Field label="后台自省">
+									<div className="flex items-center gap-2 h-9">
+										<Switch
+											checked={mem.review_enabled}
+											onCheckedChange={(v) => setMem({ review_enabled: v })}
+										/>
+										<span className="text-xs text-zinc-500">
+											{mem.review_enabled ? "每轮对话后自动提取记忆" : "关闭"}
+										</span>
+									</div>
 								</Field>
 							</div>
-							{mem.mode === "long_term" && (
-								<div className="grid grid-cols-2 gap-4 pl-3 border-l border-zinc-800">
-									<Field label="数据库路径">
-										<Input
-											value={mem.long_term_db_path}
-											onChange={(e) =>
-												setMem({ long_term_db_path: e.target.value })
-											}
-											placeholder="data/memory.db"
-											className={`${inp} col-span-2`}
-										/>
-									</Field>
-									<Field label="最大检索条数">
-										<Input
-											type="number"
-											min={0}
-											value={mem.long_term_max_results}
-											onChange={(e) =>
-												setMem({ long_term_max_results: +e.target.value })
-											}
-											className={inp}
-										/>
-									</Field>
-									<Field label="保留天数">
-										<Input
-											type="number"
-											min={0}
-											value={mem.retention_days}
-											onChange={(e) =>
-												setMem({ retention_days: +e.target.value })
-											}
-											className={inp}
-										/>
-									</Field>
-								</div>
-							)}
 						</TabsContent>
 
 						{/* ── MCP ── */}
