@@ -895,6 +895,14 @@ export default function AgentDetailPage() {
 									</div>
 								</Field>
 							</div>
+							<div className="border-t border-zinc-800 pt-4">
+								<button
+									onClick={() => navigate("/data/memory")}
+									className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1"
+								>
+									查看记忆库条目 →
+								</button>
+							</div>
 						</TabsContent>
 
 						{/* ── MCP ── */}
@@ -1104,12 +1112,22 @@ export default function AgentDetailPage() {
 													{new Date(d.created_at).toLocaleDateString("zh-CN")}
 												</p>
 											</div>
-											<button
-												onClick={() => handleDeleteDevice(d.id)}
-												className="text-zinc-600 hover:text-red-400 transition-colors px-2 py-1 text-xs"
-											>
-												删除
-											</button>
+											<div className="flex items-center gap-2">
+												<button
+													onClick={() =>
+														navigate(`/data/memory?device_id=${d.id}`)
+													}
+													className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
+												>
+													查看记忆
+												</button>
+												<button
+													onClick={() => handleDeleteDevice(d.id)}
+													className="text-zinc-600 hover:text-red-400 transition-colors px-2 py-1 text-xs"
+												>
+													删除
+												</button>
+											</div>
 										</div>
 									))}
 								</div>

@@ -54,6 +54,7 @@ func newRouter(
 	internalH := handler.NewInternalHandler(voicebots, devices, models, voices, mcpBindings)
 	availableH := handler.NewAvailableHandler(providers, models, voices)
 	memH := handler.NewMemoryHandler(memStore)
+	dataMemH := handler.NewDataMemoryHandler(memStore, devices, voicebots)
 	turnH := handler.NewTurnHandler(turnStore)
 
 	api := r.Group("/api")
@@ -104,6 +105,13 @@ func newRouter(
 
 		// 可用资源（无 API key）
 		api.GET("/available-resources", jwtMw, availableH.List)
+
+		// 记忆管理（用户级）
+		data := api.Group("/data/memory", jwtMw)
+		data.GET("/agents", dataMemH.ListAgents)
+		data.GET("/agents/:agent_id/devices", dataMemH.ListDevices)
+		data.GET("/devices/:device_id/entries", dataMemH.ListEntries)
+		data.DELETE("/:id", dataMemH.DeleteMemory)
 
 		// 预留：活跃会话列表
 		api.GET("/sessions", jwtMw, func(c *gin.Context) {

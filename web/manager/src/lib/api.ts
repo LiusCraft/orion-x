@@ -399,6 +399,86 @@ export const mcpApi = {
 		}>("/mcp/call-tool", data),
 };
 
+export interface MemoryEntry {
+	id: string;
+	target: "memory" | "user";
+	content: string;
+	device_id: string;
+	agent_name: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface DeviceUsage {
+	memory: { used: number; limit: number };
+	user: { used: number; limit: number };
+}
+
+export interface DeviceGroup {
+	id: string;
+	name: string;
+	entries: MemoryEntry[];
+	total: number;
+	usage: DeviceUsage;
+}
+
+export interface AgentGroup {
+	id: string;
+	name: string;
+	devices: DeviceGroup[];
+	total: number;
+}
+
+export interface AgentItem {
+	id: string;
+	name: string;
+	device_count: number;
+	total: number;
+}
+
+export interface DeviceItem {
+	id: string;
+	name: string;
+	total: number;
+	usage: {
+		memory: { used: number; limit: number };
+		user: { used: number; limit: number };
+	};
+}
+
+export interface EntryItem {
+	id: string;
+	target: "memory" | "user";
+	content: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export const memoryApi = {
+	listAgents: (params?: { page?: number; page_size?: number }) =>
+		http.get<PaginatedResponse<AgentItem> & { agents: AgentItem[] }>(
+			"/data/memory/agents",
+			{ params },
+		),
+	listDevices: (
+		agentId: string,
+		params?: { page?: number; page_size?: number; q?: string; target?: string },
+	) =>
+		http.get<PaginatedResponse<DeviceItem> & { devices: DeviceItem[] }>(
+			`/data/memory/agents/${agentId}/devices`,
+			{ params },
+		),
+	listEntries: (
+		deviceId: string,
+		params?: { page?: number; page_size?: number; q?: string; target?: string },
+	) =>
+		http.get<PaginatedResponse<EntryItem> & { entries: EntryItem[] }>(
+			`/data/memory/devices/${deviceId}/entries`,
+			{ params },
+		),
+	remove: (id: string) => http.delete(`/data/memory/${id}`),
+};
+
 export const availableResourcesApi = {
 	list: (lang?: string) =>
 		http.get<AvailableResources>("/available-resources", {
