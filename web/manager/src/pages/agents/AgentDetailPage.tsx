@@ -659,15 +659,16 @@ export default function AgentDetailPage() {
 											({resources?.voices.length ?? 0})
 										</span>
 									</Label>
-									{tts.voice_id && (
-										<span className="text-[11px] text-violet-400">
-											当前选中:{" "}
-											{
-												resources?.voices.find((v) => v.id === tts.voice_id)
-													?.name
-											}
-										</span>
-									)}
+									{tts.voice_id &&
+										resources?.voices?.some((v) => v.id === tts.voice_id) && (
+											<span className="text-[11px] text-violet-400">
+												当前选中:{" "}
+												{
+													resources?.voices.find((v) => v.id === tts.voice_id)
+														?.name
+												}
+											</span>
+										)}
 								</div>
 
 								{resources?.voices && resources.voices.length > 0 && (
@@ -1062,12 +1063,12 @@ export default function AgentDetailPage() {
 								</div>
 							)}
 							<div className="border-t border-zinc-800 pt-3">
-								<a
-									href="/components/mcp"
+								<button
+									onClick={() => navigate("/components/mcp")}
 									className="text-xs text-violet-400 hover:text-violet-300"
 								>
 									管理 MCP 服务器 →
-								</a>
+								</button>
 							</div>
 						</TabsContent>
 
