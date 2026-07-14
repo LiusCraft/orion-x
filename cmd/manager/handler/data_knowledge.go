@@ -40,8 +40,19 @@ func NewDataKnowledgeHandler(
 
 // ── 知识库 CRUD ──
 
+func (h *DataKnowledgeHandler) needSvc(c *gin.Context) bool {
+	if h.kbSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "知识库服务未启动，请检查 pgvector 扩展是否已安装"})
+		return false
+	}
+	return true
+}
+
 // ListKBs GET /api/data/knowledge/bots/:bot_id/knowledge_bases
 func (h *DataKnowledgeHandler) ListKBs(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
 	userID := c.GetString("userID")
 	botID := c.Param("bot_id")
 
@@ -65,6 +76,9 @@ func (h *DataKnowledgeHandler) ListKBs(c *gin.Context) {
 
 // CreateKB POST /api/data/knowledge/bots/:bot_id/knowledge_bases
 func (h *DataKnowledgeHandler) CreateKB(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
 	userID := c.GetString("userID")
 	botID := c.Param("bot_id")
 
@@ -99,6 +113,9 @@ func (h *DataKnowledgeHandler) CreateKB(c *gin.Context) {
 
 // GetKB GET /api/data/knowledge/knowledge_bases/:kb_id
 func (h *DataKnowledgeHandler) GetKB(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
 	kbID := c.Param("kb_id")
 	kb, err := h.kbSvc.GetKB(c.Request.Context(), kbID)
 	if err != nil {
@@ -110,6 +127,9 @@ func (h *DataKnowledgeHandler) GetKB(c *gin.Context) {
 
 // DeleteKB DELETE /api/data/knowledge/knowledge_bases/:kb_id
 func (h *DataKnowledgeHandler) DeleteKB(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
 	kbID := c.Param("kb_id")
 	if err := h.kbSvc.DeleteKB(c.Request.Context(), kbID); err != nil {
 		logging.Errorf("DataKnowledge DeleteKB id=%s: %v", kbID, err)
@@ -123,6 +143,9 @@ func (h *DataKnowledgeHandler) DeleteKB(c *gin.Context) {
 
 // ListDocuments GET /api/data/knowledge/knowledge_bases/:kb_id/documents
 func (h *DataKnowledgeHandler) ListDocuments(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
 	kbID := c.Param("kb_id")
 	docs, err := h.kbSvc.ListDocuments(c.Request.Context(), kbID)
 	if err != nil {
@@ -138,6 +161,9 @@ func (h *DataKnowledgeHandler) ListDocuments(c *gin.Context) {
 
 // UploadDocument POST /api/data/knowledge/knowledge_bases/:kb_id/documents
 func (h *DataKnowledgeHandler) UploadDocument(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
 	kbID := c.Param("kb_id")
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -163,6 +189,9 @@ func (h *DataKnowledgeHandler) UploadDocument(c *gin.Context) {
 
 // IngestURL POST /api/data/knowledge/knowledge_bases/:kb_id/documents/url
 func (h *DataKnowledgeHandler) IngestURL(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
 	kbID := c.Param("kb_id")
 	var req struct {
 		URL string `json:"url"`
@@ -183,6 +212,9 @@ func (h *DataKnowledgeHandler) IngestURL(c *gin.Context) {
 
 // DeleteDocument DELETE /api/data/knowledge/documents/:doc_id
 func (h *DataKnowledgeHandler) DeleteDocument(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
 	docID := c.Param("doc_id")
 	if err := h.kbSvc.DeleteDocument(c.Request.Context(), docID); err != nil {
 		logging.Errorf("DataKnowledge DeleteDocument id=%s: %v", docID, err)
@@ -194,6 +226,9 @@ func (h *DataKnowledgeHandler) DeleteDocument(c *gin.Context) {
 
 // GetDocumentStatus GET /api/data/knowledge/documents/:doc_id/status
 func (h *DataKnowledgeHandler) GetDocumentStatus(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
 	docID := c.Param("doc_id")
 	doc, err := h.kbSvc.GetDocumentStatus(c.Request.Context(), docID)
 	if err != nil {
@@ -207,6 +242,9 @@ func (h *DataKnowledgeHandler) GetDocumentStatus(c *gin.Context) {
 
 // Search GET /internal/knowledge/search?q=...&device_id=...&top_k=5
 func (h *DataKnowledgeHandler) Search(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
 	deviceID := c.Query("device_id")
 	if deviceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "device_id is required"})
