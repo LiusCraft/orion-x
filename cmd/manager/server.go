@@ -27,6 +27,7 @@ func newRouter(
 	kbSvc *knowledge.Service,
 	kbStore *store.KnowledgeBaseStore,
 	docStore *store.DocumentStore,
+	voicebotKBs *store.VoicebotKBStore,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -59,7 +60,7 @@ func newRouter(
 	availableH := handler.NewAvailableHandler(providers, models, voices)
 	memH := handler.NewMemoryHandler(memStore)
 	dataMemH := handler.NewDataMemoryHandler(memStore, devices, voicebots)
-	dataKnowH := handler.NewDataKnowledgeHandler(kbSvc, kbStore, docStore, devices, voicebots)
+	dataKnowH := handler.NewDataKnowledgeHandler(kbSvc, kbStore, docStore, devices, voicebots, voicebotKBs)
 	turnH := handler.NewTurnHandler(turnStore)
 
 	api := r.Group("/api")
@@ -120,17 +121,23 @@ func newRouter(
 
 		// 知识库管理
 		knowledgeData := api.Group("/data/knowledge", jwtMw)
-		knowledgeData.GET("/bots/:bot_id/knowledge_bases", dataKnowH.ListKBs)
-		knowledgeData.POST("/bots/:bot_id/knowledge_bases", dataKnowH.CreateKB)
+		knowledgeData.GET("/knowledge_bases", dataKnowH.ListAllKBs)
 		knowledgeData.GET("/knowledge_bases/:kb_id", dataKnowH.GetKB)
 		knowledgeData.GET("/knowledge_bases/:kb_id/search", dataKnowH.SearchKB)
 		knowledgeData.DELETE("/knowledge_bases/:kb_id", dataKnowH.DeleteKB)
 		knowledgeData.GET("/knowledge_bases/:kb_id/documents", dataKnowH.ListDocuments)
 		knowledgeData.POST("/knowledge_bases/:kb_id/documents", dataKnowH.UploadDocument)
+		knowledgeData.POST("/knowledge_bases/:kb_id/documents/url", dataKnowH.IngestURL)
 		knowledgeData.DELETE("/documents/:doc_id", dataKnowH.DeleteDocument)
 		knowledgeData.GET("/documents/:doc_id/status", dataKnowH.GetDocumentStatus)
 		knowledgeData.POST("/documents/:doc_id/retry", dataKnowH.RetryDocument)
-		knowledgeData.POST("/knowledge_bases/:kb_id/documents/url", dataKnowH.IngestURL)
+		// KB-bot binding
+		knowledgeData.GET("/bots/:bot_id/knowledge_bases/bound", dataKnowH.ListBoundKBs)
+		knowledgeData.POST("/bots/:bot_id/knowledge_bases/bind", dataKnowH.BindKB)
+		knowledgeData.DELETE("/bots/:bot_id/knowledge_bases/:kb_id/bind", dataKnowH.UnbindKB)
+		// Legacy: create/list KBs for a bot (KB is created under the bot, then can be bound to others)
+		knowledgeData.GET("/bots/:bot_id/knowledge_bases", dataKnowH.ListKBs)
+		knowledgeData.POST("/bots/:bot_id/knowledge_bases", dataKnowH.CreateKB)
 
 		// 预留：活跃会话列表
 		api.GET("/sessions", jwtMw, func(c *gin.Context) {

@@ -68,6 +68,7 @@ func main() {
 	turnStore := store.NewTurnStore(db)
 	kbStore := store.NewKnowledgeBaseStore(db)
 	docStore := store.NewDocumentStore(db)
+	voicebotKBs := store.NewVoicebotKBStore(db)
 
 	if pass := strings.TrimSpace(cfg.Admin.Password); pass != "" {
 		if _, err := users.GetByUsername(cfg.Admin.Username); errors.Is(err, store.ErrNotFound) {
@@ -98,7 +99,7 @@ func main() {
 		logging.Infof("knowledge service ready")
 	}
 
-	r := newRouter(secret, users, voicebots, devices, providers, models, voices, langH, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore)
+	r := newRouter(secret, users, voicebots, devices, providers, models, voices, langH, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {

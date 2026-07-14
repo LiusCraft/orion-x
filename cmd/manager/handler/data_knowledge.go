@@ -19,6 +19,7 @@ type DataKnowledgeHandler struct {
 	docStore    *store.DocumentStore
 	deviceStore *store.DeviceStore
 	botStore    *store.VoicebotStore
+	bindStore   *store.VoicebotKBStore
 }
 
 // NewDataKnowledgeHandler creates a DataKnowledgeHandler.
@@ -28,6 +29,7 @@ func NewDataKnowledgeHandler(
 	docStore *store.DocumentStore,
 	deviceStore *store.DeviceStore,
 	botStore *store.VoicebotStore,
+	bindStore *store.VoicebotKBStore,
 ) *DataKnowledgeHandler {
 	return &DataKnowledgeHandler{
 		kbSvc:       kbSvc,
@@ -35,6 +37,7 @@ func NewDataKnowledgeHandler(
 		docStore:    docStore,
 		deviceStore: deviceStore,
 		botStore:    botStore,
+		bindStore:   bindStore,
 	}
 }
 
@@ -250,6 +253,115 @@ func (h *DataKnowledgeHandler) RetryDocument(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusAccepted)
+}
+
+// ListAllKBs GET /api/data/knowledge/knowledge_bases
+func (h *DataKnowledgeHandler) ListAllKBs(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
+	userID := c.GetString("userID")
+
+	kbs, err := h.kbSvc.ListAllKBs(c.Request.Context(), userID)
+	if err != nil {
+		logging.Errorf("DataKnowledge ListAllKBs: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询知识库失败"})
+		return
+	}
+	if kbs == nil {
+		kbs = []store.KnowledgeBase{}
+	}
+	c.JSON(http.StatusOK, gin.H{"knowledge_bases": kbs})
+}
+
+// ListBoundKBs GET /api/data/knowledge/bots/:bot_id/knowledge_bases/bound
+func (h *DataKnowledgeHandler) ListBoundKBs(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
+	userID := c.GetString("userID")
+	botID := c.Param("bot_id")
+
+	bot, err := h.botStore.GetByID(botID)
+	if err != nil || bot.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问"})
+		return
+	}
+
+	kbIDs, err := h.bindStore.ListKBIDsByVoicebot(botID)
+	if err != nil {
+		logging.Errorf("DataKnowledge ListBoundKBs bot=%s: %v", botID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询绑定知识库失败"})
+		return
+	}
+	if len(kbIDs) == 0 {
+		c.JSON(http.StatusOK, gin.H{"knowledge_bases": []store.KnowledgeBase{}})
+		return
+	}
+
+	kbs, err := h.kbSvc.ListKBsByIDs(c.Request.Context(), kbIDs)
+	if err != nil {
+		logging.Errorf("DataKnowledge ListBoundKBs: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询知识库失败"})
+		return
+	}
+	if kbs == nil {
+		kbs = []store.KnowledgeBase{}
+	}
+	c.JSON(http.StatusOK, gin.H{"knowledge_bases": kbs})
+}
+
+// BindKB POST /api/data/knowledge/bots/:bot_id/knowledge_bases/bind
+func (h *DataKnowledgeHandler) BindKB(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
+	userID := c.GetString("userID")
+	botID := c.Param("bot_id")
+
+	bot, err := h.botStore.GetByID(botID)
+	if err != nil || bot.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问"})
+		return
+	}
+
+	var req struct {
+		KBID string `json:"kb_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.KBID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
+		return
+	}
+
+	if err := h.bindStore.Bind(botID, req.KBID); err != nil {
+		logging.Errorf("DataKnowledge BindKB bot=%s kb=%s: %v", botID, req.KBID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "绑定失败"})
+		return
+	}
+	c.Status(http.StatusCreated)
+}
+
+// UnbindKB DELETE /api/data/knowledge/bots/:bot_id/knowledge_bases/:kb_id/bind
+func (h *DataKnowledgeHandler) UnbindKB(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
+	userID := c.GetString("userID")
+	botID := c.Param("bot_id")
+	kbID := c.Param("kb_id")
+
+	bot, err := h.botStore.GetByID(botID)
+	if err != nil || bot.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问"})
+		return
+	}
+
+	if err := h.bindStore.Unbind(botID, kbID); err != nil {
+		logging.Errorf("DataKnowledge UnbindKB bot=%s kb=%s: %v", botID, kbID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "解绑失败"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // ── 内部检索 API（wsserver 调用） ──

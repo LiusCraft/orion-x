@@ -2,6 +2,7 @@
 __debug_bin*
 !web/manager/src/pages/data
 .DS_Store
+.superpowers/
 .opencode/
 .pi-subagents/
 /bin/

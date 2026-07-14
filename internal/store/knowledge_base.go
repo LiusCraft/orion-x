@@ -52,6 +52,32 @@ func (s *KnowledgeBaseStore) ListByVoicebot(voicebotID string) ([]KnowledgeBase,
 	return kbs, nil
 }
 
+// ListAll returns all knowledge bases for a user (by owner, via voicebot join).
+func (s *KnowledgeBaseStore) ListAll(ownerID string) ([]KnowledgeBase, error) {
+	var kbs []KnowledgeBase
+	if err := s.db.Table("knowledge_bases").
+		Joins("JOIN voicebots ON voicebots.id = knowledge_bases.voicebot_id").
+		Where("voicebots.owner_id = ?", ownerID).
+		Order("knowledge_bases.created_at DESC").
+		Find(&kbs).Error; err != nil {
+		return nil, err
+	}
+	return kbs, nil
+}
+
+// ListByIDs returns knowledge bases by a list of IDs.
+func (s *KnowledgeBaseStore) ListByIDs(ids []string) ([]KnowledgeBase, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var kbs []KnowledgeBase
+	if err := s.db.Where("id IN ?", ids).
+		Order("created_at DESC").Find(&kbs).Error; err != nil {
+		return nil, err
+	}
+	return kbs, nil
+}
+
 func (s *KnowledgeBaseStore) DeleteByID(id string) error {
 	return s.db.Delete(&KnowledgeBase{}, "id = ?", id).Error
 }

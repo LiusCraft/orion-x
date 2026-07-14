@@ -133,6 +133,16 @@ func (s *Service) ListKBs(ctx context.Context, voicebotID string) ([]store.Knowl
 	return s.kbStore.ListByVoicebot(voicebotID)
 }
 
+// ListAllKBs returns all knowledge bases owned by the given user.
+func (s *Service) ListAllKBs(ctx context.Context, ownerID string) ([]store.KnowledgeBase, error) {
+	return s.kbStore.ListAll(ownerID)
+}
+
+// ListKBsByIDs returns knowledge bases by their IDs.
+func (s *Service) ListKBsByIDs(ctx context.Context, ids []string) ([]store.KnowledgeBase, error) {
+	return s.kbStore.ListByIDs(ids)
+}
+
 // GetKB returns a single knowledge base by ID.
 func (s *Service) GetKB(ctx context.Context, kbID string) (*store.KnowledgeBase, error) {
 	return s.kbStore.GetByID(kbID)

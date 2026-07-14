@@ -519,10 +519,19 @@ export interface SearchResultItem {
 }
 
 export const knowledgeApi = {
+	listAllKBs: (params?: { page?: number; page_size?: number; q?: string }) =>
+		http.get<{ knowledge_bases: KnowledgeBase[] }>(
+			`/data/knowledge/knowledge_bases`,
+			{ params },
+		),
 	listKBs: (botId: string, params?: { page?: number; page_size?: number }) =>
 		http.get<{ knowledge_bases: KnowledgeBase[] }>(
 			`/data/knowledge/bots/${botId}/knowledge_bases`,
 			{ params },
+		),
+	listBoundKBs: (botId: string) =>
+		http.get<{ knowledge_bases: KnowledgeBase[] }>(
+			`/data/knowledge/bots/${botId}/knowledge_bases/bound`,
 		),
 	createKB: (
 		botId: string,
@@ -535,9 +544,18 @@ export const knowledgeApi = {
 	getKB: (kbId: string) =>
 		http.get<KnowledgeBase>(`/data/knowledge/knowledge_bases/${kbId}`),
 	searchKB: (kbId: string, q: string, top_k?: number) =>
-		http.get<SearchResultItem[]>(`/data/knowledge/knowledge_bases/${kbId}/search`, { params: { q, top_k } }),
+		http.get<SearchResultItem[]>(
+			`/data/knowledge/knowledge_bases/${kbId}/search`,
+			{ params: { q, top_k } },
+		),
 	deleteKB: (kbId: string) =>
 		http.delete(`/data/knowledge/knowledge_bases/${kbId}`),
+	bindKB: (botId: string, kbId: string) =>
+		http.post(`/data/knowledge/bots/${botId}/knowledge_bases/bind`, {
+			kb_id: kbId,
+		}),
+	unbindKB: (botId: string, kbId: string) =>
+		http.delete(`/data/knowledge/bots/${botId}/knowledge_bases/${kbId}/bind`),
 	listDocs: (kbId: string) =>
 		http.get<{ documents: KnowledgeDocument[] }>(
 			`/data/knowledge/knowledge_bases/${kbId}/documents`,
