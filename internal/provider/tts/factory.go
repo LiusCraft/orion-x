@@ -149,7 +149,7 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 func SupportsLanguage(providerType, model string, lang language.Code) bool {
 	reg, ok := constructors[normalizeType(providerType, "")]
 	if !ok {
-		return false
+		return true // provider not registered → no restriction
 	}
 	info, ok := reg.meta.Models[model]
 	if !ok {

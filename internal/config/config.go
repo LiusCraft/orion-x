@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/liuscraft/orion-x/internal/language"
+	asrprovider "github.com/liuscraft/orion-x/internal/provider/asr"
+	ttsprovider "github.com/liuscraft/orion-x/internal/provider/tts"
 )
 
 const DefaultPath = "data/voicebot.json"
@@ -27,6 +31,7 @@ type ASRConfig struct {
 	APIKey   string `json:"api_key"`
 	Model    string `json:"model"`
 	Endpoint string `json:"endpoint"`
+	Language string `json:"language"` // system language code, e.g. "zh"
 }
 
 type TTSConfig struct {
@@ -44,6 +49,7 @@ type TTSConfig struct {
 	TextType             string            `json:"text_type"`
 	EnableDataInspection *bool             `json:"enable_data_inspection"`
 	VoiceMap             map[string]string `json:"voice_map"`
+	Language             string            `json:"language"` // system language code
 }
 
 type LLMConfig struct {
@@ -154,7 +160,8 @@ type MCPServerConfig struct {
 func DefaultConfig() *AppConfig {
 	enableDataInspection := true
 	defaultASR := ASRConfig{
-		Model: "fun-asr-realtime",
+		Model:    "fun-asr-realtime",
+		Language: "zh",
 	}
 	defaultTTS := TTSConfig{
 		Model:                "cosyvoice-v3-flash",
@@ -166,6 +173,7 @@ func DefaultConfig() *AppConfig {
 		Pitch:                1.0,
 		TextType:             "PlainText",
 		EnableDataInspection: &enableDataInspection,
+		Language:             "zh",
 		VoiceMap: map[string]string{
 			"happy":   "longanyang",
 			"sad":     "zhichu",
@@ -382,6 +390,39 @@ func (c *AppConfig) Validate() error {
 		return errors.New("memory.user_char_limit must be >= 0")
 	}
 
+	if err := c.validateASRLanguage(); err != nil {
+		return err
+	}
+	if err := c.validateTTSLanguage(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *AppConfig) validateASRLanguage() error {
+	lang := language.Normalize(c.Provider.ASR.Aliyun.Language)
+	if lang == "" {
+		return nil
+	}
+	model := c.Provider.ASR.Aliyun.Model
+	providerType := c.Provider.ASR.Type
+	if !asrprovider.SupportsLanguage(providerType, model, lang) {
+		return fmt.Errorf("ASR model %q does not support language %q", model, lang)
+	}
+	return nil
+}
+
+func (c *AppConfig) validateTTSLanguage() error {
+	lang := language.Normalize(c.Provider.TTS.Aliyun.Language)
+	if lang == "" {
+		return nil
+	}
+	model := c.Provider.TTS.Aliyun.Model
+	providerType := c.Provider.TTS.Type
+	if !ttsprovider.SupportsLanguage(providerType, model, lang) {
+		return fmt.Errorf("TTS model %q does not support language %q", model, lang)
+	}
 	return nil
 }
 
