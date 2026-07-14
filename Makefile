@@ -7,7 +7,7 @@ endif
 
 GO := GOTOOLCHAIN=$(GO_TOOLCHAIN) $(CGO_FLAGS) go
 
-.PHONY: all build build-voicebot run-voicebot build-wsserver run-wsserver build-manager run-manager test test-audio lint clean
+.PHONY: all build build-voicebot run-voicebot build-wsserver run-wsserver build-manager run-manager install-frontend dev-frontend build-frontend test test-audio lint clean
 
 all: build
 
@@ -35,6 +35,17 @@ build-manager:
 
 run-manager: build-manager
 	./bin/manager
+
+WEB_DIR := web/manager
+
+install-frontend:
+	cd $(WEB_DIR) && npm install
+
+dev-frontend:
+	cd $(WEB_DIR) && npm run dev
+
+build-frontend:
+	cd $(WEB_DIR) && npm run build
 
 test:
 	$(GO) test ./...
