@@ -484,7 +484,7 @@ export interface KnowledgeBase {
 	voicebot_id: string;
 	name: string;
 	description?: string;
-	embedding_model: string;
+	embedding_model_id: string;
 	embedding_dim: number;
 	created_at: string;
 	updated_at: string;
@@ -519,7 +519,7 @@ export const knowledgeApi = {
 		),
 	createKB: (
 		botId: string,
-		data: { name: string; description?: string; embedding_model?: string },
+		data: { name: string; description?: string; embedding_model_id: string },
 	) =>
 		http.post<KnowledgeBase>(
 			`/data/knowledge/bots/${botId}/knowledge_bases`,

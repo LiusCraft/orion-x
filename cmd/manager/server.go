@@ -118,8 +118,7 @@ func newRouter(
 		data.GET("/devices/:device_id/entries", dataMemH.ListEntries)
 		data.DELETE("/:id", dataMemH.DeleteMemory)
 
-		// 知识库管理 — only if knowledge service is available
-	if kbSvc != nil {
+		// 知识库管理
 		knowledgeData := api.Group("/data/knowledge", jwtMw)
 		knowledgeData.GET("/bots/:bot_id/knowledge_bases", dataKnowH.ListKBs)
 		knowledgeData.POST("/bots/:bot_id/knowledge_bases", dataKnowH.CreateKB)
@@ -130,7 +129,6 @@ func newRouter(
 		knowledgeData.DELETE("/documents/:doc_id", dataKnowH.DeleteDocument)
 		knowledgeData.GET("/documents/:doc_id/status", dataKnowH.GetDocumentStatus)
 		knowledgeData.POST("/knowledge_bases/:kb_id/documents/url", dataKnowH.IngestURL)
-	}
 
 		// 预留：活跃会话列表
 		api.GET("/sessions", jwtMw, func(c *gin.Context) {
@@ -177,9 +175,7 @@ func newRouter(
 		internal.GET("/devices/:device_id/turns", turnH.SearchTurns)
 		internal.GET("/devices/:device_id/sessions/:session_id", turnH.GetSessionMessages)
 
-		if kbSvc != nil {
-			internal.GET("/knowledge/search", dataKnowH.Search)
-		}
+		internal.GET("/knowledge/search", dataKnowH.Search)
 	}
 
 	return r

@@ -16,7 +16,6 @@ import (
 
 	"github.com/liuscraft/orion-x/cmd/manager/handler"
 	"github.com/liuscraft/orion-x/internal/knowledge"
-	"github.com/liuscraft/orion-x/internal/knowledge/embedder"
 	"github.com/liuscraft/orion-x/internal/knowledge/retriever"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
@@ -88,37 +87,15 @@ func main() {
 
 	langH := handler.NewLanguageHandler(languages)
 
-	// Knowledge base service — requires embedding API key to be configured.
-	// Set OPENAI_API_KEY (OpenAI) or DASHSCOPE_API_KEY (Aliyun DashScope).
-	// Without a key the knowledge routes are not registered.
-	embAPIKey := os.Getenv("OPENAI_API_KEY")
-	embBaseURL := ""
-	embModel := "text-embedding-3-small"
-	if embAPIKey == "" {
-		embAPIKey = os.Getenv("DASHSCOPE_API_KEY")
-		if embAPIKey != "" {
-			embBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-		}
+	// Knowledge base service — always created, users must configure embedding model to use it.
+	kbRet, err := retriever.NewPGVector(db, 1536)
+	if err != nil {
+		logging.Warnf("knowledge retriever init failed: %v", err)
 	}
 	var kbSvc *knowledge.Service
-	if embAPIKey != "" {
-		emb, err := embedder.New(embedder.Config{
-			Type:    "openai",
-			APIKey:  embAPIKey,
-			BaseURL: embBaseURL,
-			Model:   embModel,
-		})
-		if err != nil {
-			logging.Warnf("knowledge embedder init failed, knowledge disabled: %v", err)
-		} else {
-			ret, err := retriever.NewPGVector(db, emb.Dimensions())
-			if err != nil {
-				logging.Warnf("knowledge retriever init failed: %v", err)
-			} else {
-				kbSvc = knowledge.NewService(kbStore, docStore, ret, emb)
-				logging.Infof("knowledge service ready (dim=%d, model=%s)", emb.Dimensions(), embModel)
-			}
-		}
+	if kbRet != nil {
+		kbSvc = knowledge.NewService(kbStore, docStore, models, kbRet)
+		logging.Infof("knowledge service ready")
 	}
 
 	r := newRouter(secret, users, voicebots, devices, providers, models, voices, langH, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore)

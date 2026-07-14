@@ -1,5 +1,3 @@
-// Package knowledge provides the document knowledge base service.
-// It orchestrates document ingestion (parse → chunk → embed → store) and retrieval.
 package knowledge
 
 import (
@@ -8,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/knowledge/chunker"
@@ -20,44 +19,100 @@ import (
 
 // Service orchestrates document ingestion, retrieval, and knowledge base CRUD.
 type Service struct {
-	kbStore   *store.KnowledgeBaseStore
-	docStore  *store.DocumentStore
-	parserReg *parser.Registry
-	chunker   chunker.Chunker
-	embedder  embedder.Embedder
-	retriever retriever.Retriever
+	kbStore    *store.KnowledgeBaseStore
+	docStore   *store.DocumentStore
+	modelStore *store.AIModelStore
+	parserReg  *parser.Registry
+	chunker    chunker.Chunker
+	retriever  retriever.Retriever
+
+	mu       sync.Mutex
+	embCache map[string]embedder.Embedder // keyed by model ID
 }
 
 // NewService creates a knowledge Service.
 func NewService(
 	kbStore *store.KnowledgeBaseStore,
 	docStore *store.DocumentStore,
+	modelStore *store.AIModelStore,
 	ret retriever.Retriever,
-	emb embedder.Embedder,
 ) *Service {
 	return &Service{
-		kbStore:   kbStore,
-		docStore:  docStore,
-		parserReg: parser.DefaultRegistry(),
-		chunker:   chunker.NewRecursive(chunker.RecursiveConfig{}),
-		embedder:  emb,
-		retriever: ret,
+		kbStore:    kbStore,
+		docStore:   docStore,
+		modelStore: modelStore,
+		parserReg:  parser.DefaultRegistry(),
+		chunker:    chunker.NewRecursive(chunker.RecursiveConfig{}),
+		retriever:  ret,
+		embCache:   make(map[string]embedder.Embedder),
 	}
+}
+
+// getEmbedder resolves an embedder for the given AIModel ID.
+func (s *Service) getEmbedder(ctx context.Context, modelID string) (embedder.Embedder, error) {
+	if modelID == "" {
+		return nil, fmt.Errorf("未配置向量模型，请先在知识库设置中选择一个 Embedding 模型")
+	}
+
+	s.mu.Lock()
+	emb, ok := s.embCache[modelID]
+	s.mu.Unlock()
+	if ok {
+		return emb, nil
+	}
+
+	model, err := s.modelStore.GetByID(modelID)
+	if err != nil {
+		return nil, fmt.Errorf("向量模型 %s 不存在", modelID)
+	}
+	if model.Type != store.ModelTypeEmbedding {
+		return nil, fmt.Errorf("模型 %s 不是 embedding 类型（当前类型: %s）", model.Name, model.Type)
+	}
+	if model.Provider == nil || model.Provider.APIKeyEnc == "" {
+		return nil, fmt.Errorf("向量模型 %s 的厂商未配置 API Key", model.Name)
+	}
+
+	baseURL := model.BaseURL
+	if baseURL == "" {
+		baseURL = model.Provider.BaseURL
+	}
+
+	emb, err = embedder.New(embedder.Config{
+		Type:    "openai",
+		APIKey:  model.Provider.APIKeyEnc,
+		BaseURL: baseURL,
+		Model:   model.ModelID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("创建向量模型 %s: %w", model.Name, err)
+	}
+
+	s.mu.Lock()
+	s.embCache[modelID] = emb
+	s.mu.Unlock()
+	return emb, nil
 }
 
 // ── KnowledgeBase CRUD ──
 
 // CreateKB creates a new knowledge base for a voicebot.
-func (s *Service) CreateKB(ctx context.Context, voicebotID, name, desc, embeddingModel string) (*store.KnowledgeBase, error) {
-	if embeddingModel == "" {
-		embeddingModel = "text-embedding-3-small"
+func (s *Service) CreateKB(ctx context.Context, voicebotID, name, desc, embeddingModelID string) (*store.KnowledgeBase, error) {
+	if embeddingModelID == "" {
+		return nil, fmt.Errorf("必须选择向量模型")
 	}
+
+	// Validate the model exists and is type=embedding
+	emb, err := s.getEmbedder(ctx, embeddingModelID)
+	if err != nil {
+		return nil, fmt.Errorf("向量模型无效: %w", err)
+	}
+
 	kb := &store.KnowledgeBase{
-		VoicebotID:     voicebotID,
-		Name:           name,
-		Description:    desc,
-		EmbeddingModel: embeddingModel,
-		EmbeddingDim:   s.embedder.Dimensions(),
+		VoicebotID:       voicebotID,
+		Name:             name,
+		Description:      desc,
+		EmbeddingModelID: embeddingModelID,
+		EmbeddingDim:     emb.Dimensions(),
 	}
 	if err := s.kbStore.Create(kb); err != nil {
 		return nil, fmt.Errorf("create kb: %w", err)
@@ -91,8 +146,6 @@ func (s *Service) ListDocuments(ctx context.Context, kbID string) ([]store.Docum
 }
 
 // IngestDocument starts asynchronous ingestion of a file.
-// It creates a pending Document and returns immediately; the caller can poll
-// GetDocumentStatus for completion.
 func (s *Service) IngestDocument(ctx context.Context, kbID string, reader io.Reader, filename, source string) (*store.Document, error) {
 	doc := &store.Document{
 		KnowledgeBaseID: kbID,
@@ -102,7 +155,6 @@ func (s *Service) IngestDocument(ctx context.Context, kbID string, reader io.Rea
 	if err := s.docStore.Create(doc); err != nil {
 		return nil, fmt.Errorf("create document: %w", err)
 	}
-	// Read all data now since the caller may close the reader.
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		s.failDoc(doc.ID, fmt.Sprintf("read input: %v", err))
@@ -159,11 +211,26 @@ func (s *Service) GetDocumentStatus(ctx context.Context, docID string) (*store.D
 // ── Search ──
 
 // Search performs vector similarity search across the given knowledge bases.
+// It resolves the embedder from each KB's configured model.
 func (s *Service) Search(ctx context.Context, kbIDs []string, query string, topK int) ([]retriever.SearchResult, error) {
 	if topK <= 0 || topK > 10 {
 		topK = 5
 	}
-	vectors, err := s.embedder.Embed(ctx, []string{query})
+	if len(kbIDs) == 0 {
+		return nil, nil
+	}
+
+	// Resolve embedder from the first KB's model (all KBs for a voicebot share the same model)
+	kb, err := s.kbStore.GetByID(kbIDs[0])
+	if err != nil {
+		return nil, fmt.Errorf("get kb %s: %w", kbIDs[0], err)
+	}
+	emb, err := s.getEmbedder(ctx, kb.EmbeddingModelID)
+	if err != nil {
+		return nil, err
+	}
+
+	vectors, err := emb.Embed(ctx, []string{query})
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
 	}
@@ -188,6 +255,18 @@ func (s *Service) ingestAsync(docID, kbID string, data []byte, filename, source 
 		if err := s.docStore.UpdateStatus(docID, status, ""); err != nil {
 			logging.Errorf("Knowledge[%s]: update status to %s: %v", docID, status, err)
 		}
+	}
+
+	// Resolve embedder from KB
+	kb, err := s.kbStore.GetByID(kbID)
+	if err != nil {
+		s.failDoc(docID, fmt.Sprintf("get kb: %v", err))
+		return
+	}
+	emb, err := s.getEmbedder(ctx, kb.EmbeddingModelID)
+	if err != nil {
+		s.failDoc(docID, fmt.Sprintf("embedder: %v", err))
+		return
 	}
 
 	// 1. Parse
@@ -227,7 +306,7 @@ func (s *Service) ingestAsync(docID, kbID string, data []byte, filename, source 
 	for i, c := range chunks {
 		contents[i] = c.Content
 	}
-	vectors, err := s.embedder.Embed(ctx, contents)
+	vectors, err := emb.Embed(ctx, contents)
 	if err != nil {
 		s.failDoc(docID, fmt.Sprintf("embed: %v", err))
 		return

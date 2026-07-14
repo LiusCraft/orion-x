@@ -9,14 +9,14 @@ import (
 
 // KnowledgeBase 知识库 —— 一个智能体下可有多个
 type KnowledgeBase struct {
-	ID             string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	VoicebotID     string    `gorm:"not null;index;type:varchar(36)" json:"voicebot_id"`
-	Name           string    `gorm:"not null;type:varchar(128)" json:"name"`
-	Description    string    `gorm:"type:text" json:"description,omitempty"`
-	EmbeddingModel string    `gorm:"not null;type:varchar(128);default:text-embedding-3-small" json:"embedding_model"`
-	EmbeddingDim   int       `gorm:"not null;default:1536" json:"embedding_dim"`
-	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	ID               string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	VoicebotID       string    `gorm:"not null;index;type:varchar(36)" json:"voicebot_id"`
+	Name             string    `gorm:"not null;type:varchar(128)" json:"name"`
+	Description      string    `gorm:"type:text" json:"description,omitempty"`
+	EmbeddingModelID string    `gorm:"type:varchar(36)" json:"embedding_model_id,omitempty"` // AIModel.ID，空表示未配置
+	EmbeddingDim     int       `gorm:"not null;default:0" json:"embedding_dim"`
+	CreatedAt        time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt        time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 func (KnowledgeBase) TableName() string { return "knowledge_bases" }

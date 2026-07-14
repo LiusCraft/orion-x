@@ -75,9 +75,9 @@ func (h *DataKnowledgeHandler) CreateKB(c *gin.Context) {
 	}
 
 	var req struct {
-		Name           string `json:"name"`
-		Description    string `json:"description"`
-		EmbeddingModel string `json:"embedding_model"`
+		Name             string `json:"name"`
+		Description      string `json:"description"`
+		EmbeddingModelID string `json:"embedding_model_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
@@ -88,7 +88,7 @@ func (h *DataKnowledgeHandler) CreateKB(c *gin.Context) {
 		return
 	}
 
-	kb, err := h.kbSvc.CreateKB(c.Request.Context(), botID, req.Name, req.Description, req.EmbeddingModel)
+	kb, err := h.kbSvc.CreateKB(c.Request.Context(), botID, req.Name, req.Description, req.EmbeddingModelID)
 	if err != nil {
 		logging.Errorf("DataKnowledge CreateKB: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建知识库失败"})

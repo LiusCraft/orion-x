@@ -6,7 +6,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { voicebotApi, knowledgeApi, type Voicebot, type KnowledgeBase, type KnowledgeDocument } from "@/lib/api"
+import { voicebotApi, knowledgeApi, modelApi, type Voicebot, type KnowledgeBase, type KnowledgeDocument, type AIModel } from "@/lib/api"
 
 const KB_PAGE_SIZE = 20
 
@@ -50,6 +50,8 @@ export default function KnowledgePage() {
   const [createKBOpen, setCreateKBOpen] = useState(false)
   const [kbName, setKbName] = useState("")
   const [kbDesc, setKbDesc] = useState("")
+  const [kbModelId, setKbModelId] = useState("")
+  const [embModels, setEmbModels] = useState<AIModel[]>([])
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadKBId, setUploadKBId] = useState("")
   const [urlOpen, setUrlOpen] = useState(false)
@@ -129,10 +131,21 @@ export default function KnowledgePage() {
   }
 
   // ── Create KB ──
-  const handleCreateKB = async () => {
-    if (!kbName.trim() || !expandedAgent) return
+  const openCreateKB = useCallback(async () => {
+    setKbName(""); setKbDesc(""); setKbModelId("")
+    setCreateKBOpen(true)
     try {
-      await knowledgeApi.createKB(expandedAgent, { name: kbName, description: kbDesc })
+      const { data } = await modelApi.list("embedding")
+      setEmbModels(Array.isArray(data) ? data : [])
+    } catch {
+      setEmbModels([])
+    }
+  }, [])
+
+  const handleCreateKB = async () => {
+    if (!kbName.trim() || !expandedAgent || !kbModelId) return
+    try {
+      await knowledgeApi.createKB(expandedAgent, { name: kbName, description: kbDesc, embedding_model_id: kbModelId })
       setCreateKBOpen(false)
       setKbName("")
       setKbDesc("")
@@ -280,7 +293,7 @@ export default function KnowledgePage() {
                         </span>
                         <Button
                           size="sm"
-                          onClick={(e) => { e.stopPropagation(); setCreateKBOpen(true) }}
+                          onClick={(e) => { e.stopPropagation(); openCreateKB() }}
                           className="bg-violet-600 hover:bg-violet-500 text-white h-7 px-3 text-xs gap-1"
                         >
                           <BookOpen className="w-3 h-3" />
@@ -314,7 +327,7 @@ export default function KnowledgePage() {
                                   <BookOpen className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                                   <span className="text-sm text-zinc-300">{kb.name}</span>
                                   {kb.description && <span className="text-xs text-zinc-600 truncate max-w-40">{kb.description}</span>}
-                                  <span className="ml-auto text-xs text-zinc-600">{kb.embedding_model}</span>
+                                  <span className="ml-auto text-xs text-zinc-600 truncate max-w-32">{kb.embedding_model_id || "未配置"}</span>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleDeleteKB(kb.id) }}
                                     disabled={deleting.has(kb.id)}
@@ -429,7 +442,21 @@ export default function KnowledgePage() {
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-400 mb-1.5 block">描述（可选）</label>
+              <label className="text-xs text-zinc-400 mb-1.5 block">向量模型 <span className="text-red-400">*</span></label>
+              <select
+                value={kbModelId}
+                onChange={e => setKbModelId(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-md h-9 px-3 focus:outline-none focus:border-violet-500"
+              >
+                <option value="">请选择 Embedding 模型...</option>
+                {embModels.map(m => (
+                  <option key={m.id} value={m.id}>{m.name} ({m.model_id})</option>
+                ))}
+              </select>
+              {embModels.length === 0 && (
+                <p className="text-xs text-zinc-600 mt-1">暂无可用模型，请先在「模型管理」中添加 type=embedding 的模型</p>
+              )}
+            </div>
               <Input
                 value={kbDesc}
                 onChange={e => setKbDesc(e.target.value)}
@@ -440,7 +467,7 @@ export default function KnowledgePage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateKBOpen(false)} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">取消</Button>
-            <Button onClick={handleCreateKB} disabled={!kbName.trim()} className="bg-violet-600 hover:bg-violet-500 text-white">创建</Button>
+            <Button onClick={handleCreateKB} disabled={!kbName.trim() || !kbModelId} className="bg-violet-600 hover:bg-violet-500 text-white">创建</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
