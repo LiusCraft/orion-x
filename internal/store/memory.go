@@ -52,7 +52,7 @@ func (s *MemoryEntryStore) baseQuery(deviceIDs []string, target, search string) 
 		query = query.Where("target = ?", target)
 	}
 	if search != "" {
-		query = query.Where("content LIKE ?", "%"+search+"%")
+		query = query.Where("content ILIKE ?", "%"+search+"%")
 	}
 	return query
 }

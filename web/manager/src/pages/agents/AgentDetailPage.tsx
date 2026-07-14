@@ -1115,7 +1115,7 @@ export default function AgentDetailPage() {
 											<div className="flex items-center gap-2">
 												<button
 													onClick={() =>
-														navigate(`/data/memory?device_id=${d.id}`)
+														navigate(`/data/memory?device_id=${encodeURIComponent(d.id)}`)
 													}
 													className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
 												>

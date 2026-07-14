@@ -455,7 +455,7 @@ export interface EntryItem {
 }
 
 export const memoryApi = {
-	listAgents: (params?: { page?: number; page_size?: number }) =>
+	listAgents: (params?: { page?: number; page_size?: number; q?: string }) =>
 		http.get<PaginatedResponse<AgentItem> & { agents: AgentItem[] }>(
 			"/data/memory/agents",
 			{ params },

@@ -1,13 +1,15 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import {
-  Brain, Trash2, Search, ChevronRight, ChevronDown, HardDrive
+  ArrowLeft, Brain, Trash2, Search, ChevronRight, ChevronDown, HardDrive
 } from "lucide-react"
+import { useSearchParams } from "react-router-dom"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { memoryApi, type AgentItem, type DeviceItem, type EntryItem } from "@/lib/api"
 
 const PAGE_SIZE = 20
 const DEVICE_PAGE_SIZE = 20
+const SEARCH_DEBOUNCE_MS = 300
 
 const TARGET_MAP: Record<string, { label: string; cls: string }> = {
   memory: { label: "记忆", cls: "bg-violet-500/10 text-violet-400 border-violet-500/20" },
@@ -27,7 +29,20 @@ function shortId(id: string) {
   return id.length > 8 ? id.slice(0, 8) + "…" : id
 }
 
+function useDebouncedValue<T>(value: T, delay: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delay)
+    return () => window.clearTimeout(timer)
+  }, [value, delay])
+
+  return debouncedValue
+}
+
 export default function MemoryPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const deviceId = searchParams.get("device_id")?.trim() || ""
   const [agents, setAgents] = useState<AgentItem[]>([])
   const [agentTotal, setAgentTotal] = useState(0)
   const [agentPage, setAgentPage] = useState(1)
@@ -46,13 +61,14 @@ export default function MemoryPage() {
   const [loadingEntries, setLoadingEntries] = useState(false)
 
   const [searchText, setSearchText] = useState("")
+  const debouncedSearchText = useDebouncedValue(searchText, SEARCH_DEBOUNCE_MS)
   const [searchScope, setSearchScope] = useState<SearchScope>("")
   const [error, setError] = useState("")
   const [deleting, setDeleting] = useState<Set<string>>(new Set())
 
   // 用 ref 记住最新的搜索参数，避免闭包过期
-  const searchRef = useRef({ searchText: "", searchScope: "" as SearchScope, expandedAgent: null as string | null, expandedDevice: null as string | null })
-  searchRef.current = { searchText, searchScope, expandedAgent, expandedDevice }
+  const searchRef = useRef({ searchScope: "" as SearchScope, expandedAgent: null as string | null, expandedDevice: null as string | null })
+  searchRef.current = { searchScope, expandedAgent, expandedDevice }
 
   const currentHint = SCOPE_OPTIONS.find((o) => o.value === searchScope)?.hint || ""
 
@@ -74,7 +90,9 @@ export default function MemoryPage() {
     }
   }, [])
 
-  useEffect(() => { loadAgents() }, [loadAgents])
+  useEffect(() => {
+    if (!deviceId) loadAgents()
+  }, [deviceId, loadAgents])
 
   // ── 加载设备 ──
   const loadDeviceList = useCallback(async (agentId: string, page: number, q?: string) => {
@@ -112,18 +130,30 @@ export default function MemoryPage() {
     }
   }, [])
 
-  // ── 统一搜索：搜索文本变化时自动触发 ──
   useEffect(() => {
-    const { searchText, searchScope, expandedAgent, expandedDevice } = searchRef.current
-    if (!searchScope || !searchText) return
-    if (searchScope === "agent") {
-      loadAgents(1, searchText)
-    } else if (searchScope === "device" && expandedAgent) {
-      loadDeviceList(expandedAgent, 1, searchText)
-    } else if (searchScope === "content" && expandedDevice) {
-      loadEntryList(expandedDevice, 1, searchText)
+    if (!deviceId) {
+      setExpandedDevice(null)
+      setSearchScope("")
+      setSearchText("")
+      return
     }
-  }, [searchText]) // eslint-disable-line react-hooks/exhaustive-deps
+    setExpandedDevice(deviceId)
+    setSearchScope("content")
+    loadEntryList(deviceId, 1)
+  }, [deviceId, loadEntryList])
+
+  // ── 统一搜索：停止输入后再触发 ──
+  useEffect(() => {
+    const { searchScope, expandedAgent, expandedDevice } = searchRef.current
+    if (!searchScope) return
+    if (searchScope === "agent") {
+      loadAgents(1, debouncedSearchText)
+    } else if (searchScope === "device" && expandedAgent) {
+      loadDeviceList(expandedAgent, 1, debouncedSearchText)
+    } else if (searchScope === "content" && expandedDevice) {
+      loadEntryList(expandedDevice, 1, debouncedSearchText)
+    }
+  }, [debouncedSearchText]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 展开/收起智能体 ──
   const toggleAgent = async (id: string) => {
@@ -181,6 +211,95 @@ export default function MemoryPage() {
   const handleScopeChange = (v: SearchScope) => {
     setSearchScope(v)
     setSearchText("")
+  }
+
+  if (deviceId) {
+    return (
+      <div className="min-h-full">
+        <div className="border-b border-zinc-800/80 px-8 py-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setSearchParams({})}
+                  aria-label="返回完整记忆库"
+                  title="返回完整记忆库"
+                  className="p-1.5 -ml-1.5 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+                <h1 className="text-lg font-semibold text-white">设备记忆</h1>
+              </div>
+              <p className="text-xs text-zinc-500 font-mono mt-1 ml-8 break-all">{deviceId}</p>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-zinc-500 shrink-0">
+              <Brain className="w-4 h-4 text-zinc-600" />
+              {entryTotal} 条记忆
+            </div>
+          </div>
+          <div className="relative max-w-sm mt-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
+            <Input
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="搜索该设备的记忆内容..."
+              className="pl-9 bg-zinc-900 border-zinc-800 text-white placeholder:text-zinc-600 h-9 text-sm focus-visible:ring-violet-500"
+            />
+          </div>
+        </div>
+
+        <div className="px-8 py-6">
+          {error && (
+            <div className="flex items-center gap-2 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5 mb-4">
+              <span>{error}</span>
+              <Button onClick={() => { setError(""); loadEntryList(deviceId, 1, searchText || undefined) }} className="ml-auto bg-red-500/20 hover:bg-red-500/30 text-red-400 h-7 px-3 text-xs">重试</Button>
+            </div>
+          )}
+
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+            {loadingEntries ? (
+              <div className="flex justify-center py-20">
+                <div className="w-5 h-5 border-2 border-zinc-700 border-t-violet-500 rounded-full animate-spin" />
+              </div>
+            ) : entries.length === 0 ? (
+              <div className="flex flex-col items-center py-20">
+                <Brain className="w-6 h-6 text-zinc-700 mb-3" />
+                <p className="text-sm text-zinc-500">{searchText ? "没有匹配的记忆条目" : "该设备暂无记忆条目"}</p>
+              </div>
+            ) : (
+              <div>
+                {entries.map((mem) => {
+                  const target = TARGET_MAP[mem.target] || TARGET_MAP.memory
+                  return (
+                    <div key={mem.id} className="flex items-start gap-3 px-5 py-3 hover:bg-zinc-800/20 transition-colors group border-b border-zinc-800/50 last:border-0">
+                      <span className={`shrink-0 mt-0.5 text-[10px] px-1.5 py-0.5 rounded border ${target.cls}`}>{target.label}</span>
+                      <span className="flex-1 text-sm text-zinc-300 leading-relaxed break-words min-w-0">{mem.content}</span>
+                      <span className="shrink-0 text-[11px] text-zinc-600 font-mono mt-0.5 whitespace-nowrap">{mem.created_at}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(mem.id)}
+                        disabled={deleting.has(mem.id)}
+                        aria-label="删除记忆"
+                        title="删除记忆"
+                        className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-zinc-600 hover:text-red-400 transition-all p-1 rounded hover:bg-red-400/10 disabled:opacity-40 cursor-pointer -mr-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )
+                })}
+                {entryPages > 1 && (
+                  <div className="flex items-center justify-end px-5 py-2.5 border-t border-zinc-800/50">
+                    <Pagination page={entryPage} totalPages={entryPages} onChange={(page) => loadEntryList(deviceId, page, searchText || undefined)} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

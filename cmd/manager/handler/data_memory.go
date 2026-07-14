@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -148,6 +149,7 @@ func (h *DataMemoryHandler) ListDevices(c *gin.Context) {
 
 	// 分页
 	page, pageSize := parsePageParams(c)
+	total := int64(len(devs))
 	start := (page - 1) * pageSize
 	if start < 0 {
 		start = 0
@@ -155,7 +157,7 @@ func (h *DataMemoryHandler) ListDevices(c *gin.Context) {
 	if start >= len(devs) {
 		c.JSON(http.StatusOK, listDevicesResponse{
 			Devices:  []deviceItem{},
-			Total:    0,
+			Total:    total,
 			Page:     page,
 			PageSize: pageSize,
 		})
@@ -192,10 +194,8 @@ func (h *DataMemoryHandler) ListDevices(c *gin.Context) {
 	}
 
 	items := make([]deviceItem, 0, len(pagedDevs))
-	var total int64
 	for _, d := range pagedDevs {
 		cnt := entryCount[d.ID]
-		total += cnt
 		items = append(items, deviceItem{
 			ID:    d.ID,
 			Name:  d.Name,
@@ -259,31 +259,9 @@ func (h *DataMemoryHandler) ListAgents(c *gin.Context) {
 		return bots[i].Name < bots[j].Name
 	})
 
-	// 分页
-	page, pageSize := parsePageParams(c)
-	start := (page - 1) * pageSize
-	if start < 0 {
-		start = 0
-	}
-	if start >= len(bots) {
-		c.JSON(http.StatusOK, listAgentsResponse{
-			Agents:   []agentItem{},
-			Total:    0,
-			Page:     page,
-			PageSize: pageSize,
-		})
-		return
-	}
-	end := start + pageSize
-	if end > len(bots) {
-		end = len(bots)
-	}
-	pagedBots := bots[start:end]
-
-	// 收集每个 voicebot 下的设备数 + 记忆数
-	items := make([]agentItem, 0, len(pagedBots))
-	var total int64
-	for _, b := range pagedBots {
+	// 收集每个 voicebot 下的设备数 + 记忆数。无设备的智能体不属于记忆库列表。
+	allItems := make([]agentItem, 0, len(bots))
+	for _, b := range bots {
 		devs, err := h.deviceStore.ListByVoicebot(b.ID)
 		if err != nil {
 			continue
@@ -296,8 +274,7 @@ func (h *DataMemoryHandler) ListAgents(c *gin.Context) {
 			deviceIDs[i] = d.ID
 		}
 		cnt, _ := h.memStore.CountByDevices(deviceIDs, "", "")
-		total += cnt
-		items = append(items, agentItem{
+		allItems = append(allItems, agentItem{
 			ID:          b.ID,
 			Name:        b.Name,
 			DeviceCount: len(devs),
@@ -305,8 +282,28 @@ func (h *DataMemoryHandler) ListAgents(c *gin.Context) {
 		})
 	}
 
+	page, pageSize := parsePageParams(c)
+	total := int64(len(allItems))
+	start := (page - 1) * pageSize
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(allItems) {
+		c.JSON(http.StatusOK, listAgentsResponse{
+			Agents:   []agentItem{},
+			Total:    total,
+			Page:     page,
+			PageSize: pageSize,
+		})
+		return
+	}
+	end := start + pageSize
+	if end > len(allItems) {
+		end = len(allItems)
+	}
+
 	c.JSON(http.StatusOK, listAgentsResponse{
-		Agents:   items,
+		Agents:   allItems[start:end],
 		Total:    total,
 		Page:     page,
 		PageSize: pageSize,
@@ -386,23 +383,5 @@ func parseInt(s string) (int, error) {
 }
 
 func containsFold(s, substr string) bool {
-	s, substr = toLower(s), toLower(substr)
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func toLower(s string) string {
-	b := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 32
-		}
-		b[i] = c
-	}
-	return string(b)
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
