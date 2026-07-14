@@ -479,6 +479,67 @@ export const memoryApi = {
 	remove: (id: string) => http.delete(`/data/memory/${id}`),
 };
 
+export interface KnowledgeBase {
+	id: string;
+	voicebot_id: string;
+	name: string;
+	description?: string;
+	embedding_model: string;
+	embedding_dim: number;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface KnowledgeDocument {
+	id: string;
+	knowledge_base_id: string;
+	name: string;
+	source: "file" | "url";
+	source_url?: string;
+	status: "pending" | "parsing" | "chunking" | "embedding" | "storing" | "ready" | "error";
+	chunk_count: number;
+	char_count: number;
+	error_message?: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export const knowledgeApi = {
+	listKBs: (botId: string, params?: { page?: number; page_size?: number }) =>
+		http.get<{ knowledge_bases: KnowledgeBase[] }>(
+			`/data/knowledge/bots/${botId}/knowledge_bases`,
+			{ params },
+		),
+	createKB: (botId: string, data: { name: string; description?: string; embedding_model?: string }) =>
+		http.post<KnowledgeBase>(`/data/knowledge/bots/${botId}/knowledge_bases`, data),
+	getKB: (kbId: string) =>
+		http.get<KnowledgeBase>(`/data/knowledge/knowledge_bases/${kbId}`),
+	deleteKB: (kbId: string) =>
+		http.delete(`/data/knowledge/knowledge_bases/${kbId}`),
+	listDocs: (kbId: string) =>
+		http.get<{ documents: KnowledgeDocument[] }>(
+			`/data/knowledge/knowledge_bases/${kbId}/documents`,
+		),
+	uploadDoc: (kbId: string, file: File) => {
+		const form = new FormData();
+		form.append("file", file);
+		return http.post<KnowledgeDocument>(
+			`/data/knowledge/knowledge_bases/${kbId}/documents`,
+			form,
+			{ headers: { "Content-Type": "multipart/form-data" } },
+		);
+	},
+	ingestURL: (kbId: string, url: string) =>
+		http.post<KnowledgeDocument>(
+			`/data/knowledge/knowledge_bases/${kbId}/documents/url`,
+			{ url },
+		),
+	deleteDoc: (docId: string) =>
+		http.delete(`/data/knowledge/documents/${docId}`),
+	getDocStatus: (docId: string) =>
+		http.get<KnowledgeDocument>(`/data/knowledge/documents/${docId}/status`),
+};
+
 export const availableResourcesApi = {
 	list: (lang?: string) =>
 		http.get<AvailableResources>("/available-resources", {
