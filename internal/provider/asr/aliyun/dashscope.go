@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	asr "github.com/liuscraft/orion-x/internal/provider/asr"
+	"github.com/liuscraft/orion-x/internal/language"
 )
 
 const defaultDashScopeEndpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
@@ -22,6 +23,10 @@ func init() {
 	}, asr.ProviderMeta{
 		Name:           "阿里云 Dashscope",
 		DefaultBaseURL: defaultDashScopeEndpoint,
+		Models: map[string]asr.ModelInfo{
+			"fun-asr-realtime": {SupportedLanguages: []language.Code{language.ZH, language.EN, language.RU}},
+			"fun-asr":          {SupportedLanguages: []language.Code{language.ZH, language.EN, language.JA, language.KO}},
+		},
 	})
 }
 

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/liuscraft/orion-x/internal/language"
 )
 
 const TypeAliyun = "aliyun"
@@ -101,9 +103,14 @@ type ProviderConfig struct {
 
 type Constructor func(cfg Config) (Provider, error)
 
+type ModelInfo struct {
+	SupportedLanguages []language.Code
+}
+
 type ProviderMeta struct {
 	Name           string
 	DefaultBaseURL string
+	Models         map[string]ModelInfo
 }
 
 type registration struct {
@@ -137,6 +144,26 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 		return nil, fmt.Errorf("unsupported tts provider: %s", cfg.Type)
 	}
 	return reg.constructor(cfg.Config)
+}
+
+func SupportsLanguage(providerType, model string, lang language.Code) bool {
+	reg, ok := constructors[normalizeType(providerType, "")]
+	if !ok {
+		return false
+	}
+	info, ok := reg.meta.Models[model]
+	if !ok {
+		return true // model not declared → no restriction
+	}
+	if len(info.SupportedLanguages) == 0 {
+		return true // empty list → all languages
+	}
+	for _, s := range info.SupportedLanguages {
+		if s == lang {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeType(value, fallback string) string {

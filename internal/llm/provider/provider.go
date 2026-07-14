@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/liuscraft/orion-x/internal/language"
 	"github.com/liuscraft/orion-x/internal/llm"
 )
 
@@ -23,9 +24,14 @@ type Config struct {
 
 type AdapterConstructor func(context.Context, Config) (Adapter, error)
 
+type ModelInfo struct {
+	SupportedLanguages []language.Code
+}
+
 type ProviderMeta struct {
 	Name           string
 	DefaultBaseURL string
+	Models         map[string]ModelInfo
 }
 
 type registration struct {
@@ -61,6 +67,26 @@ func (r *Registry) ListRegistered() map[string]ProviderMeta {
 		out[k] = v.meta
 	}
 	return out
+}
+
+func (r *Registry) SupportsLanguage(providerType, model string, lang language.Code) bool {
+	reg, ok := r.adapters[strings.ToLower(strings.TrimSpace(providerType))]
+	if !ok {
+		return false
+	}
+	info, ok := reg.meta.Models[model]
+	if !ok {
+		return true
+	}
+	if len(info.SupportedLanguages) == 0 {
+		return true
+	}
+	for _, s := range info.SupportedLanguages {
+		if s == lang {
+			return true
+		}
+	}
+	return false
 }
 
 type Client struct {

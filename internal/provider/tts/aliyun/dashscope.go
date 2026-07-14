@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/liuscraft/orion-x/internal/language"
 	"github.com/liuscraft/orion-x/internal/logging"
 	tts "github.com/liuscraft/orion-x/internal/provider/tts"
 )
@@ -35,6 +36,9 @@ func init() {
 	}, tts.ProviderMeta{
 		Name:           "阿里云 Dashscope",
 		DefaultBaseURL: defaultDashScopeEndpoint,
+		Models: map[string]tts.ModelInfo{
+			"cosyvoice-v3-flash": {SupportedLanguages: []language.Code{language.ZH, language.EN}},
+		},
 	})
 }
 
