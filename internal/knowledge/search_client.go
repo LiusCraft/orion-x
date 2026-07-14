@@ -55,7 +55,7 @@ func (c *SearchClient) Search(ctx context.Context, query string, topK int) ([]Se
 		logging.Warnf("SearchClient: HTTP error: %v", err)
 		return nil, fmt.Errorf("search_client: request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("search_client: status %d", resp.StatusCode)

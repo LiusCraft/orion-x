@@ -150,7 +150,7 @@ func (h *DataKnowledgeHandler) UploadDocument(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取文件失败"})
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	doc, err := h.kbSvc.IngestDocument(c.Request.Context(), kbID, f, file.Filename, "file")
 	if err != nil {
