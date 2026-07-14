@@ -7,15 +7,16 @@ import (
 	"github.com/lib/pq"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+
+	"github.com/liuscraft/orion-x/internal/language"
 )
 
 type ModelVoiceStore struct {
-	db            *gorm.DB
-	languageStore *LanguageStore
+	db *gorm.DB
 }
 
-func NewModelVoiceStore(db *gorm.DB, languageStore *LanguageStore) *ModelVoiceStore {
-	return &ModelVoiceStore{db: db, languageStore: languageStore}
+func NewModelVoiceStore(db *gorm.DB) *ModelVoiceStore {
+	return &ModelVoiceStore{db: db}
 }
 
 // List 返回指定模型下系统内置 + 当前用户的音色，支持按 lang 过滤
@@ -53,13 +54,10 @@ func (s *ModelVoiceStore) GetByID(id string) (*ModelVoice, error) {
 }
 
 func (s *ModelVoiceStore) validateLangs(langs pq.StringArray) error {
-	for _, lang := range langs {
-		ok, err := s.languageStore.Exists(lang)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("voice store: unknown language: %s", lang)
+	for _, langStr := range langs {
+		code := language.Normalize(langStr)
+		if code == "" || !language.Exists(code) {
+			return fmt.Errorf("voice store: unknown language: %s", langStr)
 		}
 	}
 	return nil

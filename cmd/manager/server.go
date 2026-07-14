@@ -17,7 +17,6 @@ func newRouter(
 	providers *store.ProviderStore,
 	models *store.AIModelStore,
 	voices *store.ModelVoiceStore,
-	langH *handler.LanguageHandler,
 	mcpMarket *store.MCPMarketStore,
 	mcpServers *store.MCPServerStore,
 	mcpBindings *store.VoicebotMCPBindingStore,
@@ -55,6 +54,7 @@ func newRouter(
 	providerH := handler.NewProviderHandler(providers)
 	modelH := handler.NewModelHandler(models)
 	voiceH := handler.NewVoiceHandler(voices)
+	langH := handler.NewLanguageHandler()
 	mcpH := handler.NewMCPHandler(mcpMarket, mcpServers, mcpBindings, voicebots)
 	internalH := handler.NewInternalHandler(voicebots, devices, models, voices, mcpBindings)
 	availableH := handler.NewAvailableHandler(providers, models, voices)
@@ -173,10 +173,6 @@ func newRouter(
 		internal.GET("/device-config", internalH.DeviceConfig)
 		internal.POST("/voices", voiceH.AdminCreate)
 		internal.PATCH("/voices/:id", voiceH.AdminUpdate)
-		internal.GET("/languages", langH.List)
-		internal.POST("/languages", langH.AdminCreate)
-		internal.PUT("/languages/:code", langH.AdminUpdate)
-		internal.DELETE("/languages/:code", langH.AdminDelete)
 
 		internal.GET("/devices/:device_id/memory", memH.GetMemory)
 		internal.PUT("/devices/:device_id/memory", memH.PutMemory)

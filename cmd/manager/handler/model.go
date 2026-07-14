@@ -28,7 +28,7 @@ func (h *ModelHandler) Types(c *gin.Context) {
 // GET /api/models?type=text
 func (h *ModelHandler) List(c *gin.Context) {
 	modelType := store.ModelType(c.Query("type"))
-	list, err := h.models.List(middleware.UserID(c), modelType)
+	list, err := h.models.List(middleware.UserID(c), modelType, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

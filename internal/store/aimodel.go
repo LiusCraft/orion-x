@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -12,11 +13,14 @@ type AIModelStore struct{ db *gorm.DB }
 
 func NewAIModelStore(db *gorm.DB) *AIModelStore { return &AIModelStore{db: db} }
 
-// List 返回系统内置 + 当前用户自建的模型，支持按 type 过滤
-func (s *AIModelStore) List(userID string, modelType ModelType) ([]AIModel, error) {
+// List 返回系统内置 + 当前用户自建的模型，支持按 type 和 lang 过滤
+func (s *AIModelStore) List(userID string, modelType ModelType, lang string) ([]AIModel, error) {
 	q := s.db.Preload("Provider").Where("is_system = true OR creator = ?", userID)
 	if modelType != "" {
 		q = q.Where("type = ?", modelType)
+	}
+	if lang != "" {
+		q = q.Where("langs @> ?", pq.StringArray{lang})
 	}
 	var list []AIModel
 	if err := q.Find(&list).Error; err != nil {

@@ -14,7 +14,6 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/liuscraft/orion-x/cmd/manager/handler"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/knowledge/retriever"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
@@ -59,8 +58,7 @@ func main() {
 	devices := store.NewDeviceStore(db)
 	providers := store.NewProviderStore(db)
 	models := store.NewAIModelStore(db)
-	languages := store.NewLanguageStore(db)
-	voices := store.NewModelVoiceStore(db, languages)
+	voices := store.NewModelVoiceStore(db)
 	mcpMarket := store.NewMCPMarketStore(db)
 	mcpServers := store.NewMCPServerStore(db)
 	mcpBindings := store.NewVoicebotMCPBindingStore(db)
@@ -86,8 +84,6 @@ func main() {
 	secret := []byte(cfg.JWT.Secret)
 	sign := func(userID string) (string, error) { return signToken(secret, userID) }
 
-	langH := handler.NewLanguageHandler(languages)
-
 	// Knowledge base service — always created, users must configure embedding model to use it.
 	kbRet, err := retriever.NewPGVector(db, 1536)
 	if err != nil {
@@ -99,7 +95,7 @@ func main() {
 		logging.Infof("knowledge service ready")
 	}
 
-	r := newRouter(secret, users, voicebots, devices, providers, models, voices, langH, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs)
+	r := newRouter(secret, users, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {

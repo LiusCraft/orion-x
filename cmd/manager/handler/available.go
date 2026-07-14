@@ -94,7 +94,7 @@ func (h *AvailableHandler) List(c *gin.Context) {
 		providerByID[p.ID] = p
 	}
 
-	allModels, err := h.models.List(userID, "")
+	allModels, err := h.models.List(userID, "", "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

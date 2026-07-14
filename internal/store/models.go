@@ -85,18 +85,9 @@ type AIModel struct {
 	BaseURL    string            `gorm:"type:varchar(512)" json:"base_url"` // 空则用 provider.base_url
 	ModelID    string            `gorm:"not null;type:varchar(128)" json:"model_id"`
 	IsSystem   bool              `gorm:"not null;default:false;index" json:"is_system"`
+	Langs      pq.StringArray    `gorm:"type:text[]" json:"langs,omitempty"`
 	Extra      datatypes.JSONMap `gorm:"type:jsonb" json:"extra,omitempty"`
 	Voices     []ModelVoice      `gorm:"foreignKey:ModelID" json:"voices,omitempty"`
-	BaseModel
-}
-
-// Language TTS 音色语言标签字典（两级：语言→方言）
-type Language struct {
-	Code       string      `gorm:"primaryKey;type:varchar(16)" json:"code"`
-	Name       string      `gorm:"not null;type:varchar(64)" json:"name"`
-	ParentCode *string     `gorm:"type:varchar(16);index" json:"parent_code,omitempty"`
-	Parent     *Language   `gorm:"foreignKey:ParentCode;references:Code" json:"parent,omitempty"`
-	Children   []*Language `gorm:"foreignKey:ParentCode;references:Code" json:"children,omitempty"`
 	BaseModel
 }
 
