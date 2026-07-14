@@ -161,6 +161,26 @@ func (h *DataKnowledgeHandler) UploadDocument(c *gin.Context) {
 	c.JSON(http.StatusCreated, doc)
 }
 
+// IngestURL POST /api/data/knowledge/knowledge_bases/:kb_id/documents/url
+func (h *DataKnowledgeHandler) IngestURL(c *gin.Context) {
+	kbID := c.Param("kb_id")
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url 不能为空"})
+		return
+	}
+
+	doc, err := h.kbSvc.IngestURL(c.Request.Context(), kbID, req.URL)
+	if err != nil {
+		logging.Errorf("DataKnowledge IngestURL: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "导入 URL 失败"})
+		return
+	}
+	c.JSON(http.StatusCreated, doc)
+}
+
 // DeleteDocument DELETE /api/data/knowledge/documents/:doc_id
 func (h *DataKnowledgeHandler) DeleteDocument(c *gin.Context) {
 	docID := c.Param("doc_id")

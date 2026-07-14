@@ -176,6 +176,12 @@ func (s *Service) Search(ctx context.Context, kbIDs []string, query string, topK
 // ── Internal: async ingestion pipeline ──
 
 func (s *Service) ingestAsync(docID, kbID string, data []byte, filename, source string) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.failDoc(docID, fmt.Sprintf("panic: %v", rec))
+		}
+	}()
+
 	ctx := context.Background()
 
 	setStatus := func(status string) {

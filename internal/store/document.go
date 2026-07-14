@@ -12,8 +12,8 @@ type Document struct {
 	ID              string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	KnowledgeBaseID string    `gorm:"not null;index;type:varchar(36)" json:"knowledge_base_id"`
 	Name            string    `gorm:"not null;type:varchar(256)" json:"name"`
-	Source          string    `gorm:"not null;type:varchar(16)" json:"source"`   // "file" | "url"
-	SourceURL       string    `gorm:"type:text" json:"source_url,omitempty"`     // URL 来源（source=url 时）
+	Source          string    `gorm:"not null;type:varchar(16)" json:"source"`                 // "file" | "url"
+	SourceURL       string    `gorm:"type:text" json:"source_url,omitempty"`                   // URL 来源（source=url 时）
 	Status          string    `gorm:"not null;default:pending;type:varchar(16)" json:"status"` // pending/parsing/chunking/embedding/storing/ready/error
 	ChunkCount      int       `gorm:"default:0" json:"chunk_count"`
 	CharCount       int       `gorm:"default:0" json:"char_count"`
