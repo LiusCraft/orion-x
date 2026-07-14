@@ -123,6 +123,7 @@ func newRouter(
 		knowledgeData.GET("/bots/:bot_id/knowledge_bases", dataKnowH.ListKBs)
 		knowledgeData.POST("/bots/:bot_id/knowledge_bases", dataKnowH.CreateKB)
 		knowledgeData.GET("/knowledge_bases/:kb_id", dataKnowH.GetKB)
+		knowledgeData.GET("/knowledge_bases/:kb_id/search", dataKnowH.SearchKB)
 		knowledgeData.DELETE("/knowledge_bases/:kb_id", dataKnowH.DeleteKB)
 		knowledgeData.GET("/knowledge_bases/:kb_id/documents", dataKnowH.ListDocuments)
 		knowledgeData.POST("/knowledge_bases/:kb_id/documents", dataKnowH.UploadDocument)

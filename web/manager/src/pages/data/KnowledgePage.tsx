@@ -58,6 +58,13 @@ export default function KnowledgePage() {
   const [urlKBId, setUrlKBId] = useState("")
   const [urlInput, setUrlInput] = useState("")
   const [dragging, setDragging] = useState(false)
+
+  // Search within a KB
+  const [kbSearchText, setKbSearchText] = useState("")
+  const [kbSearchResults, setKbSearchResults] = useState<Array<{ chunk_id: string; content: string; score: number; document_name: string }>>([])
+  const [kbSearchKBId, setKbSearchKBId] = useState("")
+  const [kbSearching, setKbSearching] = useState(false)
+
   const fileRef = useRef<HTMLInputElement>(null)
 
   // ── Load agents ──
@@ -224,6 +231,21 @@ export default function KnowledgePage() {
     }
   }
 
+  // ── Search within KB ──
+  const handleKBSearch = async (kbId: string) => {
+    if (!kbSearchText.trim()) return
+    setKbSearchKBId(kbId)
+    setKbSearching(true)
+    try {
+      const { data } = await knowledgeApi.searchKB(kbId, kbSearchText, 5)
+      setKbSearchResults(Array.isArray(data) ? data : [])
+    } catch {
+      setKbSearchResults([])
+    } finally {
+      setKbSearching(false)
+    }
+  }
+
   const filteredAgents = agents.filter(
     a => !searchText || a.name.toLowerCase().includes(searchText.toLowerCase())
   )
@@ -372,6 +394,46 @@ export default function KnowledgePage() {
                                       </Button>
                                       <span className="ml-auto text-xs text-zinc-600">{docs.length} 个文档</span>
                                     </div>
+
+                                    {/* KB Search */}
+                                    <div className="flex items-center gap-2 px-5 py-2 border-b border-zinc-800/30 bg-zinc-800/20">
+                                      <Search className="w-3 h-3 text-zinc-500 shrink-0" />
+                                      <Input
+                                        value={kbSearchText}
+                                        onChange={e => setKbSearchText(e.target.value)}
+                                        placeholder="搜索知识库内容..."
+                                        className="flex-1 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-600 h-7 text-xs focus-visible:ring-violet-500"
+                                        onKeyDown={e => { if (e.key === "Enter") handleKBSearch(kb.id) }}
+                                      />
+                                      <Button
+                                        size="sm"
+                                        onClick={() => handleKBSearch(kb.id)}
+                                        disabled={kbSearching || !kbSearchText.trim()}
+                                        className="bg-violet-600 hover:bg-violet-500 text-white h-7 px-3 text-xs gap-1"
+                                      >
+                                        {kbSearching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+                                        检索
+                                      </Button>
+                                    </div>
+
+                                    {/* KB Search Results */}
+                                    {kbSearchKBId === kb.id && kbSearchResults.length > 0 && (
+                                      <div className="border-b border-zinc-800/30 bg-zinc-800/10">
+                                        {kbSearchResults.map((r, i) => (
+                                          <div key={i} className="px-5 py-3 border-b border-zinc-800/10 last:border-0">
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                              <FileText className="w-3 h-3 text-violet-400 shrink-0" />
+                                              <span className="text-xs text-zinc-400 truncate">{r.document_name}</span>
+                                              <span className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded ml-auto shrink-0">得分 {(r.score * 100).toFixed(0)}%</span>
+                                            </div>
+                                            <p className="text-sm text-zinc-300 leading-relaxed">{r.content.slice(0, 300)}{r.content.length > 300 ? "…" : ""}</p>
+                                          </div>
+                                        ))}
+                                        <div className="px-5 py-1.5 flex justify-end">
+                                          <button onClick={() => { setKbSearchResults([]); setKbSearchKBId("") }} className="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer">清除结果</button>
+                                        </div>
+                                      </div>
+                                    )}
 
                                     {loadingDocs ? (
                                       <div className="flex justify-center py-8">

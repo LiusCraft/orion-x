@@ -511,6 +511,13 @@ export interface KnowledgeDocument {
 	updated_at: string;
 }
 
+export interface SearchResultItem {
+	chunk_id: string;
+	content: string;
+	score: number;
+	document_name: string;
+}
+
 export const knowledgeApi = {
 	listKBs: (botId: string, params?: { page?: number; page_size?: number }) =>
 		http.get<{ knowledge_bases: KnowledgeBase[] }>(
@@ -527,6 +534,8 @@ export const knowledgeApi = {
 		),
 	getKB: (kbId: string) =>
 		http.get<KnowledgeBase>(`/data/knowledge/knowledge_bases/${kbId}`),
+	searchKB: (kbId: string, q: string, top_k?: number) =>
+		http.get<SearchResultItem[]>(`/data/knowledge/knowledge_bases/${kbId}/search`, { params: { q, top_k } }),
 	deleteKB: (kbId: string) =>
 		http.delete(`/data/knowledge/knowledge_bases/${kbId}`),
 	listDocs: (kbId: string) =>

@@ -312,3 +312,33 @@ func (h *DataKnowledgeHandler) Search(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, results)
 }
+
+// SearchKB GET /api/data/knowledge/knowledge_bases/:kb_id/search?q=...&top_k=5
+func (h *DataKnowledgeHandler) SearchKB(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
+	kbID := c.Param("kb_id")
+	query := c.Query("q")
+	if query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "q is required"})
+		return
+	}
+	topK := 5
+	if v := c.Query("top_k"); v != "" {
+		if n, err := parseInt(v); err == nil && n > 0 && n <= 10 {
+			topK = n
+		}
+	}
+
+	results, err := h.kbSvc.Search(c.Request.Context(), []string{kbID}, query, topK)
+	if err != nil {
+		logging.Errorf("DataKnowledge SearchKB id=%s: %v", kbID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "检索失败"})
+		return
+	}
+	if results == nil {
+		results = []retriever.SearchResult{}
+	}
+	c.JSON(http.StatusOK, results)
+}
