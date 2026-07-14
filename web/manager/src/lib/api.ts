@@ -196,6 +196,8 @@ export interface ModelVoice {
 export interface Language {
 	code: string;
 	name: string;
+	parent_code?: string;
+	children?: Language[];
 }
 
 export const languageApi = {
