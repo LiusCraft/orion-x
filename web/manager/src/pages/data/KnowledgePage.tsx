@@ -457,6 +457,8 @@ export default function KnowledgePage() {
                 <p className="text-xs text-zinc-600 mt-1">暂无可用模型，请先在「模型管理」中添加 type=embedding 的模型</p>
               )}
             </div>
+            <div>
+              <label className="text-xs text-zinc-400 mb-1.5 block">描述（可选）</label>
               <Input
                 value={kbDesc}
                 onChange={e => setKbDesc(e.target.value)}
