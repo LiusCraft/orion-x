@@ -41,3 +41,11 @@ func (r *Registry) Find(filename string) (Parser, bool) {
 	p, ok := r.byExt[ext]
 	return p, ok
 }
+
+// DefaultRegistry returns a Registry pre-loaded with built-in parsers.
+func DefaultRegistry() *Registry {
+	r := NewRegistry()
+	r.Register(NewTextParser())
+	r.Register(NewURLParser())
+	return r
+}
