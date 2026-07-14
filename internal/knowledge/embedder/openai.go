@@ -1,100 +1,76 @@
 package embedder
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
-	"time"
+
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 )
 
 type openaiEmbedder struct {
-	apiKey     string
-	baseURL    string
+	client     openai.Client
 	model      string
 	dimensions int
-	client     *http.Client
 }
 
 func init() {
-	// Register as default ("") and "openai"
 	Register("openai", NewOpenAI)
 	Register("", NewOpenAI)
 }
 
-// NewOpenAI creates an OpenAI-compatible embedder.
-// BaseURL defaults to https://api.openai.com/v1, model to text-embedding-3-small.
+// NewOpenAI creates an OpenAI-compatible embedder using the official Go SDK.
 func NewOpenAI(cfg Config) (Embedder, error) {
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
+	if cfg.APIKey == "" {
+		return nil, fmt.Errorf("embedder: api key is required for %s", baseURL)
+	}
+	opts := []option.RequestOption{
+		option.WithAPIKey(cfg.APIKey),
+	}
+	if baseURL != "https://api.openai.com/v1" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+
 	model := cfg.Model
 	if model == "" {
 		model = "text-embedding-3-small"
 	}
 	dims := 1536
-	switch {
-	case strings.Contains(model, "large"):
+	if strings.Contains(model, "large") {
 		dims = 3072
-	case model == "text-embedding-ada-002":
-		dims = 1536
 	}
+
 	return &openaiEmbedder{
-		apiKey:     cfg.APIKey,
-		baseURL:    baseURL,
+		client:     openai.NewClient(opts...),
 		model:      model,
 		dimensions: dims,
-		client:     &http.Client{Timeout: 60 * time.Second},
 	}, nil
 }
 
 func (e *openaiEmbedder) Dimensions() int { return e.dimensions }
 
 func (e *openaiEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	type reqBody struct {
-		Input []string `json:"input"`
-		Model string   `json:"model"`
+	params := openai.EmbeddingNewParams{
+		Input: openai.EmbeddingNewParamsInputUnion{OfArrayOfStrings: texts},
+		Model: e.model,
 	}
-	type embedData struct {
-		Embedding []float32 `json:"embedding"`
-	}
-	type respData struct {
-		Data []embedData `json:"data"`
-	}
-
-	body, _ := json.Marshal(reqBody{Input: texts, Model: e.model})
-	url := fmt.Sprintf("%s/embeddings", e.baseURL)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	resp, err := e.client.Embeddings.New(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("embed: create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+e.apiKey)
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("embed: request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("embed: status %d: %s", resp.StatusCode, string(msg))
+		return nil, fmt.Errorf("embed: %w", err)
 	}
 
-	var data respData
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, fmt.Errorf("embed: decode: %w", err)
-	}
-
-	result := make([][]float32, len(data.Data))
-	for i, d := range data.Data {
-		result[i] = d.Embedding
+	result := make([][]float32, len(resp.Data))
+	for i, d := range resp.Data {
+		vec := make([]float32, len(d.Embedding))
+		for j, v := range d.Embedding {
+			vec[j] = float32(v)
+		}
+		result[i] = vec
 	}
 	return result, nil
 }

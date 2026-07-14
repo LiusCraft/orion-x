@@ -88,24 +88,36 @@ func main() {
 
 	langH := handler.NewLanguageHandler(languages)
 
-	// Knowledge base service — embedding API key from env, falls back to LLM key
-	embCfg := embedder.Config{
-		Type:   "openai",
-		APIKey: os.Getenv("OPENAI_API_KEY"),
-		Model:  "text-embedding-3-small",
-	}
-	emb, err := embedder.New(embCfg)
-	if err != nil {
-		logging.Warnf("knowledge embedder init failed, knowledge search disabled: %v", err)
+	// Knowledge base service — requires embedding API key to be configured.
+	// Set OPENAI_API_KEY (OpenAI) or DASHSCOPE_API_KEY (Aliyun DashScope).
+	// Without a key the knowledge routes are not registered.
+	embAPIKey := os.Getenv("OPENAI_API_KEY")
+	embBaseURL := ""
+	embModel := "text-embedding-3-small"
+	if embAPIKey == "" {
+		embAPIKey = os.Getenv("DASHSCOPE_API_KEY")
+		if embAPIKey != "" {
+			embBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+		}
 	}
 	var kbSvc *knowledge.Service
-	if emb != nil {
-		ret, err := retriever.NewPGVector(db, emb.Dimensions())
+	if embAPIKey != "" {
+		emb, err := embedder.New(embedder.Config{
+			Type:    "openai",
+			APIKey:  embAPIKey,
+			BaseURL: embBaseURL,
+			Model:   embModel,
+		})
 		if err != nil {
-			logging.Warnf("knowledge retriever init failed: %v", err)
+			logging.Warnf("knowledge embedder init failed, knowledge disabled: %v", err)
 		} else {
-			kbSvc = knowledge.NewService(kbStore, docStore, ret, emb)
-			logging.Infof("knowledge service ready (dim=%d, model=%s)", emb.Dimensions(), embCfg.Model)
+			ret, err := retriever.NewPGVector(db, emb.Dimensions())
+			if err != nil {
+				logging.Warnf("knowledge retriever init failed: %v", err)
+			} else {
+				kbSvc = knowledge.NewService(kbStore, docStore, ret, emb)
+				logging.Infof("knowledge service ready (dim=%d, model=%s)", emb.Dimensions(), embModel)
+			}
 		}
 	}
 

@@ -496,7 +496,14 @@ export interface KnowledgeDocument {
 	name: string;
 	source: "file" | "url";
 	source_url?: string;
-	status: "pending" | "parsing" | "chunking" | "embedding" | "storing" | "ready" | "error";
+	status:
+		| "pending"
+		| "parsing"
+		| "chunking"
+		| "embedding"
+		| "storing"
+		| "ready"
+		| "error";
 	chunk_count: number;
 	char_count: number;
 	error_message?: string;
@@ -510,8 +517,14 @@ export const knowledgeApi = {
 			`/data/knowledge/bots/${botId}/knowledge_bases`,
 			{ params },
 		),
-	createKB: (botId: string, data: { name: string; description?: string; embedding_model?: string }) =>
-		http.post<KnowledgeBase>(`/data/knowledge/bots/${botId}/knowledge_bases`, data),
+	createKB: (
+		botId: string,
+		data: { name: string; description?: string; embedding_model?: string },
+	) =>
+		http.post<KnowledgeBase>(
+			`/data/knowledge/bots/${botId}/knowledge_bases`,
+			data,
+		),
 	getKB: (kbId: string) =>
 		http.get<KnowledgeBase>(`/data/knowledge/knowledge_bases/${kbId}`),
 	deleteKB: (kbId: string) =>
