@@ -23,16 +23,19 @@ func NewPGVector(db *gorm.DB, dimension int) (*PGVectorRetriever, error) {
 	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {
 		return nil, fmt.Errorf("pgvector: create extension: %w", err)
 	}
+	_ = dimension
 	if err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS chunk_vectors (
 			chunk_id   VARCHAR(36) PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
 			kb_id      VARCHAR(36) NOT NULL,
-			embedding  halfvec(` + fmt.Sprintf("%d", dimension) + `),
+			embedding  halfvec,
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)
 	`).Error; err != nil {
 		return nil, fmt.Errorf("pgvector: create table: %w", err)
 	}
+	// Migrate existing tables that may have been created with a fixed dimension
+	_ = db.Exec(`ALTER TABLE chunk_vectors ALTER COLUMN embedding TYPE halfvec`).Error
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_chunk_vectors_kb ON chunk_vectors(kb_id)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_chunk_vectors_embedding ON chunk_vectors " +
 		"USING hnsw (embedding halfvec_cosine_ops) WITH (m = 16, ef_construction = 200)")

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import {
-  Brain, Trash2, Upload, Search, ChevronRight, ChevronDown,
+  Brain, Trash2, Upload, Search, ChevronRight, ChevronDown, RotateCw,
   BookOpen, FileText, Link2, CheckCircle2, Clock, AlertCircle, Loader2
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -211,6 +211,19 @@ export default function KnowledgePage() {
     }
   }
 
+  // ── Retry failed doc ──
+  const handleRetryDoc = async (docId: string, kbId: string) => {
+    setDeleting(p => new Set(p).add(docId))
+    try {
+      await knowledgeApi.retryDoc(docId)
+      loadDocs(kbId)
+    } catch {
+      // silently fail
+    } finally {
+      setDeleting(p => { const n = new Set(p); n.delete(docId); return n })
+    }
+  }
+
   const filteredAgents = agents.filter(
     a => !searchText || a.name.toLowerCase().includes(searchText.toLowerCase())
   )
@@ -400,6 +413,15 @@ export default function KnowledgePage() {
                                               >
                                                 <Trash2 className="w-3.5 h-3.5" />
                                               </button>
+                                              {doc.status === "error" && doc.source === "url" && (
+                                                <button
+                                                  onClick={() => handleRetryDoc(doc.id, kb.id)}
+                                                  disabled={deleting.has(doc.id)}
+                                                  className="shrink-0 opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-amber-400 transition-all p-1 rounded hover:bg-amber-400/10 disabled:opacity-40 cursor-pointer"
+                                                >
+                                                  <RotateCw className="w-3.5 h-3.5" />
+                                                </button>
+                                              )}
                                             </div>
                                           )
                                         })}

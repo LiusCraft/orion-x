@@ -208,6 +208,65 @@ func (s *Service) GetDocumentStatus(ctx context.Context, docID string) (*store.D
 	return s.docStore.GetByID(docID)
 }
 
+// RetryDocument resets a failed document and re-triggers ingestion.
+// For file-type documents, the original content must be re-uploaded.
+// For url-type documents, it re-fetches the URL.
+func (s *Service) RetryDocument(ctx context.Context, docID string) error {
+	doc, err := s.docStore.GetByID(docID)
+	if err != nil {
+		return fmt.Errorf("document not found: %w", err)
+	}
+	if doc.Status != "error" {
+		return fmt.Errorf("only failed documents can be retried, current status: %s", doc.Status)
+	}
+
+	// Clear old chunks/vectors
+	if err := s.retriever.DeleteByDocument(ctx, docID); err != nil {
+		logging.Warnf("Knowledge: retry delete old vectors for doc %s: %v", docID, err)
+	}
+
+	if doc.Source == "url" && doc.SourceURL != "" {
+		// Re-fetch URL
+		if err := s.docStore.UpdateStatus(docID, "pending", ""); err != nil {
+			return err
+		}
+		go s.ingestURLAsync(docID, doc.KnowledgeBaseID, doc.SourceURL)
+	} else {
+		return fmt.Errorf("文件类型文档请重新上传，URL 类型文档支持自动重试")
+	}
+	return nil
+}
+
+func (s *Service) ingestURLAsync(docID, kbID, urlStr string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	if err != nil {
+		s.failDoc(docID, fmt.Sprintf("fetch url: %v", err))
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		s.failDoc(docID, fmt.Sprintf("fetch url: %v", err))
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		s.failDoc(docID, fmt.Sprintf("read url body: %v", err))
+		return
+	}
+
+	name := urlStr
+	if idx := strings.LastIndex(urlStr, "/"); idx >= 0 {
+		name = urlStr[idx+1:]
+	}
+
+	s.ingestAsync(docID, kbID, body, name, "url")
+}
+
 // ── Search ──
 
 // Search performs vector similarity search across the given knowledge bases.

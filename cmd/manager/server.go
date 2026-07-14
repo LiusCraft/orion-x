@@ -128,6 +128,7 @@ func newRouter(
 		knowledgeData.POST("/knowledge_bases/:kb_id/documents", dataKnowH.UploadDocument)
 		knowledgeData.DELETE("/documents/:doc_id", dataKnowH.DeleteDocument)
 		knowledgeData.GET("/documents/:doc_id/status", dataKnowH.GetDocumentStatus)
+		knowledgeData.POST("/documents/:doc_id/retry", dataKnowH.RetryDocument)
 		knowledgeData.POST("/knowledge_bases/:kb_id/documents/url", dataKnowH.IngestURL)
 
 		// 预留：活跃会话列表

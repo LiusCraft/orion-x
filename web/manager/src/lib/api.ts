@@ -551,6 +551,8 @@ export const knowledgeApi = {
 		http.delete(`/data/knowledge/documents/${docId}`),
 	getDocStatus: (docId: string) =>
 		http.get<KnowledgeDocument>(`/data/knowledge/documents/${docId}/status`),
+	retryDoc: (docId: string) =>
+		http.post(`/data/knowledge/documents/${docId}/retry`),
 };
 
 export const availableResourcesApi = {

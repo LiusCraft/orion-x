@@ -238,6 +238,20 @@ func (h *DataKnowledgeHandler) GetDocumentStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, doc)
 }
 
+// RetryDocument POST /api/data/knowledge/documents/:doc_id/retry
+func (h *DataKnowledgeHandler) RetryDocument(c *gin.Context) {
+	if !h.needSvc(c) {
+		return
+	}
+	docID := c.Param("doc_id")
+	if err := h.kbSvc.RetryDocument(c.Request.Context(), docID); err != nil {
+		logging.Errorf("DataKnowledge RetryDocument id=%s: %v", docID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusAccepted)
+}
+
 // ── 内部检索 API（wsserver 调用） ──
 
 // Search GET /internal/knowledge/search?q=...&device_id=...&top_k=5
