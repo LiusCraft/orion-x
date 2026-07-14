@@ -105,6 +105,22 @@ func (h *AvailableHandler) List(c *gin.Context) {
 	// ── ASR models ──
 	seenASR := map[string]bool{}
 	for _, m := range allModels {
+		if m.Type != store.ModelTypeSpeech {
+			continue
+		}
+		// Filter by language if specified
+		if lang != "" && len(m.Langs) > 0 {
+			hasLang := false
+			for _, l := range m.Langs {
+				if l == lang {
+					hasLang = true
+					break
+				}
+			}
+			if !hasLang {
+				continue
+			}
+		}
 		p, ok := providerByID[m.ProviderID]
 		if !ok {
 			continue
@@ -116,13 +132,10 @@ func (h *AvailableHandler) List(c *gin.Context) {
 		} else if c := slugCats[key]; len(c) > 0 {
 			cats = c
 		}
-		// speech models under asr category
-		if m.Type == store.ModelTypeSpeech {
-			for _, c := range cats {
-				if c == "asr" && !seenASR[m.ID] {
-					seenASR[m.ID] = true
-					resp.ASR = append(resp.ASR, ResourceOption{ID: m.ID, Name: m.Name})
-				}
+		for _, c := range cats {
+			if c == "asr" && !seenASR[m.ID] {
+				seenASR[m.ID] = true
+				resp.ASR = append(resp.ASR, ResourceOption{ID: m.ID, Name: m.Name})
 			}
 		}
 	}
