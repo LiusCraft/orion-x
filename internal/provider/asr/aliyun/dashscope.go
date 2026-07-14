@@ -11,8 +11,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	asr "github.com/liuscraft/orion-x/internal/provider/asr"
 	"github.com/liuscraft/orion-x/internal/language"
+	asr "github.com/liuscraft/orion-x/internal/provider/asr"
 )
 
 const defaultDashScopeEndpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
