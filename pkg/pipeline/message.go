@@ -28,6 +28,7 @@ type Metadata struct {
 	TurnID    int64
 	TraceID   string
 	Emotion   string
+	Language  string // ASR-detected language code, e.g. "zh"
 	Timestamp time.Time
 	Error     error
 	Extra     map[string]interface{}

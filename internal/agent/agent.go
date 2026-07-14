@@ -18,6 +18,7 @@ type Agent struct {
 	maxSteps    int
 	soulPrompt  string
 	rulesPrompt string
+	currentLang string // language code currently reflected in system prompt
 }
 
 // RegisterBuiltinTool adds a tool spec to the agent's registry.
@@ -66,4 +67,13 @@ func (a *Agent) SetMaxSteps(n int) {
 	if n > 0 {
 		a.maxSteps = n
 	}
+}
+
+// SetLanguage sets the language code for prompt adaptation.
+// When lang is empty or unchanged, it is a no-op.
+func (a *Agent) SetLanguage(lang string) {
+	if lang == "" || lang == a.currentLang {
+		return
+	}
+	a.currentLang = lang
 }

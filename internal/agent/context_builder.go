@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
+	"github.com/liuscraft/orion-x/internal/language"
 	"github.com/liuscraft/orion-x/internal/llm"
 	"github.com/liuscraft/orion-x/internal/session"
 )
@@ -16,6 +19,9 @@ func (a *Agent) buildContextMessages(ctx context.Context, sess *session.Session)
 	soul := a.soulPrompt
 	if soul == "" {
 		soul = SoulPrompt()
+	}
+	if a.currentLang != "" {
+		soul = languageAwareSoulPrompt(soul, a.currentLang)
 	}
 	rules := a.rulesPrompt
 	if rules == "" {
@@ -49,6 +55,24 @@ func filterSystemMessages(msgs []*llm.Message) []llm.Message {
 		}
 	}
 	return result
+}
+
+// languageAwareSoulPrompt replaces hardcoded Chinese instructions with the
+// appropriate language instruction based on the detected language code.
+func languageAwareSoulPrompt(soul, lang string) string {
+	if lang == "" || lang == "zh" {
+		return soul // default is already Chinese
+	}
+	info := language.Get(language.Code(lang))
+	langName := lang
+	if info != nil {
+		langName = info.Name
+	}
+	replacer := strings.NewReplacer(
+		"用中文交流", fmt.Sprintf("用%s交流", langName),
+		"用中文", fmt.Sprintf("用%s", langName),
+	)
+	return replacer.Replace(soul)
 }
 
 // mergeSystemAndHistory 将 system 消息与会话历史拼接为最终发送顺序。

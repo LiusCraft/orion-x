@@ -15,6 +15,8 @@ import (
 // mockAgent 简化的 Mock Agent
 type mockAgent struct{}
 
+func (m *mockAgent) SetLanguage(lang string) {}
+
 func (m *mockAgent) Run(ctx context.Context, sess *session.Session) (<-chan agent.AgentEvent, error) {
 	text := ""
 	if len(sess.Messages) > 0 {

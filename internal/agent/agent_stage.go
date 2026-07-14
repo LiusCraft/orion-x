@@ -12,6 +12,7 @@ import (
 // AgentRunner Agent 运行接口
 type AgentRunner interface {
 	Run(ctx context.Context, sess *session.Session) (<-chan AgentEvent, error)
+	SetLanguage(lang string)
 }
 
 // AgentStage Agent 处理 Stage
@@ -63,6 +64,10 @@ func (s *AgentStage) Process(ctx context.Context, input <-chan pipeline.Message)
 					return
 				}
 				continue
+			}
+
+			if msg.Metadata.Language != "" {
+				s.agent.SetLanguage(msg.Metadata.Language)
 			}
 
 			s.session.Add(session.Message{Role: session.RoleUser, Content: text})

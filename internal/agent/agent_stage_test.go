@@ -23,6 +23,8 @@ func (m *mockAgentRunner) Run(ctx context.Context, sess *session.Session) (<-cha
 	return ch, nil
 }
 
+func (m *mockAgentRunner) SetLanguage(lang string) {}
+
 func TestAgentStage_TextChunk(t *testing.T) {
 	mockAgent := &mockAgentRunner{
 		processFunc: func(ctx context.Context, sess *session.Session) (<-chan AgentEvent, error) {
