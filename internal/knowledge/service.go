@@ -300,16 +300,25 @@ func (s *Service) ingestAsync(docID, kbID string, data []byte, filename, source 
 		return
 	}
 
-	// 3. Embed
+	// 3. Embed (batch by 10 for DashScope compatibility)
 	setStatus("embedding")
 	contents := make([]string, len(chunks))
 	for i, c := range chunks {
 		contents[i] = c.Content
 	}
-	vectors, err := emb.Embed(ctx, contents)
-	if err != nil {
-		s.failDoc(docID, fmt.Sprintf("embed: %v", err))
-		return
+	const batchSize = 10
+	var vectors [][]float32
+	for i := 0; i < len(contents); i += batchSize {
+		end := i + batchSize
+		if end > len(contents) {
+			end = len(contents)
+		}
+		batch, err := emb.Embed(ctx, contents[i:end])
+		if err != nil {
+			s.failDoc(docID, fmt.Sprintf("embed: %v", err))
+			return
+		}
+		vectors = append(vectors, batch...)
 	}
 
 	// 4. Store

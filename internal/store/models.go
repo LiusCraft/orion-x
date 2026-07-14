@@ -45,7 +45,7 @@ type Device struct {
 type Provider struct {
 	ID        string            `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	Name      string            `gorm:"not null;type:varchar(64)" json:"name"`
-	Slug      string            `gorm:"uniqueIndex;not null;type:varchar(32)" json:"slug"`
+	Slug      string            `gorm:"index;not null;type:varchar(32)" json:"slug"`
 	BaseURL   string            `gorm:"not null;type:varchar(512)" json:"base_url"`
 	APIKeyEnc string            `gorm:"not null;type:text" json:"-"`
 	IsSystem  bool              `gorm:"not null;default:false;index" json:"is_system"`
