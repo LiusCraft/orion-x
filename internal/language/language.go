@@ -29,8 +29,8 @@ const (
 
 // Info pairs a language code with its display name.
 type Info struct {
-	Code Code
-	Name string
+	Code Code   `json:"code"`
+	Name string `json:"name"`
 }
 
 // registry maps every known Code to its display name.
