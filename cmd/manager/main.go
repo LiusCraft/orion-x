@@ -15,6 +15,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/liuscraft/orion-x/cmd/manager/handler"
+	"github.com/liuscraft/orion-x/internal/knowledge"
+	"github.com/liuscraft/orion-x/internal/knowledge/embedder"
+	"github.com/liuscraft/orion-x/internal/knowledge/retriever"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
 	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
@@ -64,6 +67,8 @@ func main() {
 	mcpBindings := store.NewVoicebotMCPBindingStore(db)
 	memStore := store.NewMemoryEntryStore(db)
 	turnStore := store.NewTurnStore(db)
+	kbStore := store.NewKnowledgeBaseStore(db)
+	docStore := store.NewDocumentStore(db)
 
 	if pass := strings.TrimSpace(cfg.Admin.Password); pass != "" {
 		if _, err := users.GetByUsername(cfg.Admin.Username); errors.Is(err, store.ErrNotFound) {
@@ -83,7 +88,28 @@ func main() {
 
 	langH := handler.NewLanguageHandler(languages)
 
-	r := newRouter(secret, users, voicebots, devices, providers, models, voices, langH, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore)
+	// Knowledge base service — embedding API key from env, falls back to LLM key
+	embCfg := embedder.Config{
+		Type:   "openai",
+		APIKey: os.Getenv("OPENAI_API_KEY"),
+		Model:  "text-embedding-3-small",
+	}
+	emb, err := embedder.New(embCfg)
+	if err != nil {
+		logging.Warnf("knowledge embedder init failed, knowledge search disabled: %v", err)
+	}
+	var kbSvc *knowledge.Service
+	if emb != nil {
+		ret, err := retriever.NewPGVector(db, emb.Dimensions())
+		if err != nil {
+			logging.Warnf("knowledge retriever init failed: %v", err)
+		} else {
+			kbSvc = knowledge.NewService(kbStore, docStore, ret, emb)
+			logging.Infof("knowledge service ready (dim=%d, model=%s)", emb.Dimensions(), embCfg.Model)
+		}
+	}
+
+	r := newRouter(secret, users, voicebots, devices, providers, models, voices, langH, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {
