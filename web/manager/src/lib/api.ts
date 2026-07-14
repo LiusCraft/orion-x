@@ -107,6 +107,7 @@ export interface AIModel {
 	base_url: string;
 	model_id: string;
 	is_system: boolean;
+	langs?: string[];
 	extra?: Record<string, unknown>;
 	created_at: string;
 	creator: string;
@@ -195,8 +196,6 @@ export interface ModelVoice {
 export interface Language {
 	code: string;
 	name: string;
-	parent_code?: string;
-	children?: Language[];
 }
 
 export const languageApi = {

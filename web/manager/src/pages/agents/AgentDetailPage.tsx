@@ -90,7 +90,7 @@ interface BotConfig {
 }
 
 const DC: BotConfig = {
-	language: "zh-CN",
+	language: "zh",
 	asr: {
 		model_id: "",
 		vad_mode: "auto",
