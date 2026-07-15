@@ -17,12 +17,11 @@ import (
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
-	"github.com/liuscraft/orion-x/internal/pipeline"
-	pstages "github.com/liuscraft/orion-x/internal/pipeline/stages"
 	"github.com/liuscraft/orion-x/internal/provider/asr"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 // independent of cmd/voicebot's 22050Hz (each entry point constructs its
@@ -346,9 +345,9 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 	}
 
 	pl, err := pipeline.NewDAGBuilder().
-		AddStage(pstages.NewASRStage(asrProc, audioSrc)).
-		AddStage(pstages.NewAgentStage(connAgent, sess)).
-		AddStage(pstages.NewTTSStage(ttsProc)).
+		AddStage(audio.NewASRStage(asrProc, audioSrc)).
+		AddStage(agent.NewAgentStage(connAgent, sess)).
+		AddStage(audio.NewTTSStage(ttsProc)).
 		AddStage(wsstages.NewWSOutputStage(safeConn, sessionID, outputCodec, wsserverTTSSampleRate, frameDurationMs, preBufferFrames)).
 		Connect("asr", "agent").
 		Connect("asr", "ws_output").

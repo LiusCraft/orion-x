@@ -1,29 +1,28 @@
-package stages
+package audio
 
 import (
 	"context"
 	"sync"
 	"time"
 
-	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/logging"
-	"github.com/liuscraft/orion-x/internal/pipeline"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 // TTSStage wraps a TTSProcessor as a pipeline stage. It consumes text
-// messages (writing them to the processor) and produces audio.TTSChunk
+// messages (writing them to the processor) and produces TTSChunk
 // messages (from the processor's OnChunk callback) as output, so a
 // downstream output stage (PortAudio, WebSocket, ...) can consume audio via
 // the standard pipeline Message bus instead of a side-channel callback.
 type TTSStage struct {
 	*pipeline.BaseStage
-	proc audio.TTSProcessor
+	proc TTSProcessor
 }
 
 // NewTTSStage creates a TTSStage. The proc must be started externally before
 // the pipeline starts (e.g., proc.Start in main before pipeline.Start).
-func NewTTSStage(proc audio.TTSProcessor) pipeline.Stage {
+func NewTTSStage(proc TTSProcessor) pipeline.Stage {
 	return &TTSStage{
 		BaseStage: pipeline.NewBaseStage("tts"),
 		proc:      proc,
@@ -61,7 +60,7 @@ func (s *TTSStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 		close(output)
 	}
 
-	s.proc.OnChunk(func(chunk audio.TTSChunk) {
+	s.proc.OnChunk(func(chunk TTSChunk) {
 		send(pipeline.Message{
 			Type:     pipeline.MessageTypeData,
 			Payload:  chunk,

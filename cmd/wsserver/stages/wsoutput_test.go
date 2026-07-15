@@ -11,10 +11,10 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/liuscraft/orion-x/internal/audio"
-	"github.com/liuscraft/orion-x/internal/pipeline"
-	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 	"github.com/liuscraft/orion-x/cmd/wsserver/stages"
+	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
+	"github.com/liuscraft/orion-x/internal/audio"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 // newTestWSConnPair spins up a real WebSocket server (httptest) and dials

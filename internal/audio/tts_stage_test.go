@@ -1,4 +1,4 @@
-package stages_test
+package audio
 
 import (
 	"context"
@@ -7,17 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liuscraft/orion-x/internal/audio"
-	"github.com/liuscraft/orion-x/internal/pipeline"
-	"github.com/liuscraft/orion-x/internal/pipeline/stages"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
-// mockTTSProcessor is a minimal audio.TTSProcessor for testing TTSStage in
+// mockTTSProcessor is a minimal TTSProcessor for testing TTSStage in
 // isolation from the real TTS pipeline.
 type mockTTSProcessor struct {
 	mu             sync.Mutex
-	onChunk        func(audio.TTSChunk)
+	onChunk        func(TTSChunk)
 	writeCalls     []string
 	writeErr       error
 	flushCalls     int
@@ -38,7 +36,7 @@ func (m *mockTTSProcessor) Flush(_ tts.SynthesisOptions) error {
 	return nil
 }
 
-func (m *mockTTSProcessor) OnChunk(fn func(audio.TTSChunk)) {
+func (m *mockTTSProcessor) OnChunk(fn func(TTSChunk)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onChunk = fn
@@ -56,7 +54,7 @@ func (m *mockTTSProcessor) Stop() error                   { return nil }
 
 // emitChunk simulates the TTSProcessor internally producing an audio chunk
 // (as if from its dispatcher/playAudio goroutine).
-func (m *mockTTSProcessor) emitChunk(c audio.TTSChunk) {
+func (m *mockTTSProcessor) emitChunk(c TTSChunk) {
 	m.mu.Lock()
 	fn := m.onChunk
 	m.mu.Unlock()
@@ -86,7 +84,7 @@ func (m *mockTTSProcessor) interruptCallCount() int {
 // TestTTSStage_TextInputWritesToProcessor 验证文本消息驱动 proc.Write。
 func TestTTSStage_TextInputWritesToProcessor(t *testing.T) {
 	proc := &mockTTSProcessor{}
-	stage := stages.NewTTSStage(proc)
+	stage := NewTTSStage(proc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -113,7 +111,7 @@ func TestTTSStage_TextInputWritesToProcessor(t *testing.T) {
 // pipeline Message 总线输出，而不是旁路回调。
 func TestTTSStage_OnChunkProducesMessage(t *testing.T) {
 	proc := &mockTTSProcessor{}
-	stage := stages.NewTTSStage(proc)
+	stage := NewTTSStage(proc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -121,14 +119,14 @@ func TestTTSStage_OnChunkProducesMessage(t *testing.T) {
 	input := make(chan pipeline.Message)
 	output := stage.Process(ctx, input)
 
-	want := audio.TTSChunk{Text: "你好", Audio: []byte{1, 2, 3}}
+	want := TTSChunk{Text: "你好", Audio: []byte{1, 2, 3}}
 	proc.emitChunk(want)
 
 	select {
 	case msg := <-output:
-		chunk, ok := msg.Payload.(audio.TTSChunk)
+		chunk, ok := msg.Payload.(TTSChunk)
 		if !ok {
-			t.Fatalf("expected payload type audio.TTSChunk, got %T", msg.Payload)
+			t.Fatalf("expected payload type TTSChunk, got %T", msg.Payload)
 		}
 		if chunk.Text != want.Text || string(chunk.Audio) != string(want.Audio) {
 			t.Errorf("unexpected chunk: %+v", chunk)
@@ -141,7 +139,7 @@ func TestTTSStage_OnChunkProducesMessage(t *testing.T) {
 // TestTTSStage_FinishedTriggersFlush 验证 Finished 消息触发 proc.Flush。
 func TestTTSStage_FinishedTriggersFlush(t *testing.T) {
 	proc := &mockTTSProcessor{}
-	stage := stages.NewTTSStage(proc)
+	stage := NewTTSStage(proc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -165,7 +163,7 @@ func TestTTSStage_FinishedTriggersFlush(t *testing.T) {
 // 转发给下游，供 output stage 感知打断以便立即停止播报。
 func TestTTSStage_InterruptForwarded(t *testing.T) {
 	proc := &mockTTSProcessor{}
-	stage := stages.NewTTSStage(proc)
+	stage := NewTTSStage(proc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -194,7 +192,7 @@ func TestTTSStage_InterruptForwarded(t *testing.T) {
 func TestTTSStage_WriteErrorEmitsErrorMessage(t *testing.T) {
 	wantErr := errors.New("boom")
 	proc := &mockTTSProcessor{writeErr: wantErr}
-	stage := stages.NewTTSStage(proc)
+	stage := NewTTSStage(proc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -221,7 +219,7 @@ func TestTTSStage_WriteErrorEmitsErrorMessage(t *testing.T) {
 // 且并发的 OnChunk 回调不会因写入已关闭 channel 而 panic（用 -race 运行）。
 func TestTTSStage_CloseAfterCtxCancelDoesNotPanic(t *testing.T) {
 	proc := &mockTTSProcessor{}
-	stage := stages.NewTTSStage(proc)
+	stage := NewTTSStage(proc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	input := make(chan pipeline.Message)
@@ -237,7 +235,7 @@ func TestTTSStage_CloseAfterCtxCancelDoesNotPanic(t *testing.T) {
 			case <-stop:
 				return
 			default:
-				proc.emitChunk(audio.TTSChunk{Audio: []byte{9}})
+				proc.emitChunk(TTSChunk{Audio: []byte{9}})
 			}
 		}
 	}()
