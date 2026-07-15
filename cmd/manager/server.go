@@ -5,6 +5,7 @@ import (
 
 	"github.com/liuscraft/orion-x/cmd/manager/handler"
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
+	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
@@ -23,6 +24,10 @@ func newRouter(
 	signToken func(userID string) (string, error),
 	memStore *store.MemoryEntryStore,
 	turnStore *store.TurnStore,
+	kbSvc *knowledge.Service,
+	kbStore *store.KnowledgeBaseStore,
+	docStore *store.DocumentStore,
+	voicebotKBs *store.VoicebotKBStore,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -55,6 +60,7 @@ func newRouter(
 	availableH := handler.NewAvailableHandler(providers, models, voices)
 	memH := handler.NewMemoryHandler(memStore)
 	dataMemH := handler.NewDataMemoryHandler(memStore, devices, voicebots)
+	dataKnowH := handler.NewDataKnowledgeHandler(kbSvc, kbStore, docStore, devices, voicebots, voicebotKBs)
 	turnH := handler.NewTurnHandler(turnStore)
 
 	api := r.Group("/api")
@@ -113,6 +119,26 @@ func newRouter(
 		data.GET("/devices/:device_id/entries", dataMemH.ListEntries)
 		data.DELETE("/:id", dataMemH.DeleteMemory)
 
+		// 知识库管理
+		knowledgeData := api.Group("/data/knowledge", jwtMw)
+		knowledgeData.GET("/knowledge_bases", dataKnowH.ListAllKBs)
+		knowledgeData.GET("/knowledge_bases/:kb_id", dataKnowH.GetKB)
+		knowledgeData.GET("/knowledge_bases/:kb_id/search", dataKnowH.SearchKB)
+		knowledgeData.DELETE("/knowledge_bases/:kb_id", dataKnowH.DeleteKB)
+		knowledgeData.GET("/knowledge_bases/:kb_id/documents", dataKnowH.ListDocuments)
+		knowledgeData.POST("/knowledge_bases/:kb_id/documents", dataKnowH.UploadDocument)
+		knowledgeData.POST("/knowledge_bases/:kb_id/documents/url", dataKnowH.IngestURL)
+		knowledgeData.DELETE("/documents/:doc_id", dataKnowH.DeleteDocument)
+		knowledgeData.GET("/documents/:doc_id/status", dataKnowH.GetDocumentStatus)
+		knowledgeData.POST("/documents/:doc_id/retry", dataKnowH.RetryDocument)
+		// KB-bot binding
+		knowledgeData.GET("/bots/:bot_id/knowledge_bases/bound", dataKnowH.ListBoundKBs)
+		knowledgeData.POST("/bots/:bot_id/knowledge_bases/bind", dataKnowH.BindKB)
+		knowledgeData.DELETE("/bots/:bot_id/knowledge_bases/:kb_id/bind", dataKnowH.UnbindKB)
+		// Legacy: create/list KBs for a bot (KB is created under the bot, then can be bound to others)
+		knowledgeData.GET("/bots/:bot_id/knowledge_bases", dataKnowH.ListKBs)
+		knowledgeData.POST("/bots/:bot_id/knowledge_bases", dataKnowH.CreateKB)
+
 		// 预留：活跃会话列表
 		api.GET("/sessions", jwtMw, func(c *gin.Context) {
 			c.JSON(200, []any{})
@@ -157,6 +183,8 @@ func newRouter(
 		internal.POST("/devices/:device_id/turns", turnH.CreateTurn)
 		internal.GET("/devices/:device_id/turns", turnH.SearchTurns)
 		internal.GET("/devices/:device_id/sessions/:session_id", turnH.GetSessionMessages)
+
+		internal.GET("/knowledge/search", dataKnowH.Search)
 	}
 
 	return r

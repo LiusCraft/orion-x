@@ -14,6 +14,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
 	"github.com/liuscraft/orion-x/internal/config"
+	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/pipeline"
@@ -333,6 +334,11 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		connAgent.RegisterBuiltinTool(tools.SessionSearchToolSpec(s.deviceCfg.ManagerURL(), deviceID))
 		logging.Infof("wsserver[%s]: registered memory system tools", sessionID)
 	}
+
+	// Register knowledge_search tool (independent of memory service)
+	knowClient := knowledge.NewSearchClient(s.deviceCfg.ManagerURL(), deviceID)
+	connAgent.RegisterBuiltinTool(tools.KnowledgeSearchToolSpec(knowClient))
+	logging.Infof("wsserver[%s]: registered knowledge search tool", sessionID)
 
 	if err := ttsProc.Start(ctx); err != nil {
 		cancel()
