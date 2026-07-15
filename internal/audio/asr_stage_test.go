@@ -1,4 +1,4 @@
-package stages_test
+package audio
 
 import (
 	"context"
@@ -7,23 +7,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liuscraft/orion-x/internal/audio"
-	"github.com/liuscraft/orion-x/internal/pipeline"
-	"github.com/liuscraft/orion-x/internal/pipeline/stages"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
-// mockASRProcessor is a minimal audio.ASRProcessor for testing ASRStage in
+// mockASRProcessor is a minimal ASRProcessor for testing ASRStage in
 // isolation.
 type mockASRProcessor struct {
 	mu       sync.Mutex
-	onResult func(audio.ASRResult)
+	onResult func(ASRResult)
 	onSpeech func()
 	startErr error
 }
 
 func (m *mockASRProcessor) Write(_ []byte) error { return nil }
 
-func (m *mockASRProcessor) OnResult(fn func(audio.ASRResult)) {
+func (m *mockASRProcessor) OnResult(fn func(ASRResult)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onResult = fn
@@ -46,7 +44,7 @@ func (m *mockASRProcessor) Stop() error { return nil }
 func (m *mockASRProcessor) BeginTurn(_ context.Context) error { return nil }
 func (m *mockASRProcessor) EndTurn(_ context.Context) error   { return nil }
 
-func (m *mockASRProcessor) emitResult(r audio.ASRResult) {
+func (m *mockASRProcessor) emitResult(r ASRResult) {
 	m.mu.Lock()
 	fn := m.onResult
 	m.mu.Unlock()
@@ -78,7 +76,7 @@ func (m *mockASRProcessor) waitOnResultRegistered(t *testing.T) {
 // 从而能沿 DAG 传播给下游 AgentStage/TTSStage。
 func TestASRStage_ForwardsInterruptFromInput(t *testing.T) {
 	proc := &mockASRProcessor{}
-	stage := stages.NewASRStage(proc, nil)
+	stage := NewASRStage(proc, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -103,7 +101,7 @@ func TestASRStage_ForwardsInterruptFromInput(t *testing.T) {
 // 直接驱动下游 AgentStage。
 func TestASRStage_ForwardsDataFromInput(t *testing.T) {
 	proc := &mockASRProcessor{}
-	stage := stages.NewASRStage(proc, nil)
+	stage := NewASRStage(proc, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -129,7 +127,7 @@ func TestASRStage_ForwardsDataFromInput(t *testing.T) {
 // 合法控制信号。
 func TestASRStage_IgnoresFinishedAndErrorFromInput(t *testing.T) {
 	proc := &mockASRProcessor{}
-	stage := stages.NewASRStage(proc, nil)
+	stage := NewASRStage(proc, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -153,7 +151,7 @@ func TestASRStage_IgnoresFinishedAndErrorFromInput(t *testing.T) {
 // 消息仍然正常产出——新增的 forwardInterrupt 转发逻辑必须是完全惰性的。
 func TestASRStage_CLIScenario_UnusedInputDoesNotBlockResults(t *testing.T) {
 	proc := &mockASRProcessor{}
-	stage := stages.NewASRStage(proc, nil)
+	stage := NewASRStage(proc, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -162,7 +160,7 @@ func TestASRStage_CLIScenario_UnusedInputDoesNotBlockResults(t *testing.T) {
 	output := stage.Process(ctx, input)
 
 	proc.waitOnResultRegistered(t)
-	proc.emitResult(audio.ASRResult{Text: "hello", IsFinal: true})
+	proc.emitResult(ASRResult{Text: "hello", IsFinal: true})
 
 	select {
 	case msg := <-output:
@@ -180,7 +178,7 @@ func TestASRStage_CLIScenario_UnusedInputDoesNotBlockResults(t *testing.T) {
 // goroutine 必须能在这种提前退出路径下也被唤醒，否则 wg.Wait() 会死锁。
 func TestASRStage_StartErrorClosesOutputWithoutDeadlock(t *testing.T) {
 	proc := &mockASRProcessor{startErr: errors.New("boom")}
-	stage := stages.NewASRStage(proc, nil)
+	stage := NewASRStage(proc, nil)
 
 	// 故意不 cancel：验证 output 的关闭不依赖外部 ctx.Done()。
 	ctx := context.Background()

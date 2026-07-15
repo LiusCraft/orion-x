@@ -1,18 +1,17 @@
-package stages
+package agent
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/logging"
-	"github.com/liuscraft/orion-x/internal/pipeline"
 	"github.com/liuscraft/orion-x/internal/session"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 // AgentRunner Agent 运行接口
 type AgentRunner interface {
-	Run(ctx context.Context, sess *session.Session) (<-chan agent.AgentEvent, error)
+	Run(ctx context.Context, sess *session.Session) (<-chan AgentEvent, error)
 }
 
 // AgentStage Agent 处理 Stage
@@ -148,15 +147,15 @@ func (s *AgentStage) runAgentWithInterrupt(
 }
 
 // drainEventChan 排空 agent 事件通道
-func (s *AgentStage) drainEventChan(eventChan <-chan agent.AgentEvent) {
+func (s *AgentStage) drainEventChan(eventChan <-chan AgentEvent) {
 	for range eventChan {
 	}
 }
 
 // convertAgentEvent 转换 AgentEvent 到 Pipeline Message
-func (s *AgentStage) convertAgentEvent(event agent.AgentEvent, metadata pipeline.Metadata) pipeline.Message {
+func (s *AgentStage) convertAgentEvent(event AgentEvent, metadata pipeline.Metadata) pipeline.Message {
 	switch e := event.(type) {
-	case *agent.TextChunkEvent:
+	case *TextChunkEvent:
 		md := metadata
 		if md.Extra == nil {
 			md.Extra = map[string]interface{}{}
@@ -168,7 +167,7 @@ func (s *AgentStage) convertAgentEvent(event agent.AgentEvent, metadata pipeline
 			Metadata: md,
 		}
 
-	case *agent.FinishedEvent:
+	case *FinishedEvent:
 		msg := pipeline.Message{
 			Type:     pipeline.MessageTypeFinished,
 			Metadata: metadata,

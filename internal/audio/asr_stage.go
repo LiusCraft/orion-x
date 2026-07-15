@@ -1,13 +1,12 @@
-package stages
+package audio
 
 import (
 	"context"
 	"sync"
 	"time"
 
-	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/logging"
-	"github.com/liuscraft/orion-x/internal/pipeline"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 // AudioSource is an audio input source that provides raw PCM bytes.
@@ -22,12 +21,12 @@ type AudioSource interface {
 // Otherwise the caller is responsible for pushing audio via proc.Write.
 type ASRStage struct {
 	*pipeline.BaseStage
-	proc   audio.ASRProcessor
+	proc   ASRProcessor
 	source AudioSource
 }
 
 // NewASRStage creates an ASRStage that reads from source.
-func NewASRStage(proc audio.ASRProcessor, source AudioSource) pipeline.Stage {
+func NewASRStage(proc ASRProcessor, source AudioSource) pipeline.Stage {
 	return &ASRStage{
 		BaseStage: pipeline.NewBaseStage("asr"),
 		proc:      proc,
@@ -44,7 +43,7 @@ func (s *ASRStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 
-	s.proc.OnResult(func(result audio.ASRResult) {
+	s.proc.OnResult(func(result ASRResult) {
 		if !result.IsFinal {
 			return // 中间结果不走 pipeline，外部通过 ASRProcessor 回调直接处理
 		}

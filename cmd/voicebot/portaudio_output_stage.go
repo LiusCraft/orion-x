@@ -7,7 +7,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/logging"
-	"github.com/liuscraft/orion-x/internal/pipeline"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 // PortAudioOutputStage consumes audio.TTSChunk messages produced by the TTS
@@ -90,12 +90,12 @@ func writeWAV(path string, pcm []byte, sampleRate int) {
 	_, _ = f.Write([]byte("WAVE"))
 	_, _ = f.Write([]byte("fmt "))
 	putU32(16)
-	putU16(1)  // PCM
-	putU16(1)  // mono
+	putU16(1) // PCM
+	putU16(1) // mono
 	putU32(uint32(sampleRate))
 	putU32(uint32(sampleRate * 2)) // byte rate
-	putU16(2)  // block align
-	putU16(16) // bits per sample
+	putU16(2)                      // block align
+	putU16(16)                     // bits per sample
 	_, _ = f.Write([]byte("data"))
 	putU32(dataLen)
 	_, _ = f.Write(pcm)

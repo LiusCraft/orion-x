@@ -1,4 +1,4 @@
-package stages_test
+package agent_test
 
 import (
 	"context"
@@ -6,9 +6,8 @@ import (
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/agent"
-	"github.com/liuscraft/orion-x/internal/pipeline"
-	"github.com/liuscraft/orion-x/internal/pipeline/stages"
 	"github.com/liuscraft/orion-x/internal/session"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 // 这是一个集成测试示例，展示如何组合多个 Stage
@@ -30,10 +29,10 @@ func (m *mockAgent) Run(ctx context.Context, sess *session.Session) (<-chan agen
 
 func TestAgentStage_Integration(t *testing.T) {
 	// 构建简单的 Pipeline: AgentStage -> TextFilterStage
-	agent := &mockAgent{}
+	mockAg := &mockAgent{}
 
 	p := pipeline.NewBuilder().
-		AddStage(stages.NewAgentStage(agent, session.New(session.SessionMeta{Model: "test"}))).
+		AddStage(agent.NewAgentStage(mockAg, session.New(session.SessionMeta{Model: "test"}))).
 		AddStage(pipeline.NewTextFilterStage()).
 		Build()
 
@@ -99,10 +98,10 @@ done:
 
 func TestMultipleStages_MessageFlow(t *testing.T) {
 	// 测试消息在多个 Stage 之间的流转
-	agent := &mockAgent{}
+	mockAg := &mockAgent{}
 
 	p := pipeline.NewBuilder().
-		AddStage(stages.NewAgentStage(agent, session.New(session.SessionMeta{Model: "test"}))).
+		AddStage(agent.NewAgentStage(mockAg, session.New(session.SessionMeta{Model: "test"}))).
 		AddStage(pipeline.NewEmotionExtractorStage()).
 		AddStage(pipeline.NewTextFilterStage()).
 		Build()

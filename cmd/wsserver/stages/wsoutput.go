@@ -9,12 +9,12 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
 	"github.com/liuscraft/orion-x/internal/logging"
-	"github.com/liuscraft/orion-x/internal/pipeline"
 	textutil "github.com/liuscraft/orion-x/internal/text"
-	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 // defaultAudioFrameDurationMs is the fallback used when NewWSOutputStage is

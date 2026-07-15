@@ -15,14 +15,13 @@ import (
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
-	"github.com/liuscraft/orion-x/internal/pipeline"
-	pstages "github.com/liuscraft/orion-x/internal/pipeline/stages"
 	"github.com/liuscraft/orion-x/internal/provider/asr"
 	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
 	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 func main() {
@@ -266,9 +265,9 @@ func main() {
 	logging.Infof("Building pipeline: ASR → Agent → TTS → PortAudio...")
 	sess := session.New(session.SessionMeta{Model: agentCfg.Model})
 	pl := pipeline.NewBuilder().
-		AddStage(pstages.NewASRStage(asrProc, micSource)).
-		AddStage(pstages.NewAgentStage(agentInst, sess)).
-		AddStage(pstages.NewTTSStage(ttsProc)).
+		AddStage(audio.NewASRStage(asrProc, micSource)).
+		AddStage(agent.NewAgentStage(agentInst, sess)).
+		AddStage(audio.NewTTSStage(ttsProc)).
 		AddStage(NewPortAudioOutputStage(sink, sinkFormat.SampleRate)).
 		SetObserver(pipeline.NewLoggingObserver(false)).
 		Build()

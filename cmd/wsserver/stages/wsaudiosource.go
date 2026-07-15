@@ -81,7 +81,7 @@ func (s *WSAudioSource) PushBinaryFrame(data []byte) {
 	}
 }
 
-// Read implements stages.AudioSource.
+// Read implements audio.AudioSource.
 func (s *WSAudioSource) Read(ctx context.Context) ([]byte, error) {
 	select {
 	case data, ok := <-s.ch:
@@ -96,7 +96,7 @@ func (s *WSAudioSource) Read(ctx context.Context) ([]byte, error) {
 	}
 }
 
-// Close implements stages.AudioSource. Safe to call multiple times.
+// Close implements audio.AudioSource. Safe to call multiple times.
 func (s *WSAudioSource) Close() error {
 	s.closeOnce.Do(func() { close(s.closed) })
 	return nil
