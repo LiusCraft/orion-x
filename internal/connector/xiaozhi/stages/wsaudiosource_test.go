@@ -1,4 +1,4 @@
-package stages_test
+package xstages_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
-	"github.com/liuscraft/orion-x/cmd/wsserver/stages"
+	xstages "github.com/liuscraft/orion-x/internal/connector/xiaozhi/stages"
 )
 
 func newPCMCodecForTest(t *testing.T) codec.Codec {
@@ -20,7 +20,7 @@ func newPCMCodecForTest(t *testing.T) codec.Codec {
 }
 
 func TestWSAudioSource_PCMPassthrough(t *testing.T) {
-	src := stages.NewWSAudioSource(newPCMCodecForTest(t), audio.InternalSampleRate)
+	src := xstages.NewWSAudioSource(newPCMCodecForTest(t), audio.InternalSampleRate)
 
 	in := []int16{1, 2, 3, 4}
 	src.PushBinaryFrame(audio.Int16ToBytesLE(in))
@@ -46,7 +46,7 @@ func TestWSAudioSource_PCMPassthrough(t *testing.T) {
 
 func TestWSAudioSource_ResamplesWhenRateMismatched(t *testing.T) {
 	// 客户端 48kHz，内部标准 16kHz：应产生约 1/3 长度的样本。
-	src := stages.NewWSAudioSource(newPCMCodecForTest(t), 48000)
+	src := xstages.NewWSAudioSource(newPCMCodecForTest(t), 48000)
 
 	in := make([]int16, 480) // 10ms @ 48kHz
 	for i := range in {
@@ -70,7 +70,7 @@ func TestWSAudioSource_ResamplesWhenRateMismatched(t *testing.T) {
 }
 
 func TestWSAudioSource_DropsUnderBackpressure(t *testing.T) {
-	src := stages.NewWSAudioSource(newPCMCodecForTest(t), audio.InternalSampleRate)
+	src := xstages.NewWSAudioSource(newPCMCodecForTest(t), audio.InternalSampleRate)
 
 	// 疯狂推送，远超内部缓冲容量；不应该阻塞。
 	done := make(chan struct{})
@@ -89,7 +89,7 @@ func TestWSAudioSource_DropsUnderBackpressure(t *testing.T) {
 }
 
 func TestWSAudioSource_CloseUnblocksRead(t *testing.T) {
-	src := stages.NewWSAudioSource(newPCMCodecForTest(t), audio.InternalSampleRate)
+	src := xstages.NewWSAudioSource(newPCMCodecForTest(t), audio.InternalSampleRate)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -116,7 +116,7 @@ func TestWSAudioSource_CloseUnblocksRead(t *testing.T) {
 }
 
 func TestWSAudioSource_ContextCancelUnblocksRead(t *testing.T) {
-	src := stages.NewWSAudioSource(newPCMCodecForTest(t), audio.InternalSampleRate)
+	src := xstages.NewWSAudioSource(newPCMCodecForTest(t), audio.InternalSampleRate)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -142,7 +142,7 @@ func TestWSAudioSource_DecodeErrorDoesNotPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codec.New(opus) failed: %v", err)
 	}
-	src := stages.NewWSAudioSource(opusCodec, audio.InternalSampleRate)
+	src := xstages.NewWSAudioSource(opusCodec, audio.InternalSampleRate)
 
 	// 塞入不是合法 opus 数据的垃圾字节，解码应该失败但不能 panic，也不能
 	// 塞入任何数据。

@@ -67,7 +67,6 @@ func main() {
 	kbStore := store.NewKnowledgeBaseStore(db)
 	docStore := store.NewDocumentStore(db)
 	voicebotKBs := store.NewVoicebotKBStore(db)
-
 	if pass := strings.TrimSpace(cfg.Admin.Password); pass != "" {
 		if _, err := users.GetByUsername(cfg.Admin.Username); errors.Is(err, store.ErrNotFound) {
 			hash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)

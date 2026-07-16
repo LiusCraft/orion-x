@@ -38,10 +38,11 @@ type Device struct {
 	ID         string `gorm:"primaryKey;type:varchar(128)" json:"id"` // 即 hello.DeviceID
 	VoicebotID string `gorm:"not null;index;type:varchar(36)" json:"voicebot_id"`
 	Name       string `gorm:"type:varchar(128)" json:"name"`
+	TgBotToken string `gorm:"type:varchar(256)" json:"tg_bot_token,omitempty"` // 设备绑定的 TG Bot Token
 	BaseModel
 }
 
-// Provider AI 模型厂商（Anthropic / Aliyun / OpenAI 等）
+// Provider AI 模型厂商
 type Provider struct {
 	ID        string            `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	Name      string            `gorm:"not null;type:varchar(64)" json:"name"`
@@ -64,14 +65,10 @@ const (
 	ModelTypeEmbedding  ModelType = "embedding"
 )
 
-// AllModelTypes returns all supported model types in display order.
 func AllModelTypes() []ModelType {
 	return []ModelType{
-		ModelTypeText,
-		ModelTypeVision,
-		ModelTypeSpeech,
-		ModelTypeMultimodal,
-		ModelTypeEmbedding,
+		ModelTypeText, ModelTypeVision, ModelTypeSpeech,
+		ModelTypeMultimodal, ModelTypeEmbedding,
 	}
 }
 
@@ -82,7 +79,7 @@ type AIModel struct {
 	Provider   *Provider         `gorm:"foreignKey:ProviderID" json:"provider,omitempty"`
 	Name       string            `gorm:"not null;type:varchar(128)" json:"name"`
 	Type       ModelType         `gorm:"not null;type:varchar(16);index" json:"type"`
-	BaseURL    string            `gorm:"type:varchar(512)" json:"base_url"` // 空则用 provider.base_url
+	BaseURL    string            `gorm:"type:varchar(512)" json:"base_url"`
 	ModelID    string            `gorm:"not null;type:varchar(128)" json:"model_id"`
 	IsSystem   bool              `gorm:"not null;default:false;index" json:"is_system"`
 	Langs      pq.StringArray    `gorm:"type:text[]" json:"langs,omitempty"`
@@ -100,11 +97,11 @@ const (
 	VoiceGenderNeutral VoiceGender = "neutral"
 )
 
-// ModelVoice TTS 模型下的音色（含系统内置音色和用户复刻音色）
+// ModelVoice TTS 模型下的音色
 type ModelVoice struct {
 	ID          string         `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	ModelID     string         `gorm:"not null;index;type:varchar(36)" json:"model_id"`
-	VoiceID     string         `gorm:"not null;type:varchar(128)" json:"voice_id"` // 调用 TTS API 时传的实际 ID
+	VoiceID     string         `gorm:"not null;type:varchar(128)" json:"voice_id"`
 	Name        string         `gorm:"not null;type:varchar(128)" json:"name"`
 	Description string         `gorm:"type:text" json:"description,omitempty"`
 	Gender      VoiceGender    `gorm:"type:varchar(16)" json:"gender,omitempty"`
@@ -112,12 +109,10 @@ type ModelVoice struct {
 	PreviewURL  string         `gorm:"type:varchar(512)" json:"preview_url,omitempty"`
 	Tags        pq.StringArray `gorm:"type:text[]" json:"tags,omitempty"`
 	Langs       pq.StringArray `gorm:"type:text[]" json:"langs,omitempty"`
-	// Emotions maps system emotion keys to per-voice config.
-	// e.g. {"happy": {"mapped_value": "joy", "preview_url": "https://..."}, "neutral": {}}
 	Emotions       datatypes.JSONMap `gorm:"type:jsonb" json:"emotions,omitempty"`
 	IsSystem       bool              `gorm:"not null;default:false;index" json:"is_system"`
 	IsCloned       bool              `gorm:"not null;default:false" json:"is_cloned"`
-	SourceAudioURL string            `gorm:"type:varchar(512)" json:"source_audio_url,omitempty"` // 复刻时上传的音频文件
+	SourceAudioURL string            `gorm:"type:varchar(512)" json:"source_audio_url,omitempty"`
 	Extra          datatypes.JSONMap `gorm:"type:jsonb" json:"extra,omitempty"`
 	BaseModel
 }
@@ -133,29 +128,24 @@ const (
 
 // MCPMarketEntry 系统预置的 MCP 市场条目
 type MCPMarketEntry struct {
-	ID          string         `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	Name        string         `gorm:"not null;type:varchar(128)" json:"name"`
-	Description string         `gorm:"type:text" json:"description,omitempty"`
-	Icon        string         `gorm:"type:varchar(64)" json:"icon,omitempty"`
-	Tags        pq.StringArray `gorm:"type:text[]" json:"tags,omitempty"`
-	Provider    string         `gorm:"type:varchar(64)" json:"provider,omitempty"`
-	Billing     string         `gorm:"type:varchar(64)" json:"billing,omitempty"`
-	Price       string         `gorm:"type:varchar(64)" json:"price,omitempty"`
-	// Config 是默认 MCPServerConfig JSON，安装时预填
-	Config datatypes.JSONMap `gorm:"type:jsonb;not null" json:"config"`
-	// HeaderMeta 描述 Config.headers 中每个 header 的安装形态（required/optional/auto）
-	// required: 用户安装时必须填写
-	// optional: 可填可不填，有默认值
-	// auto: 用户不用填写，系统自动注入
-	HeaderMeta datatypes.JSONMap `gorm:"type:jsonb" json:"header_meta,omitempty"`
+	ID          string            `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	Name        string            `gorm:"not null;type:varchar(128)" json:"name"`
+	Description string            `gorm:"type:text" json:"description,omitempty"`
+	Icon        string            `gorm:"type:varchar(64)" json:"icon,omitempty"`
+	Tags        pq.StringArray    `gorm:"type:text[]" json:"tags,omitempty"`
+	Provider    string            `gorm:"type:varchar(64)" json:"provider,omitempty"`
+	Billing     string            `gorm:"type:varchar(64)" json:"billing,omitempty"`
+	Price       string            `gorm:"type:varchar(64)" json:"price,omitempty"`
+	Config      datatypes.JSONMap `gorm:"type:jsonb;not null" json:"config"`
+	HeaderMeta  datatypes.JSONMap `gorm:"type:jsonb" json:"header_meta,omitempty"`
 	BaseModel
 }
 
-// MCPServer 独立的 MCP 服务器定义，被多个 voicebot 引用
+// MCPServer 独立的 MCP 服务器定义
 type MCPServer struct {
 	ID           string            `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	OwnerID      string            `gorm:"type:varchar(36);index" json:"owner_id,omitempty"` // 用户 ID，系统预置为空
-	MarketID     *string           `gorm:"type:varchar(36)" json:"market_id,omitempty"`      // 来自市场的条目 ID
+	OwnerID      string            `gorm:"type:varchar(36);index" json:"owner_id,omitempty"`
+	MarketID     *string           `gorm:"type:varchar(36)" json:"market_id,omitempty"`
 	Name         string            `gorm:"not null;type:varchar(128)" json:"name"`
 	Description  string            `gorm:"type:text" json:"description,omitempty"`
 	Icon         string            `gorm:"type:varchar(64)" json:"icon,omitempty"`
@@ -180,3 +170,4 @@ type VoicebotMCPBinding struct {
 	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 	Creator     string    `gorm:"type:varchar(36)" json:"creator"`
 }
+

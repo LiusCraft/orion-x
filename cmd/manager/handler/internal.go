@@ -67,6 +67,37 @@ func (h *InternalHandler) DeviceConfig(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", []byte(v.ConfigJSON))
 }
 
+
+// GET /internal/devices/tg-bots — 返回所有配置了 TG Bot Token 的设备列表。
+func (h *InternalHandler) DeviceTGBots(c *gin.Context) {
+	devices, err := h.devices.ListWithTGBot()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	type tgBotDevice struct {
+		DeviceID    string `json:"device_id"`
+		DeviceName  string `json:"device_name"`
+		TgBotToken  string `json:"tg_bot_token"`
+		VoicebotID  string `json:"voicebot_id"`
+		VoicebotName string `json:"voicebot_name,omitempty"`
+	}
+	result := make([]tgBotDevice, 0, len(devices))
+	for _, d := range devices {
+		entry := tgBotDevice{
+			DeviceID:   d.ID,
+			DeviceName: d.Name,
+			TgBotToken: d.TgBotToken,
+			VoicebotID: d.VoicebotID,
+		}
+		if v, err := h.voicebots.GetByID(d.VoicebotID); err == nil {
+			entry.VoicebotName = v.Name
+		}
+		result = append(result, entry)
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 func effectiveBaseURL2(m store.AIModel) string {
 	if m.BaseURL != "" {
 		return m.BaseURL
@@ -90,7 +121,6 @@ func jsonbToSS(m map[string]any) map[string]string {
 func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*config.AppConfig, error) {
 	full := config.DefaultConfig()
 
-	// ── ASR ──
 	if ac.ASR.ModelID != "" {
 		if m, err := h.models.GetByID(ac.ASR.ModelID); err == nil {
 			full.Provider.ASR.Aliyun.Model = m.ModelID
@@ -116,11 +146,9 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 		full.Audio.InPipe.VADSpeechPadMs = ac.ASR.VADSpeechPadMs
 	}
 
-	// ── TTS: voice lookup (voice_id stores the ModelVoice DB UUID) ──
 	if ac.TTS.VoiceID != "" {
 		if voice, err := h.voices.GetByID(ac.TTS.VoiceID); err == nil {
 			full.Provider.TTS.Aliyun.Voice = voice.VoiceID
-			// If model not already set via model_id, derive from voice
 			if ac.TTS.ModelID == "" {
 				if m, err := h.models.GetByID(voice.ModelID); err == nil {
 					full.Provider.TTS.Aliyun.Model = m.ModelID
@@ -146,7 +174,6 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 	full.Provider.TTS.Aliyun.Rate = ac.TTS.Rate
 	full.Provider.TTS.Aliyun.Pitch = ac.TTS.Pitch
 
-	// ── LLM ──
 	if ac.LLM.ModelID != "" {
 		if m, err := h.models.GetByID(ac.LLM.ModelID); err == nil {
 			full.Provider.LLM.OpenAI.Model = m.ModelID
@@ -167,11 +194,9 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 		full.Provider.LLM.OpenAI.RulesPrompt = ac.LLM.RulesPrompt
 	}
 
-	// ── Memory / MCP / Audio ──
 	if ac.Memory.MemoryCharLimit > 0 {
 		full.Memory = ac.Memory
 	}
-	// MCP: 从 voicebot_mcp_bindings + mcp_servers 加载（仅 enabled）
 	if h.mcpBinds != nil {
 		dbList, err := h.mcpBinds.ListByVoicebotWithServers(voicebotID)
 		if err != nil {

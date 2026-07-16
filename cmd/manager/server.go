@@ -57,7 +57,8 @@ func newRouter(
 	langH := handler.NewLanguageHandler()
 	mcpH := handler.NewMCPHandler(mcpMarket, mcpServers, mcpBindings, voicebots)
 	internalH := handler.NewInternalHandler(voicebots, devices, models, voices, mcpBindings)
-	availableH := handler.NewAvailableHandler(providers, models, voices)
+	
+		availableH := handler.NewAvailableHandler(providers, models, voices)
 	memH := handler.NewMemoryHandler(memStore)
 	dataMemH := handler.NewDataMemoryHandler(memStore, devices, voicebots)
 	dataKnowH := handler.NewDataKnowledgeHandler(kbSvc, kbStore, docStore, devices, voicebots, voicebotKBs)
@@ -135,7 +136,6 @@ func newRouter(
 		knowledgeData.GET("/bots/:bot_id/knowledge_bases/bound", dataKnowH.ListBoundKBs)
 		knowledgeData.POST("/bots/:bot_id/knowledge_bases/bind", dataKnowH.BindKB)
 		knowledgeData.DELETE("/bots/:bot_id/knowledge_bases/:kb_id/bind", dataKnowH.UnbindKB)
-		// Legacy: create/list KBs for a bot (KB is created under the bot, then can be bound to others)
 		knowledgeData.GET("/bots/:bot_id/knowledge_bases", dataKnowH.ListKBs)
 		knowledgeData.POST("/bots/:bot_id/knowledge_bases", dataKnowH.CreateKB)
 
@@ -161,6 +161,8 @@ func newRouter(
 		bots.DELETE("/:id/mcps/:serverID", mcpH.UnbindMCP)
 		bots.PATCH("/:id/mcps/:serverID/toggle", mcpH.ToggleBinding)
 
+		// TG 绑定管理
+
 		// 语言字典（只读）
 		api.GET("/languages", jwtMw, langH.List)
 		api.GET("/languages/:code", jwtMw, langH.Get)
@@ -181,7 +183,7 @@ func newRouter(
 		internal.GET("/devices/:device_id/sessions/:session_id", turnH.GetSessionMessages)
 
 		internal.GET("/knowledge/search", dataKnowH.Search)
+		internal.GET("/devices/tg-bots", internalH.DeviceTGBots)
 	}
-
 	return r
 }

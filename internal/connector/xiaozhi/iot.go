@@ -1,4 +1,4 @@
-package main
+package xiaozhi
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/tools"
-	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
+	"github.com/liuscraft/orion-x/internal/connector/xiaozhi/wsproto"
 )
 
 // iotProperty mirrors wsproto.IoTProperty but stores a live value.
@@ -73,7 +73,7 @@ func (m *iotManager) handleDescriptors(descriptors []wsproto.IoTDescriptor) {
 			dev.Methods[k] = method
 		}
 		m.devices[d.Name] = dev
-		logging.Infof("wsserver/iot: registered device %q (%d properties, %d methods)",
+		logging.Infof("xiaozhi/iot: registered device %q (%d properties, %d methods)",
 			d.Name, len(dev.Properties), len(dev.Methods))
 
 		for _, spec := range m.specsForDevice(dev) {
@@ -93,7 +93,7 @@ func (m *iotManager) handleStates(states []wsproto.IoTState) {
 			if prop, ok := dev.Properties[k]; ok {
 				prop.Value = v
 				dev.Properties[k] = prop
-				logging.Infof("wsserver/iot: %s.%s = %v", s.Name, k, v)
+				logging.Infof("xiaozhi/iot: %s.%s = %v", s.Name, k, v)
 			}
 		}
 	}

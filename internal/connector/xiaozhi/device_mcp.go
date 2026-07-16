@@ -1,4 +1,4 @@
-package main
+package xiaozhi
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/tools"
-	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
+	"github.com/liuscraft/orion-x/internal/connector/xiaozhi/wsproto"
 )
 
 const (
@@ -21,8 +21,6 @@ const (
 
 // deviceMCPClient manages the server-side of the device-MCP handshake:
 // the server acts as an MCP client, the ESP32/client acts as an MCP server.
-// After hello, the server sends initialize → tools/list over the WebSocket,
-// then registers the discovered tools so the LLM can call them.
 type deviceMCPClient struct {
 	conn      safeWriter
 	sessionID string
@@ -70,7 +68,7 @@ func (c *deviceMCPClient) HandleMessage(ctx context.Context, payload json.RawMes
 		Method string `json:"method"`
 	}
 	if err := json.Unmarshal(payload, &env); err != nil {
-		logging.Warnf("wsserver/device_mcp[%s]: invalid payload: %v", c.sessionID, err)
+		logging.Warnf("xiaozhi/device_mcp[%s]: invalid payload: %v", c.sessionID, err)
 		return
 	}
 
@@ -81,13 +79,13 @@ func (c *deviceMCPClient) HandleMessage(ctx context.Context, payload json.RawMes
 
 	if env.Error != nil {
 		c.resolvePending(id, nil)
-		logging.Warnf("wsserver/device_mcp[%s]: error id=%d: %s", c.sessionID, id, env.Error.Message)
+		logging.Warnf("xiaozhi/device_mcp[%s]: error id=%d: %s", c.sessionID, id, env.Error.Message)
 		return
 	}
 
 	switch id {
 	case mcpInitializeID:
-		logging.Infof("wsserver/device_mcp[%s]: initialize ok, requesting tools/list", c.sessionID)
+		logging.Infof("xiaozhi/device_mcp[%s]: initialize ok, requesting tools/list", c.sessionID)
 		_ = c.sendToolsList(ctx)
 
 	case mcpToolsListID:
@@ -113,11 +111,11 @@ func (c *deviceMCPClient) handleToolsList(ctx context.Context, result json.RawMe
 		NextCursor string       `json:"nextCursor"`
 	}
 	if err := json.Unmarshal(result, &body); err != nil {
-		logging.Warnf("wsserver/device_mcp[%s]: bad tools/list result: %v", c.sessionID, err)
+		logging.Warnf("xiaozhi/device_mcp[%s]: bad tools/list result: %v", c.sessionID, err)
 		return
 	}
 
-	logging.Infof("wsserver/device_mcp[%s]: discovered %d device tools", c.sessionID, len(body.Tools))
+	logging.Infof("xiaozhi/device_mcp[%s]: discovered %d device tools", c.sessionID, len(body.Tools))
 
 	for _, t := range body.Tools {
 		spec := c.specFor(t)
@@ -204,7 +202,6 @@ func (c *deviceMCPClient) callTool(ctx context.Context, name string, args json.R
 		if !ok || raw == nil {
 			return tools.Result{Error: fmt.Errorf("device MCP call failed (id=%d)", id)}, nil
 		}
-		// Extract text from MCP content array if present.
 		var content struct {
 			Content []struct {
 				Text string `json:"text"`

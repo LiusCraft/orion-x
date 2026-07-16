@@ -1,16 +1,13 @@
+// Command wsserver is the unified entry point for Orion-X server connectors.
 package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
-	"time"
 
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
@@ -18,15 +15,17 @@ import (
 	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
 	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
 	"github.com/liuscraft/orion-x/internal/tools"
+
+	"github.com/liuscraft/orion-x/internal/connector"
+	"github.com/liuscraft/orion-x/internal/connector/tg"
+	"github.com/liuscraft/orion-x/internal/connector/xiaozhi"
 )
 
-const shutdownTimeout = 10 * time.Second
-
 func main() {
-	configPath := flag.String("config", defaultWsserverConfigPath, "config file path")
+	configPath := flag.String("config", "data/wsserver.yaml", "config file path")
 	flag.Parse()
 
-	cfg, err := loadWsserverConfig(*configPath)
+	cfg, err := xiaozhi.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
@@ -41,22 +40,15 @@ func main() {
 	}
 	defer logging.Sync()
 
-	managerURL := strings.TrimSpace(cfg.Manager.URL)
-	if managerURL == "" {
-		logging.Fatalf("manager.url is required — all device configs are loaded from manager")
-	}
-
 	logging.SetTraceID(logging.NewTraceID())
 	logging.Infof("========================================")
-	logging.Infof("        WS VoiceBot Server Starting... ")
+	logging.Infof("        Orion-X Server Starting...      ")
 	logging.Infof("========================================")
 
 	baseCtx := context.Background()
 
-	// process-level memory / tool / agent — shared across connections.
-	// Per-connection memory service is created in newConnection.
 	memorySvc, err := memory.NewService(memory.Config{}, memory.Options{
-		ManagerURL:   managerURL,
+		ManagerURL:   cfg.Manager.URL,
 		DeviceID:     "",
 		ReviewConfig: memory.ReviewConfig{Enabled: false},
 	})
@@ -79,40 +71,44 @@ func main() {
 		}
 	}()
 
-	deviceCfg := newHTTPDeviceConfigLoader(managerURL)
-	logging.Infof("Device config loader: manager at %s", managerURL)
+	// Shared dependencies for connectors
+	deviceCfgLoader := xiaozhi.NewHTTPDeviceConfigLoader(cfg.Manager.URL)
+	deps := &connector.Dependencies{
+		DeviceCfgLoader: deviceCfgLoader,
+	}
 
-	srv := NewServer(toolMgr, memorySvc, deviceCfg)
+	connMgr := connector.NewManager(deps)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc(cfg.Server.WsPath, srv.HandleWS)
-	httpServer := &http.Server{Addr: cfg.Server.Addr, Handler: mux}
+	// Xiaozhi WS Connector
+	wsConn := xiaozhi.NewXiaozhiWSConnector(cfg, deps, toolMgr, memorySvc)
+	connMgr.Register(wsConn)
 
-	go func() {
-		logging.Infof("Listening on %s (ws: %s)", cfg.Server.Addr, cfg.Server.WsPath)
-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logging.Fatalf("HTTP server error: %v", err)
-		}
-	}()
+	// TG Bot Connector — started automatically; refreshes device list
+	// from the manager and starts bot instances for devices with tokens.
+	tgConn := tg.NewTGConnector(deps, toolMgr, memorySvc)
+	connMgr.Register(tgConn)
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(baseCtx)
+	defer cancel()
+
+	if err := connMgr.Start(ctx); err != nil {
+		logging.Fatalf("Failed to start connectors: %v", err)
+	}
 
 	logging.Infof("========================================")
-	logging.Infof("     WS VoiceBot Server is Running!    ")
+	logging.Infof("     Orion-X Server is Running!        ")
 	logging.Infof("     Press Ctrl+C to stop.             ")
 	logging.Infof("========================================")
 
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		logging.Errorf("HTTP server shutdown error: %v", err)
-	}
-	srv.Shutdown(shutdownTimeout)
+	logging.Infof("Shutting down...")
+	cancel()
+	connMgr.Stop()
 
-	logging.Infof("WS VoiceBot Server stopped.")
+	logging.Infof("Orion-X Server stopped.")
 	logging.Sync()
 
 	_, _, _ = syscall.Syscall(syscall.SYS_EXIT, 0, 0, 0)

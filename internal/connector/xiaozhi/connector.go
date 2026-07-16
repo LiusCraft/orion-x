@@ -1,19 +1,21 @@
-package main
+package xiaozhi
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
-	wsstages "github.com/liuscraft/orion-x/cmd/wsserver/stages"
-	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
 	"github.com/liuscraft/orion-x/internal/config"
+	"github.com/liuscraft/orion-x/internal/connector"
+	xstages "github.com/liuscraft/orion-x/internal/connector/xiaozhi/stages"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
@@ -22,11 +24,12 @@ import (
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
+	"github.com/liuscraft/orion-x/internal/connector/xiaozhi/wsproto"
 )
 
 // independent of cmd/voicebot's 22050Hz (each entry point constructs its
 // own tts.Provider instance, so the two don't need to agree).
-const wsserverTTSSampleRate = 16000
+const ttsSampleRate = 16000
 
 // defaultAudioFormat is used when a client's hello omits audio_params.format.
 const defaultAudioFormat = codec.FormatOpus
@@ -37,116 +40,190 @@ const defaultFrameDurationMs = 60
 
 // supportedBitsPerSample is the only bits_per_sample value this server
 // accepts — the entire pipeline (codec, resampler, ASR/TTS providers) is
-// hardcoded to PCM16LE, so any other value fails the handshake rather than
-// being silently coerced.
+// hardcoded to PCM16LE.
 const supportedBitsPerSample = 16
 
 const (
-	// defaultPreBufferFrames is used when a client's hello omits (or sends
-	// a non-positive) audio_params.play_buffer_duration.
 	defaultPreBufferFrames = 3
-	// minPreBufferFrames/maxPreBufferFrames bound computePreBufferFrames's
-	// result so a malformed play_buffer_duration can't produce a
-	// pre-buffer window of zero (defeats the low-latency start) or an
-	// unreasonably large one (defeats pacing almost entirely).
-	minPreBufferFrames = 1
-	maxPreBufferFrames = 100
+	minPreBufferFrames     = 1
+	maxPreBufferFrames     = 100
+	helloTimeout           = 10 * time.Second
 )
 
-// computePreBufferFrames converts the client's playback buffer size
-// (audio_params.play_buffer_duration) into a frame count: the larger the
-// client's own buffer, the more frames the server can safely front-load
-// before switching to steady-rate pacing without risking a client-side
-// overrun. Falls back to defaultPreBufferFrames when either input is
-// unusable (not declared, or non-positive).
-func computePreBufferFrames(playBufferDurationMs, frameDurationMs int) int {
-	if playBufferDurationMs <= 0 || frameDurationMs <= 0 {
-		return defaultPreBufferFrames
-	}
-	n := playBufferDurationMs / frameDurationMs
-	if n < minPreBufferFrames {
-		n = minPreBufferFrames
-	}
-	if n > maxPreBufferFrames {
-		n = maxPreBufferFrames
-	}
-	return n
+// XiaozhiWSConnector implements connector.Connector for the Xiaozhi ESP32
+// WebSocket voice protocol. It manages an HTTP server for WebSocket upgrades
+// and creates per-connection DAG pipelines (ASR → Agent → TTS → output).
+type XiaozhiWSConnector struct {
+	cfg   *Config
+	deps  *connector.Dependencies
+
+	toolsMgr  *tools.Manager
+	memorySvc *memory.Service
+
+	upgrader   websocket.Upgrader
+	httpServer *http.Server
+
+	rootCtx    context.Context
+	rootCancel context.CancelFunc
+	connWG     sync.WaitGroup
 }
 
-// wsConnection holds all per-connection state and resources: its own
-// Session, ASR recognizer/processor, TTS provider/processor, and DAG
-// pipeline. None of this is shared across connections — see Server's doc
-// comment for what is shared (Agent, ToolManager, MemoryService).
-type wsConnection struct {
-	server    *Server
-	rawConn   *websocket.Conn
-	safeConn  *wsstages.SafeConn
-	sessionID string
-	mode      wsproto.Mode
-
-	asrProc  audio.ASRProcessor
-	ttsProc  audio.TTSProcessor
-	pl       pipeline.Pipeline
-	audioSrc *wsstages.WSAudioSource
-
-	connMgr   *tools.Registry
-	connAgent *agent.Agent
-	memSvc    *memory.Service
-	iotMgr    *iotManager
-	deviceMCP *deviceMCPClient
-
-	ctx    context.Context
-	cancel context.CancelFunc
+// NewXiaozhiWSConnector creates a new Xiaozhi WS connector.
+func NewXiaozhiWSConnector(cfg *Config, deps *connector.Dependencies, toolsMgr *tools.Manager, memorySvc *memory.Service) *XiaozhiWSConnector {
+	return &XiaozhiWSConnector{
+		cfg:       cfg,
+		deps:      deps,
+		toolsMgr:  toolsMgr,
+		memorySvc: memorySvc,
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool { return true },
+		},
+	}
 }
 
-// handleConnection owns the full lifecycle of one WebSocket connection:
-// handshake, resource setup, pipeline wiring, the read loop, and cleanup on
-// exit (any exit path — normal close, read error, or setup failure).
-func (s *Server) handleConnection(rawConn *websocket.Conn) {
+// Name returns the connector identifier.
+func (s *XiaozhiWSConnector) Name() string { return "xiaozhi" }
+
+// Info returns connector metadata.
+func (s *XiaozhiWSConnector) Info() connector.ConnectorInfo {
+	return connector.NewConnectorInfo(
+		"xiaozhi",
+		"Xiaozhi WebSocket",
+		connector.ConnectorServer,
+		[]connector.Capability{connector.CapText, connector.CapAudioStream},
+	)
+}
+
+// Start starts the HTTP server and begins accepting WebSocket connections.
+func (s *XiaozhiWSConnector) Start(ctx context.Context) error {
+	s.rootCtx, s.rootCancel = context.WithCancel(ctx)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(s.cfg.Server.WsPath, s.handleWS)
+
+	s.httpServer = &http.Server{
+		Addr:    s.cfg.Server.Addr,
+		Handler: mux,
+	}
+
+	go func() {
+		logging.Infof("xiaozhi-connector: listening on %s (ws: %s)", s.cfg.Server.Addr, s.cfg.Server.WsPath)
+		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logging.Errorf("xiaozhi-connector: HTTP server error: %v", err)
+		}
+	}()
+
+	return nil
+}
+
+// Stop gracefully shuts down the HTTP server and waits for all connections
+// to finish, or until the context is cancelled.
+func (s *XiaozhiWSConnector) Stop(ctx context.Context) error {
+	if s.rootCancel != nil {
+		s.rootCancel()
+	}
+
+	if s.httpServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = s.httpServer.Shutdown(shutdownCtx)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.connWG.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		logging.Infof("xiaozhi-connector: all connections closed cleanly")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+
+// handleWS upgrades an HTTP request to WebSocket and handles it asynchronously.
+func (s *XiaozhiWSConnector) handleWS(w http.ResponseWriter, r *http.Request) {
+	pick := func(header, query string) string {
+		if v := r.Header.Get(header); v != "" {
+			return v
+		}
+		return r.URL.Query().Get(query)
+	}
+	authorization := pick("Authorization", "access_token")
+	protocolVersion := pick("Protocol-Version", "protocol-version")
+	deviceID := pick("Device-Id", "device-id")
+	clientID := pick("Client-Id", "client-id")
+
+	logging.Infof("xiaozhi-connector: incoming connection — Authorization=%q ProtocolVersion=%q DeviceId=%q ClientId=%q RemoteAddr=%s",
+		authorization, protocolVersion, deviceID, clientID, r.RemoteAddr)
+
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		logging.Warnf("xiaozhi-connector: upgrade failed: %v", err)
+		return
+	}
+
+	s.connWG.Add(1)
+	go func() {
+		defer s.connWG.Done()
+		s.handleConnection(conn)
+	}()
+}
+
+// handleConnection handles the full lifecycle of a single WebSocket connection.
+func (s *XiaozhiWSConnector) handleConnection(rawConn *websocket.Conn) {
 	defer func() { _ = rawConn.Close() }()
 
-	hello, err := readHello(rawConn)
+	hello, err := s.readHello(rawConn)
 	if err != nil {
-		logging.Warnf("wsserver: handshake failed: %v", err)
+		logging.Warnf("xiaozhi-connector: handshake failed: %v", err)
 		return
 	}
 
 	c, err := s.newConnection(rawConn, hello)
 	if err != nil {
-		logging.Errorf("wsserver: connection setup failed: %v", err)
+		logging.Errorf("xiaozhi-connector: connection setup failed: %v", err)
 		return
 	}
 	defer c.close()
 
 	if err := c.sendHelloResponse(hello); err != nil {
-		logging.Warnf("wsserver[%s]: send hello response failed: %v", c.sessionID, err)
+		logging.Warnf("xiaozhi-connector[%s]: send hello response failed: %v", c.sessionID, err)
 		return
 	}
 
-	logging.Infof("wsserver[%s]: connection established (device_id=%q, mode=%s)", c.sessionID, hello.DeviceID, c.mode)
+	logging.Infof("xiaozhi-connector[%s]: connection established (device_id=%q, mode=%s)", c.sessionID, hello.DeviceID, c.mode)
 	c.readLoop()
-	logging.Infof("wsserver[%s]: connection closed", c.sessionID)
+	logging.Infof("xiaozhi-connector[%s]: connection closed", c.sessionID)
 }
 
-// newConnection negotiates audio format/mode from hello and assembles every
-// per-connection resource: Recognizer, ASRProcessor, TTS Provider,
-// TTSProcessor, Session, and the 4-node DAG pipeline
-// (asr -> agent, asr -> ws_output, agent -> tts, tts -> ws_output).
-func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMessage) (*wsConnection, error) {
+// newConnection builds all per-connection resources and the DAG pipeline.
+func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMessage) (*wsConnection, error) {
 	if bps := hello.AudioParams.BitsPerSample; bps != 0 && bps != supportedBitsPerSample {
 		return nil, fmt.Errorf("unsupported bits_per_sample %d (only %d is supported)", bps, supportedBitsPerSample)
 	}
 
-	// Load per-device config from manager. Unregistered devices are rejected.
 	if hello.DeviceID == "" {
 		return nil, fmt.Errorf("device_id is required")
 	}
-	connCfg, err := s.deviceCfg.LoadConfig(hello.DeviceID)
-	if err != nil {
-		return nil, fmt.Errorf("load device config for %q: %w", hello.DeviceID, err)
-	}
-	if connCfg == nil {
-		return nil, fmt.Errorf("device %q is not registered", hello.DeviceID)
+
+	// Load device config — depends on deps or s.deps
+	var connCfg *config.AppConfig
+	if s.deps != nil && s.deps.DeviceCfgLoader != nil {
+		var err error
+		connCfg, err = s.deps.DeviceCfgLoader.LoadConfig(hello.DeviceID)
+		if err != nil {
+			return nil, fmt.Errorf("load device config for %q: %w", hello.DeviceID, err)
+		}
+		if connCfg == nil {
+			return nil, fmt.Errorf("device %q is not registered", hello.DeviceID)
+		}
+	} else {
+		// Fallback to a default config if no loader available (for standalone testing)
+		connCfg = config.DefaultConfig()
 	}
 
 	mode := hello.Mode
@@ -176,7 +253,7 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 	if err != nil {
 		return nil, err
 	}
-	outputCodec, err := codec.New(codec.Format(format), wsserverTTSSampleRate, channels, frameDurationMs)
+	outputCodec, err := codec.New(codec.Format(format), ttsSampleRate, channels, frameDurationMs)
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +261,7 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 	sess := session.New(session.SessionMeta{Model: connCfg.Provider.LLM.OpenAI.Model})
 	sessionID := sess.ID
 
+	// Recognizer
 	recognizer, err := s.newRecognizer(connCfg)
 	if err != nil {
 		return nil, err
@@ -203,6 +281,7 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		return nil, err
 	}
 
+	// TTS provider + processor
 	ttsProvider, err := s.newTTSProvider(connCfg)
 	if err != nil {
 		return nil, err
@@ -221,26 +300,18 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		return nil, err
 	}
 
-	audioSrc := wsstages.NewWSAudioSource(inputCodec, clientSampleRate)
-	safeConn := wsstages.NewSafeConn(rawConn)
+	audioSrc := xstages.NewWSAudioSource(inputCodec, clientSampleRate)
+	safeConn := xstages.NewSafeConn(rawConn)
 
 	connMgr := s.toolsMgr.Clone()
 	iotMgr := newIoTManager(safeConn, connMgr.Registry())
 	var devMCP *deviceMCPClient
 
-	// Tag this connection's context with its own memory.Context so
-	// long-term memory (if enabled) is scoped per connection instead of
-	// bleeding together — unlike cmd/voicebot, which hardcodes a single
-	// "local" UserID/SessionID for its one CLI session.
 	userID := hello.DeviceID
 	if userID == "" {
 		userID = sessionID
 	}
-	// Derived from s.rootCtx (not context.Background()) so Server.Shutdown
-	// cancelling rootCtx propagates here too — see the goroutine below that
-	// closes rawConn on ctx.Done(), which is what actually unblocks
-	// readLoop's blocking ReadMessage call (context cancellation alone
-	// doesn't interrupt a gorilla/websocket read).
+
 	memCtx := memory.WithContext(s.rootCtx, memory.Context{
 		UserID:    userID,
 		SessionID: sessionID,
@@ -252,13 +323,11 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		_ = rawConn.Close()
 	}()
 
-	// Load MCP servers from device config into the per-connection manager
+	// Load MCP servers from device config
 	mcpCfgs := connCfg.Tools.MCP
 	if len(mcpCfgs) > 0 {
-		names := make([]string, len(mcpCfgs))
 		toolCfgs := make([]tools.MCPServerConfig, len(mcpCfgs))
 		for i, m := range mcpCfgs {
-			names[i] = m.ID
 			toolCfgs[i] = tools.MCPServerConfig{
 				ID:           m.ID,
 				Transport:    m.Transport,
@@ -272,37 +341,32 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 				TimeoutMs:    m.TimeoutMs,
 			}
 		}
-		logging.Infof("wsserver[%s]: device config has %d MCP servers: %v", sessionID, len(mcpCfgs), names)
 		if err := connMgr.RegisterMCPServers(ctx, toolCfgs); err != nil {
 			cancel()
-			logging.Errorf("wsserver[%s]: failed to register MCP servers: %v", sessionID, err)
-			// Don't fail the connection — continue with available tools
+			logging.Errorf("xiaozhi-connector[%s]: failed to register MCP servers: %v", sessionID, err)
 		}
 		defs := connMgr.Registry().Definitions()
-		logging.Infof("wsserver[%s]: MCP registration complete — total tools: %d", sessionID, len(defs))
+		logging.Infof("xiaozhi-connector[%s]: MCP registration complete — total tools: %d", sessionID, len(defs))
 	} else {
-		logging.Infof("wsserver[%s]: device config has NO MCP servers, total tools: %d", sessionID, len(connMgr.Registry().Definitions()))
+		logging.Infof("xiaozhi-connector[%s]: no MCP servers in config, total tools: %d", sessionID, len(connMgr.Registry().Definitions()))
 	}
 
-	// If the client declared "mcp" support, create the device-MCP client and
-	// kick off the initialize handshake after the pipeline starts.
 	if hello.Features["mcp"] {
 		devMCP = newDeviceMCPClient(safeConn, sessionID, connMgr.Registry())
 	}
 
-	// Per-connection memory service with per-device CuratedStore
+	// Per-connection memory service
 	deviceID := hello.DeviceID
 	memSvc, err := memory.NewService(memory.Config{
 		MemoryCharLimit: connCfg.Memory.MemoryCharLimit,
 		UserCharLimit:   connCfg.Memory.UserCharLimit,
 	}, memory.Options{
-		// SystemPrompt 留空 → memory service 从 data/prompts/soul.md + rules.md 读取
-		ManagerURL:   s.deviceCfg.ManagerURL(),
+		ManagerURL:   managerURLFromDeps(s.deps),
 		DeviceID:     deviceID,
 		ReviewConfig: memory.ReviewConfig{Enabled: true},
 	})
 	if err != nil {
-		logging.Warnf("wsserver[%s]: memory init: %v", sessionID, err)
+		logging.Warnf("xiaozhi-connector[%s]: memory init: %v", sessionID, err)
 		memSvc = nil
 	}
 
@@ -326,18 +390,16 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		return nil, fmt.Errorf("create per-connection agent: %w", err)
 	}
 
-	// Register builtin tools from per-connection CuratedStore
 	if memSvc != nil && memSvc.CuratedStore() != nil {
 		store := memSvc.CuratedStore()
 		connAgent.RegisterBuiltinTool(tools.MemoryToolSpec(store))
-		connAgent.RegisterBuiltinTool(tools.SessionSearchToolSpec(s.deviceCfg.ManagerURL(), deviceID))
-		logging.Infof("wsserver[%s]: registered memory system tools", sessionID)
+		connAgent.RegisterBuiltinTool(tools.SessionSearchToolSpec(managerURLFromDeps(s.deps), deviceID))
+		logging.Infof("xiaozhi-connector[%s]: registered memory system tools", sessionID)
 	}
 
-	// Register knowledge_search tool (independent of memory service)
-	knowClient := knowledge.NewSearchClient(s.deviceCfg.ManagerURL(), deviceID)
+	knowClient := knowledge.NewSearchClient(managerURLFromDeps(s.deps), deviceID)
 	connAgent.RegisterBuiltinTool(tools.KnowledgeSearchToolSpec(knowClient))
-	logging.Infof("wsserver[%s]: registered knowledge search tool", sessionID)
+	logging.Infof("xiaozhi-connector[%s]: registered knowledge search tool", sessionID)
 
 	if err := ttsProc.Start(ctx); err != nil {
 		cancel()
@@ -349,6 +411,7 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		AddStage(agent.NewAgentStage(connAgent, sess)).
 		AddStage(audio.NewTTSStage(ttsProc)).
 		AddStage(wsstages.NewWSOutputStage(safeConn, sessionID, outputCodec, wsserverTTSSampleRate, frameDurationMs, preBufferFrames)).
+		AddStage(xstages.NewWSOutputStage(safeConn, sessionID, outputCodec, ttsSampleRate, frameDurationMs, preBufferFrames)).
 		Connect("asr", "agent").
 		Connect("asr", "ws_output").
 		Connect("agent", "tts").
@@ -368,28 +431,23 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 		return nil, err
 	}
 
-	// ws_output never produces pipeline output (it's a pure sink), so this
-	// only logs internal pipeline errors and exits when pl.Output() closes
-	// on Stop.
 	go func() {
 		for msg := range pl.Output() {
 			if msg.IsError() {
-				logging.Warnf("wsserver[%s]: pipeline error: %v", sessionID, msg.Metadata.Error)
+				logging.Warnf("xiaozhi-connector[%s]: pipeline error: %v", sessionID, msg.Metadata.Error)
 			}
 		}
 	}()
 
-	// If device-MCP was negotiated, kick off the handshake now.
 	if devMCP != nil {
 		go func() {
 			if err := devMCP.Initialize(ctx); err != nil {
-				logging.Warnf("wsserver[%s]: device MCP initialize failed: %v", sessionID, err)
+				logging.Warnf("xiaozhi-connector[%s]: device MCP initialize failed: %v", sessionID, err)
 			}
 		}()
 	}
 
 	return &wsConnection{
-		server:    s,
 		rawConn:   rawConn,
 		safeConn:  safeConn,
 		sessionID: sessionID,
@@ -408,7 +466,7 @@ func (s *Server) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMess
 	}, nil
 }
 
-func (s *Server) newRecognizer(cfg *config.AppConfig) (asr.Recognizer, error) {
+func (s *XiaozhiWSConnector) newRecognizer(cfg *config.AppConfig) (asr.Recognizer, error) {
 	asrCfg := cfg.Provider.ASR.Aliyun
 	return asr.NewRecognizer(asr.ProviderConfig{
 		Type: cfg.Provider.ASR.Type,
@@ -422,7 +480,7 @@ func (s *Server) newRecognizer(cfg *config.AppConfig) (asr.Recognizer, error) {
 	})
 }
 
-func (s *Server) newTTSProvider(cfg *config.AppConfig) (tts.Provider, error) {
+func (s *XiaozhiWSConnector) newTTSProvider(cfg *config.AppConfig) (tts.Provider, error) {
 	ttsCfg := cfg.Provider.TTS.Aliyun
 	return tts.NewProvider(tts.ProviderConfig{
 		Type: cfg.Provider.TTS.Type,
@@ -433,7 +491,7 @@ func (s *Server) newTTSProvider(cfg *config.AppConfig) (tts.Provider, error) {
 			Model:                ttsCfg.Model,
 			Voice:                ttsCfg.Voice,
 			Format:               "pcm",
-			SampleRate:           wsserverTTSSampleRate,
+			SampleRate:           ttsSampleRate,
 			Volume:               ttsCfg.Volume,
 			Rate:                 ttsCfg.Rate,
 			Pitch:                ttsCfg.Pitch,
@@ -444,15 +502,75 @@ func (s *Server) newTTSProvider(cfg *config.AppConfig) (tts.Provider, error) {
 	})
 }
 
-// sendHelloResponse replies with the server-assigned session_id and the
-// audio_params the server will actually use for TTS output (downstream).
-// Upstream (client -> server) audio keeps using whatever the client
-// declared in its hello — the server resamples as needed rather than
-// forcing the client to match a server-picked rate. FrameDuration is echoed
-// back because it determines the client's Opus decoding/PCM framing for the
-// downstream stream; PlayBufferDuration is not echoed back — it's the
-// client's own buffer size, not something the server negotiates a value
-// for (see computePreBufferFrames, which only consumes it).
+// readHello blocks for the first text frame and parses it as a hello.
+func (s *XiaozhiWSConnector) readHello(conn *websocket.Conn) (*wsproto.HelloMessage, error) {
+	_ = conn.SetReadDeadline(time.Now().Add(helloTimeout))
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
+
+	msgType, data, err := conn.ReadMessage()
+	if err != nil {
+		return nil, fmt.Errorf("read hello: %w", err)
+	}
+	if msgType != websocket.TextMessage {
+		return nil, fmt.Errorf("expected text frame for hello handshake, got message type %d", msgType)
+	}
+
+	msg, err := wsproto.ParseClientMessage(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse hello: %w", err)
+	}
+	hello, ok := msg.(*wsproto.HelloMessage)
+	if !ok {
+		return nil, fmt.Errorf("expected hello as the first message, got %T", msg)
+	}
+	return hello, nil
+}
+
+// computePreBufferFrames converts playback buffer duration to a frame count.
+func computePreBufferFrames(playBufferDurationMs, frameDurationMs int) int {
+	if playBufferDurationMs <= 0 || frameDurationMs <= 0 {
+		return defaultPreBufferFrames
+	}
+	n := playBufferDurationMs / frameDurationMs
+	if n < minPreBufferFrames {
+		n = minPreBufferFrames
+	}
+	if n > maxPreBufferFrames {
+		n = maxPreBufferFrames
+	}
+	return n
+}
+
+// managerURLFromDeps extracts the manager URL from dependencies.
+func managerURLFromDeps(deps *connector.Dependencies) string {
+	if deps != nil && deps.DeviceCfgLoader != nil {
+		return deps.DeviceCfgLoader.ManagerURL()
+	}
+	return ""
+}
+
+// wsConnection holds all per-connection state and resources.
+type wsConnection struct {
+	rawConn   *websocket.Conn
+	safeConn  *xstages.SafeConn
+	sessionID string
+	mode      wsproto.Mode
+
+	asrProc  audio.ASRProcessor
+	ttsProc  audio.TTSProcessor
+	pl       pipeline.Pipeline
+	audioSrc *xstages.WSAudioSource
+
+	connMgr   *tools.Registry
+	connAgent *agent.Agent
+	memSvc    *memory.Service
+	iotMgr    *iotManager
+	deviceMCP *deviceMCPClient
+
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
 func (c *wsConnection) sendHelloResponse(hello *wsproto.HelloMessage) error {
 	format := hello.AudioParams.Format
 	if format == "" {
@@ -468,7 +586,7 @@ func (c *wsConnection) sendHelloResponse(hello *wsproto.HelloMessage) error {
 	}
 	resp := wsproto.NewHelloResponse(c.sessionID, wsproto.AudioParams{
 		Format:        format,
-		SampleRate:    wsserverTTSSampleRate,
+		SampleRate:    ttsSampleRate,
 		Channels:      channels,
 		FrameDuration: frameDurationMs,
 		BitsPerSample: supportedBitsPerSample,
@@ -476,19 +594,16 @@ func (c *wsConnection) sendHelloResponse(hello *wsproto.HelloMessage) error {
 	return c.safeConn.WriteJSON(resp)
 }
 
-// close releases every per-connection resource. It's safe to call exactly
-// once per connection (via defer in handleConnection) and must run on every
-// exit path, including setup failures partway through newConnection.
 func (c *wsConnection) close() {
-	logging.Infof("wsserver[%s]: cleaning up connection resources", c.sessionID)
+	logging.Infof("xiaozhi-connector[%s]: cleaning up connection resources", c.sessionID)
 	if c.pl != nil {
 		if err := c.pl.Stop(); err != nil {
-			logging.Warnf("wsserver[%s]: stop pipeline error: %v", c.sessionID, err)
+			logging.Warnf("xiaozhi-connector[%s]: stop pipeline error: %v", c.sessionID, err)
 		}
 	}
 	if c.ttsProc != nil {
 		if err := c.ttsProc.Stop(); err != nil {
-			logging.Warnf("wsserver[%s]: stop TTSProcessor error: %v", c.sessionID, err)
+			logging.Warnf("xiaozhi-connector[%s]: stop TTSProcessor error: %v", c.sessionID, err)
 		}
 	}
 	if c.audioSrc != nil {
@@ -502,8 +617,6 @@ func (c *wsConnection) close() {
 	}
 }
 
-// readLoop drains WebSocket frames until the connection closes or errors:
-// binary frames are audio, text frames are protocol control messages.
 func (c *wsConnection) readLoop() {
 	for {
 		msgType, data, err := c.rawConn.ReadMessage()
@@ -523,7 +636,7 @@ func (c *wsConnection) readLoop() {
 func (c *wsConnection) handleTextMessage(data []byte) {
 	msg, err := wsproto.ParseClientMessage(data)
 	if err != nil {
-		logging.Warnf("wsserver[%s]: ignoring invalid message: %v", c.sessionID, err)
+		logging.Warnf("xiaozhi-connector[%s]: ignoring invalid message: %v", c.sessionID, err)
 		return
 	}
 
@@ -533,36 +646,42 @@ func (c *wsConnection) handleTextMessage(data []byte) {
 	case *wsproto.AbortMessage:
 		c.handleAbort()
 	case *wsproto.HelloMessage:
-		logging.Warnf("wsserver[%s]: ignoring duplicate hello after handshake", c.sessionID)
+		logging.Warnf("xiaozhi-connector[%s]: ignoring duplicate hello after handshake", c.sessionID)
 	case *wsproto.IoTMessage:
-		c.handleIoT(m)
+		if len(m.Descriptors) > 0 {
+			c.iotMgr.handleDescriptors(m.Descriptors)
+		}
+		if len(m.States) > 0 {
+			c.iotMgr.handleStates(m.States)
+		}
 	case *wsproto.MCPMessage:
-		c.handleDeviceMCP(m)
+		if c.deviceMCP == nil {
+			logging.Warnf("xiaozhi-connector[%s]: received mcp message but device MCP not enabled", c.sessionID)
+			return
+		}
+		raw, err := json.Marshal(m.Payload)
+		if err != nil {
+			logging.Warnf("xiaozhi-connector[%s]: device mcp payload marshal error: %v", c.sessionID, err)
+			return
+		}
+		c.deviceMCP.HandleMessage(c.ctx, raw)
 	}
 }
 
-// handleListen drives manual-mode turn boundaries (BeginTurn/EndTurn are
-// no-ops in auto mode, see audio.ASRProcessor) and text injection. In auto
-// mode, listen start/stop are informational only: VAD already triggers
-// OnSpeechStart -> MessageTypeInterrupt on its own, so a new listen start
-// must not also force an interrupt here — mirroring xiaozhi-esp32-server's
-// behavior where manual mode never auto-interrupts an in-progress reply.
 func (c *wsConnection) handleListen(m *wsproto.ListenMessage) {
 	switch m.State {
 	case wsproto.ListenStart:
 		if c.mode == wsproto.ModeManual {
 			if err := c.asrProc.BeginTurn(c.ctx); err != nil {
-				logging.Warnf("wsserver[%s]: BeginTurn failed: %v", c.sessionID, err)
+				logging.Warnf("xiaozhi-connector[%s]: BeginTurn failed: %v", c.sessionID, err)
 			}
 		}
-
 	case wsproto.ListenStop:
 		if c.mode == wsproto.ModeManual {
 			if err := c.asrProc.EndTurn(c.ctx); err != nil {
-				logging.Warnf("wsserver[%s]: EndTurn failed: %v", c.sessionID, err)
+				logging.Warnf("xiaozhi-connector[%s]: EndTurn failed: %v", c.sessionID, err)
 			}
 		}
-
 	case wsproto.ListenDetect:
 		if m.Text == "" {
 			return
@@ -582,26 +701,4 @@ func (c *wsConnection) handleAbort() {
 	}:
 	case <-c.ctx.Done():
 	}
-}
-
-func (c *wsConnection) handleIoT(m *wsproto.IoTMessage) {
-	if len(m.Descriptors) > 0 {
-		c.iotMgr.handleDescriptors(m.Descriptors)
-	}
-	if len(m.States) > 0 {
-		c.iotMgr.handleStates(m.States)
-	}
-}
-
-func (c *wsConnection) handleDeviceMCP(m *wsproto.MCPMessage) {
-	if c.deviceMCP == nil {
-		logging.Warnf("wsserver[%s]: received mcp message but device MCP not enabled", c.sessionID)
-		return
-	}
-	raw, err := json.Marshal(m.Payload)
-	if err != nil {
-		logging.Warnf("wsserver[%s]: device mcp payload marshal error: %v", c.sessionID, err)
-		return
-	}
-	c.deviceMCP.HandleMessage(c.ctx, raw)
 }

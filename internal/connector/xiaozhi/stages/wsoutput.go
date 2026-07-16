@@ -1,4 +1,4 @@
-package stages
+package xstages
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/logging"
 	textutil "github.com/liuscraft/orion-x/internal/text"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
+	"github.com/liuscraft/orion-x/internal/connector/xiaozhi/wsproto"
 )
 
 // defaultAudioFrameDurationMs is the fallback used when NewWSOutputStage is

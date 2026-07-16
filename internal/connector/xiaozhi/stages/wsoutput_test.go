@@ -1,4 +1,4 @@
-package stages_test
+package xstages_test
 
 import (
 	"context"
@@ -15,6 +15,10 @@ import (
 	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
+	"github.com/liuscraft/orion-x/internal/audio"
+	"github.com/liuscraft/orion-x/internal/pipeline"
+	"github.com/liuscraft/orion-x/internal/connector/xiaozhi/wsproto"
+	xstages "github.com/liuscraft/orion-x/internal/connector/xiaozhi/stages"
 )
 
 // newTestWSConnPair spins up a real WebSocket server (httptest) and dials
@@ -98,7 +102,7 @@ func testFrameSamples(start int16, frames int) []int16 {
 
 func TestWSOutputStage_STTMessage(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -122,7 +126,7 @@ func TestWSOutputStage_STTMessage(t *testing.T) {
 
 func TestWSOutputStage_TTSChunkFlow(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -164,7 +168,7 @@ func TestWSOutputStage_TTSChunkFlow(t *testing.T) {
 
 func TestWSOutputStage_InterruptSendsStopIfStarted(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -186,7 +190,7 @@ func TestWSOutputStage_InterruptSendsStopIfStarted(t *testing.T) {
 
 func TestWSOutputStage_InterruptBeforeTTSStartSendsNothing(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -205,7 +209,7 @@ func TestWSOutputStage_InterruptBeforeTTSStartSendsNothing(t *testing.T) {
 
 func TestWSOutputStage_IgnoresFinishedAndErrorMessages(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -225,7 +229,7 @@ func TestWSOutputStage_IgnoresFinishedAndErrorMessages(t *testing.T) {
 
 func TestWSOutputStage_PacesFramesBeyondPreBuffer(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -259,7 +263,7 @@ func TestWSOutputStage_PacesFramesBeyondPreBuffer(t *testing.T) {
 
 func TestWSOutputStage_InterruptDropsQueuedFrames(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := stages.NewWSOutputStage(stages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -295,7 +299,7 @@ func TestWSOutputStage_InterruptDropsQueuedFrames(t *testing.T) {
 
 func TestSafeConn_ConcurrentWritesDoNotRace(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	safe := stages.NewSafeConn(server)
+	safe := xstages.NewSafeConn(server)
 
 	done := make(chan struct{})
 	go func() {
