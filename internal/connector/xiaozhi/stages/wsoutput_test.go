@@ -11,15 +11,13 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/liuscraft/orion-x/cmd/wsserver/stages"
-	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 	"github.com/liuscraft/orion-x/internal/audio"
-	"github.com/liuscraft/orion-x/pkg/pipeline"
-	"github.com/liuscraft/orion-x/internal/audio"
-	"github.com/liuscraft/orion-x/internal/pipeline"
 	"github.com/liuscraft/orion-x/internal/connector/xiaozhi/wsproto"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 	xstages "github.com/liuscraft/orion-x/internal/connector/xiaozhi/stages"
 )
+
+// newTestWSConnPair spins up a real WebSocket server (httptest) and dials
 
 // newTestWSConnPair spins up a real WebSocket server (httptest) and dials
 // it, returning the server-side and client-side *websocket.Conn. This lets

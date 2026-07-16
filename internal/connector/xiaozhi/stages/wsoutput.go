@@ -9,7 +9,6 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/liuscraft/orion-x/cmd/wsserver/wsproto"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
 	"github.com/liuscraft/orion-x/internal/logging"

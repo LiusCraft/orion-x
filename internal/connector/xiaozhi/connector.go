@@ -410,7 +410,6 @@ func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wspro
 		AddStage(audio.NewASRStage(asrProc, audioSrc)).
 		AddStage(agent.NewAgentStage(connAgent, sess)).
 		AddStage(audio.NewTTSStage(ttsProc)).
-		AddStage(wsstages.NewWSOutputStage(safeConn, sessionID, outputCodec, wsserverTTSSampleRate, frameDurationMs, preBufferFrames)).
 		AddStage(xstages.NewWSOutputStage(safeConn, sessionID, outputCodec, ttsSampleRate, frameDurationMs, preBufferFrames)).
 		Connect("asr", "agent").
 		Connect("asr", "ws_output").
