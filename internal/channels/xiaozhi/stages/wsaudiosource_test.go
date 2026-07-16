@@ -7,7 +7,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
-	xstages "github.com/liuscraft/orion-x/internal/connector/xiaozhi/stages"
+	xstages "github.com/liuscraft/orion-x/internal/channels/xiaozhi/stages"
 )
 
 func newPCMCodecForTest(t *testing.T) codec.Codec {

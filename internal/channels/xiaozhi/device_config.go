@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/config"
-	"github.com/liuscraft/orion-x/internal/connector"
+	"github.com/liuscraft/orion-x/internal/channels"
 )
 
 // DeviceConfigLoader resolves a per-device AppConfig from the manager service.
@@ -65,7 +65,7 @@ func (l *HTTPDeviceConfigLoader) LoadConfig(deviceID string) (*config.AppConfig,
 }
 
 // ListDevicesWithTGBot returns all devices that have a tg_bot_token set.
-func (l *HTTPDeviceConfigLoader) ListDevicesWithTGBot() ([]connector.DeviceTGBotInfo, error) {
+func (l *HTTPDeviceConfigLoader) ListDevicesWithTGBot() ([]channels.DeviceTGBotInfo, error) {
 	u := l.managerURL + "/internal/devices/tg-bots"
 	resp, err := l.client.Get(u)
 	if err != nil {
@@ -77,7 +77,7 @@ func (l *HTTPDeviceConfigLoader) ListDevicesWithTGBot() ([]connector.DeviceTGBot
 		return nil, fmt.Errorf("list tg bots: unexpected status %d", resp.StatusCode)
 	}
 
-	var list []connector.DeviceTGBotInfo
+	var list []channels.DeviceTGBotInfo
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
 		return nil, fmt.Errorf("list tg bots: decode: %w", err)
 	}

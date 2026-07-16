@@ -8,7 +8,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/tools"
-	"github.com/liuscraft/orion-x/internal/connector/xiaozhi/wsproto"
+	"github.com/liuscraft/orion-x/internal/channels/xiaozhi/wsproto"
 )
 
 // iotProperty mirrors wsproto.IoTProperty but stores a live value.

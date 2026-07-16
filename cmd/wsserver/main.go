@@ -16,9 +16,9 @@ import (
 	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
 	"github.com/liuscraft/orion-x/internal/tools"
 
-	"github.com/liuscraft/orion-x/internal/connector"
-	"github.com/liuscraft/orion-x/internal/connector/tg"
-	"github.com/liuscraft/orion-x/internal/connector/xiaozhi"
+	"github.com/liuscraft/orion-x/internal/channels"
+	"github.com/liuscraft/orion-x/internal/channels/tg"
+	"github.com/liuscraft/orion-x/internal/channels/xiaozhi"
 )
 
 func main() {
@@ -71,28 +71,28 @@ func main() {
 		}
 	}()
 
-	// Shared dependencies for connectors
+	// Shared dependencies for channels
 	deviceCfgLoader := xiaozhi.NewHTTPDeviceConfigLoader(cfg.Manager.URL)
-	deps := &connector.Dependencies{
+	deps := &channels.Dependencies{
 		DeviceCfgLoader: deviceCfgLoader,
 	}
 
-	connMgr := connector.NewManager(deps)
+	chMgr := channels.NewManager(deps)
 
-	// Xiaozhi WS Connector
-	wsConn := xiaozhi.NewXiaozhiWSConnector(cfg, deps, toolMgr, memorySvc)
-	connMgr.Register(wsConn)
+	// Xiaozhi WS Channel
+	wsCh := xiaozhi.NewXiaozhiWSChannel(cfg, deps, toolMgr, memorySvc)
+	chMgr.Register(wsCh)
 
-	// TG Bot Connector — started automatically; refreshes device list
+	// TG Bot Channel — started automatically; refreshes device list
 	// from the manager and starts bot instances for devices with tokens.
-	tgConn := tg.NewTGConnector(deps, toolMgr, memorySvc)
-	connMgr.Register(tgConn)
+	tgCh := tg.NewTGChannel(deps, toolMgr, memorySvc)
+	chMgr.Register(tgCh)
 
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
 
-	if err := connMgr.Start(ctx); err != nil {
-		logging.Fatalf("Failed to start connectors: %v", err)
+	if err := chMgr.Start(ctx); err != nil {
+		logging.Fatalf("Failed to start channels: %v", err)
 	}
 
 	logging.Infof("========================================")
@@ -106,7 +106,7 @@ func main() {
 
 	logging.Infof("Shutting down...")
 	cancel()
-	connMgr.Stop()
+	chMgr.Stop()
 
 	logging.Infof("Orion-X Server stopped.")
 	logging.Sync()
