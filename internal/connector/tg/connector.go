@@ -238,7 +238,7 @@ func (c *TGConnector) handleText(ctx context.Context, deviceID string, chatID in
 	if bot == nil {
 		return
 	}
-	bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+	_, _ = bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
 
 	connMgr := c.toolsMgr.Clone()
 	agentCfg := agent.Config{
@@ -305,9 +305,6 @@ func (c *TGConnector) botForDevice(deviceID string) *tgbotapi.BotAPI {
 }
 
 // sessionsMu guards the sessions map. Re-initialised per-device.
-type chatSession struct {
-	sess *session.Session
-}
 
 // getOrCreateSession returns an existing session for this (device, chat) pair.
 func (c *TGConnector) getOrCreateSession(deviceID string, chatID int64, deviceCfg *config.AppConfig) *session.Session {
