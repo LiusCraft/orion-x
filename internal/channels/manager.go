@@ -1,4 +1,4 @@
-package connector
+package channels
 
 import (
 	"context"
@@ -28,46 +28,46 @@ type DeviceTGBotInfo struct {
 	VoicebotID string `json:"voicebot_id"`
 }
 
-// Dependencies 是 ConnectorManager 注入给各 Connector 的共享依赖。
+// Dependencies 是 Manager 注入给各 Channel 的共享依赖。
 type Dependencies struct {
 	// DeviceCfgLoader 用于按设备 ID 加载配置（含 LLM/ASR/TTS/MCP 等）。
 	DeviceCfgLoader DeviceConfigLoader
 }
 
-// Manager 管理多个 Connector 的生命周期。进程级单例。
+// Manager 管理多个 Channel 的生命周期。进程级单例。
 type Manager struct {
-	deps       *Dependencies
-	connectors map[string]Connector
+	deps     *Dependencies
+	channels map[string]Channel
 
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
 }
 
-// NewManager 创建 ConnectorManager。
+// NewManager 创建 Manager。
 func NewManager(deps *Dependencies) *Manager {
 	return &Manager{
-		deps:       deps,
-		connectors: make(map[string]Connector),
+		deps:     deps,
+		channels: make(map[string]Channel),
 	}
 }
 
-// Register 注册一个 Connector。已存在同名 Connector 时会 panic。
-func (m *Manager) Register(c Connector) {
+// Register 注册一个 Channel。已存在同名 Channel 时会 panic。
+func (m *Manager) Register(c Channel) {
 	name := c.Name()
-	if _, exists := m.connectors[name]; exists {
-		logging.Fatalf("connector %q already registered", name)
+	if _, exists := m.channels[name]; exists {
+		logging.Fatalf("channel %q already registered", name)
 	}
-	m.connectors[name] = c
-	logging.Infof("connector: registered %q (%s)", name, c.Info().DisplayName)
+	m.channels[name] = c
+	logging.Infof("channel: registered %q (%s)", name, c.Info().DisplayName)
 }
 
-// Start 启动所有已注册的 Connector。按注册顺序依次启动。
+// Start 启动所有已注册的 Channel。按注册顺序依次启动。
 func (m *Manager) Start(ctx context.Context) error {
 	m.rootCtx, m.rootCancel = context.WithCancel(ctx)
 
-	for name, c := range m.connectors {
+	for name, c := range m.channels {
 		info := c.Info()
-		logging.Infof("connector: starting %q (%s, %s)", name, info.DisplayName, info.Type)
+		logging.Infof("channel: starting %q (%s, %s)", name, info.DisplayName, info.Type)
 		if err := c.Start(m.rootCtx); err != nil {
 			return err
 		}
@@ -75,20 +75,20 @@ func (m *Manager) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop 优雅停止所有 Connector。先并行触发 Stop，再等待所有 goroutine 退出。
+// Stop 优雅停止所有 Channel。先并行触发 Stop，再等待所有 goroutine 退出。
 func (m *Manager) Stop() {
 	if m.rootCancel != nil {
 		m.rootCancel()
 	}
 
 	var wg sync.WaitGroup
-	for name, c := range m.connectors {
+	for name, c := range m.channels {
 		wg.Add(1)
-		go func(name string, c Connector) {
+		go func(name string, c Channel) {
 			defer wg.Done()
-			logging.Infof("connector: stopping %q", name)
+			logging.Infof("channel: stopping %q", name)
 			if err := c.Stop(m.rootCtx); err != nil {
-				logging.Warnf("connector: stop %q error: %v", name, err)
+				logging.Warnf("channel: stop %q error: %v", name, err)
 			}
 		}(name, c)
 	}

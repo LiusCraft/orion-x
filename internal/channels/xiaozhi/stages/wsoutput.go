@@ -14,7 +14,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/logging"
 	textutil "github.com/liuscraft/orion-x/internal/text"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
-	"github.com/liuscraft/orion-x/internal/connector/xiaozhi/wsproto"
+	"github.com/liuscraft/orion-x/internal/channels/xiaozhi/wsproto"
 )
 
 // defaultAudioFrameDurationMs is the fallback used when NewWSOutputStage is

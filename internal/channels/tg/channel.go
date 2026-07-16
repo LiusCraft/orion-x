@@ -1,5 +1,5 @@
-// Package tg implements a multi-device Telegram Bot connector.
-// Each device can bind its own TG Bot Token. The connector polls the manager
+// Package tg implements a multi-device Telegram Bot channel.
+// Each device can bind its own TG Bot Token. The channel polls the manager
 // for all devices with tokens and manages one Bot polling instance per device.
 package tg
 
@@ -11,8 +11,8 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/liuscraft/orion-x/internal/agent"
+	"github.com/liuscraft/orion-x/internal/channels"
 	"github.com/liuscraft/orion-x/internal/config"
-	"github.com/liuscraft/orion-x/internal/connector"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/session"
@@ -29,11 +29,11 @@ type tgBotState struct {
 	cancel   context.CancelFunc // stops this bot's polling goroutine
 }
 
-// TGConnector implements connector.Connector for Telegram Bot.
+// TGChannel implements channels.Channel for Telegram Bot.
 // It polls the manager for devices with TG Bot Tokens and manages one
 // polling goroutine per token.
-type TGConnector struct {
-	deps  *connector.Dependencies
+type TGChannel struct {
+	deps     *channels.Dependencies
 	toolsMgr *tools.Manager
 	memSvc   *memory.Service
 
@@ -45,9 +45,9 @@ type TGConnector struct {
 	done       chan struct{}
 }
 
-// NewTGConnector creates a new Telegram Bot connector.
-func NewTGConnector(deps *connector.Dependencies, toolsMgr *tools.Manager, memSvc *memory.Service) *TGConnector {
-	return &TGConnector{
+// NewTGChannel creates a new Telegram Bot channel.
+func NewTGChannel(deps *channels.Dependencies, toolsMgr *tools.Manager, memSvc *memory.Service) *TGChannel {
+	return &TGChannel{
 		deps:     deps,
 		toolsMgr: toolsMgr,
 		memSvc:   memSvc,
@@ -56,27 +56,27 @@ func NewTGConnector(deps *connector.Dependencies, toolsMgr *tools.Manager, memSv
 	}
 }
 
-func (c *TGConnector) Name() string { return "tg" }
+func (c *TGChannel) Name() string { return "tg" }
 
-func (c *TGConnector) Info() connector.ConnectorInfo {
-	return connector.NewConnectorInfo(
+func (c *TGChannel) Info() channels.ChannelInfo {
+	return channels.NewChannelInfo(
 		"tg",
 		"Telegram Bot",
-		connector.ConnectorPolling,
-		[]connector.Capability{connector.CapText, connector.CapVoiceFile},
+		channels.ChannelPolling,
+		[]channels.Capability{channels.CapText, channels.CapVoiceFile},
 	)
 }
 
 // Start begins refreshing the device list and starting bots.
-func (c *TGConnector) Start(ctx context.Context) error {
+func (c *TGChannel) Start(ctx context.Context) error {
 	c.rootCtx, c.rootCancel = context.WithCancel(ctx)
-	logging.Infof("tg connector: starting, will poll manager for devices with TG bot tokens")
+	logging.Infof("tg channel: starting, will poll manager for devices with TG bot tokens")
 	go c.refreshLoop()
 	return nil
 }
 
 // Stop stops all bot instances and the refresh loop.
-func (c *TGConnector) Stop(ctx context.Context) error {
+func (c *TGChannel) Stop(ctx context.Context) error {
 	if c.rootCancel != nil {
 		c.rootCancel()
 	}
@@ -90,7 +90,7 @@ func (c *TGConnector) Stop(ctx context.Context) error {
 
 // refreshLoop periodically fetches all devices with tg_bot_token from the
 // manager and reconciles the active bot instances.
-func (c *TGConnector) refreshLoop() {
+func (c *TGChannel) refreshLoop() {
 	defer close(c.done)
 
 	c.refresh()
@@ -107,10 +107,10 @@ func (c *TGConnector) refreshLoop() {
 	}
 }
 
-func (c *TGConnector) refresh() {
+func (c *TGChannel) refresh() {
 	devices, err := c.deps.DeviceCfgLoader.ListDevicesWithTGBot()
 	if err != nil {
-		logging.Errorf("tg connector: refresh failed: %v", err)
+		logging.Errorf("tg channel: refresh failed: %v", err)
 		return
 	}
 
@@ -125,7 +125,7 @@ func (c *TGConnector) refresh() {
 	c.mu.Lock()
 	for devID, state := range c.bots {
 		if !current[devID] {
-			logging.Infof("tg connector: stopping bot for device %q", devID)
+			logging.Infof("tg channel: stopping bot for device %q", devID)
 			state.cancel()
 			delete(c.bots, devID)
 		}
@@ -134,7 +134,7 @@ func (c *TGConnector) refresh() {
 }
 
 // ensureBotDevice starts a bot for a device if not already running.
-func (c *TGConnector) ensureBotDevice(dev connector.DeviceTGBotInfo) {
+func (c *TGChannel) ensureBotDevice(dev channels.DeviceTGBotInfo) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -144,7 +144,7 @@ func (c *TGConnector) ensureBotDevice(dev connector.DeviceTGBotInfo) {
 
 	bot, err := tgbotapi.NewBotAPI(dev.TgBotToken)
 	if err != nil {
-		logging.Errorf("tg connector: init bot for device %q: %v", dev.DeviceID, err)
+		logging.Errorf("tg channel: init bot for device %q: %v", dev.DeviceID, err)
 		return
 	}
 
@@ -156,12 +156,12 @@ func (c *TGConnector) ensureBotDevice(dev connector.DeviceTGBotInfo) {
 	}
 	c.bots[dev.DeviceID] = state
 
-	logging.Infof("tg connector: bot started for device %q (@%s)", dev.DeviceID, bot.Self.UserName)
+	logging.Infof("tg channel: bot started for device %q (@%s)", dev.DeviceID, bot.Self.UserName)
 	go c.pollBot(botCtx, state)
 }
 
 // pollBot runs the polling loop for a single bot instance.
-func (c *TGConnector) pollBot(ctx context.Context, state *tgBotState) {
+func (c *TGChannel) pollBot(ctx context.Context, state *tgBotState) {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 30
 
@@ -181,7 +181,7 @@ func (c *TGConnector) pollBot(ctx context.Context, state *tgBotState) {
 }
 
 // handleUpdate processes a single Telegram update for the given device.
-func (c *TGConnector) handleUpdate(deviceID string, update tgbotapi.Update) {
+func (c *TGChannel) handleUpdate(deviceID string, update tgbotapi.Update) {
 	if update.Message == nil {
 		return
 	}
@@ -222,7 +222,7 @@ func (c *TGConnector) handleUpdate(deviceID string, update tgbotapi.Update) {
 	}
 }
 
-func (c *TGConnector) handleCommand(ctx context.Context, deviceID string, chatID int64, tgUserID int64, msg *tgbotapi.Message, sess *session.Session, deviceCfg *config.AppConfig) {
+func (c *TGChannel) handleCommand(ctx context.Context, deviceID string, chatID int64, tgUserID int64, msg *tgbotapi.Message, sess *session.Session, deviceCfg *config.AppConfig) {
 	switch msg.Command() {
 	case "start":
 		c.reply(deviceID, chatID, "你好！我是 Orion-X 智能助手。")
@@ -231,7 +231,7 @@ func (c *TGConnector) handleCommand(ctx context.Context, deviceID string, chatID
 	}
 }
 
-func (c *TGConnector) handleText(ctx context.Context, deviceID string, chatID int64, tgUserID int64, text string, sess *session.Session, deviceCfg *config.AppConfig) {
+func (c *TGChannel) handleText(ctx context.Context, deviceID string, chatID int64, tgUserID int64, text string, sess *session.Session, deviceCfg *config.AppConfig) {
 	logging.Infof("tg[%s]: text from %d: %q", deviceID, tgUserID, text)
 
 	bot := c.botForDevice(deviceID)
@@ -283,7 +283,7 @@ func (c *TGConnector) handleText(ctx context.Context, deviceID string, chatID in
 	c.reply(deviceID, chatID, response)
 }
 
-func (c *TGConnector) reply(deviceID string, chatID int64, text string) {
+func (c *TGChannel) reply(deviceID string, chatID int64, text string) {
 	bot := c.botForDevice(deviceID)
 	if bot == nil {
 		return
@@ -295,7 +295,7 @@ func (c *TGConnector) reply(deviceID string, chatID int64, text string) {
 }
 
 // botForDevice returns the BotAPI for a device, or nil.
-func (c *TGConnector) botForDevice(deviceID string) *tgbotapi.BotAPI {
+func (c *TGChannel) botForDevice(deviceID string) *tgbotapi.BotAPI {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if state, ok := c.bots[deviceID]; ok {
@@ -307,7 +307,7 @@ func (c *TGConnector) botForDevice(deviceID string) *tgbotapi.BotAPI {
 // sessionsMu guards the sessions map. Re-initialised per-device.
 
 // getOrCreateSession returns an existing session for this (device, chat) pair.
-func (c *TGConnector) getOrCreateSession(deviceID string, chatID int64, deviceCfg *config.AppConfig) *session.Session {
+func (c *TGChannel) getOrCreateSession(deviceID string, chatID int64, deviceCfg *config.AppConfig) *session.Session {
 	// Use a simple map for now. For MVP this is fine.
 	return session.New(session.SessionMeta{
 		Model: deviceCfg.Provider.LLM.OpenAI.Model,

@@ -13,9 +13,9 @@ import (
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
+	"github.com/liuscraft/orion-x/internal/channels"
+	xstages "github.com/liuscraft/orion-x/internal/channels/xiaozhi/stages"
 	"github.com/liuscraft/orion-x/internal/config"
-	"github.com/liuscraft/orion-x/internal/connector"
-	xstages "github.com/liuscraft/orion-x/internal/connector/xiaozhi/stages"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
@@ -24,7 +24,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
-	"github.com/liuscraft/orion-x/internal/connector/xiaozhi/wsproto"
+	"github.com/liuscraft/orion-x/internal/channels/xiaozhi/wsproto"
 )
 
 // independent of cmd/voicebot's 22050Hz (each entry point constructs its
@@ -50,12 +50,12 @@ const (
 	helloTimeout           = 10 * time.Second
 )
 
-// XiaozhiWSConnector implements connector.Connector for the Xiaozhi ESP32
+// XiaozhiWSChannel implements channels.Channel for the Xiaozhi ESP32
 // WebSocket voice protocol. It manages an HTTP server for WebSocket upgrades
 // and creates per-connection DAG pipelines (ASR → Agent → TTS → output).
-type XiaozhiWSConnector struct {
+type XiaozhiWSChannel struct {
 	cfg   *Config
-	deps  *connector.Dependencies
+	deps  *channels.Dependencies
 
 	toolsMgr  *tools.Manager
 	memorySvc *memory.Service
@@ -68,9 +68,9 @@ type XiaozhiWSConnector struct {
 	connWG     sync.WaitGroup
 }
 
-// NewXiaozhiWSConnector creates a new Xiaozhi WS connector.
-func NewXiaozhiWSConnector(cfg *Config, deps *connector.Dependencies, toolsMgr *tools.Manager, memorySvc *memory.Service) *XiaozhiWSConnector {
-	return &XiaozhiWSConnector{
+// NewXiaozhiWSChannel creates a new Xiaozhi WS channel.
+func NewXiaozhiWSChannel(cfg *Config, deps *channels.Dependencies, toolsMgr *tools.Manager, memorySvc *memory.Service) *XiaozhiWSChannel {
+	return &XiaozhiWSChannel{
 		cfg:       cfg,
 		deps:      deps,
 		toolsMgr:  toolsMgr,
@@ -81,21 +81,21 @@ func NewXiaozhiWSConnector(cfg *Config, deps *connector.Dependencies, toolsMgr *
 	}
 }
 
-// Name returns the connector identifier.
-func (s *XiaozhiWSConnector) Name() string { return "xiaozhi" }
+// Name returns the channel identifier.
+func (s *XiaozhiWSChannel) Name() string { return "xiaozhi" }
 
-// Info returns connector metadata.
-func (s *XiaozhiWSConnector) Info() connector.ConnectorInfo {
-	return connector.NewConnectorInfo(
+// Info returns channel metadata.
+func (s *XiaozhiWSChannel) Info() channels.ChannelInfo {
+	return channels.NewChannelInfo(
 		"xiaozhi",
 		"Xiaozhi WebSocket",
-		connector.ConnectorServer,
-		[]connector.Capability{connector.CapText, connector.CapAudioStream},
+		channels.ChannelServer,
+		[]channels.Capability{channels.CapText, channels.CapAudioStream},
 	)
 }
 
 // Start starts the HTTP server and begins accepting WebSocket connections.
-func (s *XiaozhiWSConnector) Start(ctx context.Context) error {
+func (s *XiaozhiWSChannel) Start(ctx context.Context) error {
 	s.rootCtx, s.rootCancel = context.WithCancel(ctx)
 
 	mux := http.NewServeMux()
@@ -107,9 +107,9 @@ func (s *XiaozhiWSConnector) Start(ctx context.Context) error {
 	}
 
 	go func() {
-		logging.Infof("xiaozhi-connector: listening on %s (ws: %s)", s.cfg.Server.Addr, s.cfg.Server.WsPath)
+		logging.Infof("xiaozhi-channel: listening on %s (ws: %s)", s.cfg.Server.Addr, s.cfg.Server.WsPath)
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logging.Errorf("xiaozhi-connector: HTTP server error: %v", err)
+			logging.Errorf("xiaozhi-channel: HTTP server error: %v", err)
 		}
 	}()
 
@@ -118,7 +118,7 @@ func (s *XiaozhiWSConnector) Start(ctx context.Context) error {
 
 // Stop gracefully shuts down the HTTP server and waits for all connections
 // to finish, or until the context is cancelled.
-func (s *XiaozhiWSConnector) Stop(ctx context.Context) error {
+func (s *XiaozhiWSChannel) Stop(ctx context.Context) error {
 	if s.rootCancel != nil {
 		s.rootCancel()
 	}
@@ -137,7 +137,7 @@ func (s *XiaozhiWSConnector) Stop(ctx context.Context) error {
 
 	select {
 	case <-done:
-		logging.Infof("xiaozhi-connector: all connections closed cleanly")
+		logging.Infof("xiaozhi-channel: all connections closed cleanly")
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -145,7 +145,7 @@ func (s *XiaozhiWSConnector) Stop(ctx context.Context) error {
 }
 
 // handleWS upgrades an HTTP request to WebSocket and handles it asynchronously.
-func (s *XiaozhiWSConnector) handleWS(w http.ResponseWriter, r *http.Request) {
+func (s *XiaozhiWSChannel) handleWS(w http.ResponseWriter, r *http.Request) {
 	pick := func(header, query string) string {
 		if v := r.Header.Get(header); v != "" {
 			return v
@@ -157,12 +157,12 @@ func (s *XiaozhiWSConnector) handleWS(w http.ResponseWriter, r *http.Request) {
 	deviceID := pick("Device-Id", "device-id")
 	clientID := pick("Client-Id", "client-id")
 
-	logging.Infof("xiaozhi-connector: incoming connection — Authorization=%q ProtocolVersion=%q DeviceId=%q ClientId=%q RemoteAddr=%s",
+	logging.Infof("xiaozhi-channel: incoming connection — Authorization=%q ProtocolVersion=%q DeviceId=%q ClientId=%q RemoteAddr=%s",
 		authorization, protocolVersion, deviceID, clientID, r.RemoteAddr)
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		logging.Warnf("xiaozhi-connector: upgrade failed: %v", err)
+		logging.Warnf("xiaozhi-channel: upgrade failed: %v", err)
 		return
 	}
 
@@ -174,34 +174,34 @@ func (s *XiaozhiWSConnector) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleConnection handles the full lifecycle of a single WebSocket connection.
-func (s *XiaozhiWSConnector) handleConnection(rawConn *websocket.Conn) {
+func (s *XiaozhiWSChannel) handleConnection(rawConn *websocket.Conn) {
 	defer func() { _ = rawConn.Close() }()
 
 	hello, err := s.readHello(rawConn)
 	if err != nil {
-		logging.Warnf("xiaozhi-connector: handshake failed: %v", err)
+		logging.Warnf("xiaozhi-channel: handshake failed: %v", err)
 		return
 	}
 
 	c, err := s.newConnection(rawConn, hello)
 	if err != nil {
-		logging.Errorf("xiaozhi-connector: connection setup failed: %v", err)
+		logging.Errorf("xiaozhi-channel: connection setup failed: %v", err)
 		return
 	}
 	defer c.close()
 
 	if err := c.sendHelloResponse(hello); err != nil {
-		logging.Warnf("xiaozhi-connector[%s]: send hello response failed: %v", c.sessionID, err)
+		logging.Warnf("xiaozhi-channel[%s]: send hello response failed: %v", c.sessionID, err)
 		return
 	}
 
-	logging.Infof("xiaozhi-connector[%s]: connection established (device_id=%q, mode=%s)", c.sessionID, hello.DeviceID, c.mode)
+	logging.Infof("xiaozhi-channel[%s]: connection established (device_id=%q, mode=%s)", c.sessionID, hello.DeviceID, c.mode)
 	c.readLoop()
-	logging.Infof("xiaozhi-connector[%s]: connection closed", c.sessionID)
+	logging.Infof("xiaozhi-channel[%s]: connection closed", c.sessionID)
 }
 
 // newConnection builds all per-connection resources and the DAG pipeline.
-func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMessage) (*wsConnection, error) {
+func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMessage) (*wsConnection, error) {
 	if bps := hello.AudioParams.BitsPerSample; bps != 0 && bps != supportedBitsPerSample {
 		return nil, fmt.Errorf("unsupported bits_per_sample %d (only %d is supported)", bps, supportedBitsPerSample)
 	}
@@ -239,9 +239,9 @@ func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wspro
 	if clientSampleRate <= 0 {
 		clientSampleRate = audio.InternalSampleRate
 	}
-	channels := hello.AudioParams.Channels
-	if channels <= 0 {
-		channels = audio.InternalChannels
+	ch := hello.AudioParams.Channels
+	if ch <= 0 {
+		ch = audio.InternalChannels
 	}
 	frameDurationMs := hello.AudioParams.FrameDuration
 	if frameDurationMs <= 0 {
@@ -249,11 +249,11 @@ func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wspro
 	}
 	preBufferFrames := computePreBufferFrames(hello.AudioParams.PlayBufferDuration, frameDurationMs)
 
-	inputCodec, err := codec.New(codec.Format(format), clientSampleRate, channels, frameDurationMs)
+	inputCodec, err := codec.New(codec.Format(format), clientSampleRate, ch, frameDurationMs)
 	if err != nil {
 		return nil, err
 	}
-	outputCodec, err := codec.New(codec.Format(format), ttsSampleRate, channels, frameDurationMs)
+	outputCodec, err := codec.New(codec.Format(format), ttsSampleRate, ch, frameDurationMs)
 	if err != nil {
 		return nil, err
 	}
@@ -343,12 +343,12 @@ func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wspro
 		}
 		if err := connMgr.RegisterMCPServers(ctx, toolCfgs); err != nil {
 			cancel()
-			logging.Errorf("xiaozhi-connector[%s]: failed to register MCP servers: %v", sessionID, err)
+			logging.Errorf("xiaozhi-channel[%s]: failed to register MCP servers: %v", sessionID, err)
 		}
 		defs := connMgr.Registry().Definitions()
-		logging.Infof("xiaozhi-connector[%s]: MCP registration complete — total tools: %d", sessionID, len(defs))
+		logging.Infof("xiaozhi-channel[%s]: MCP registration complete — total tools: %d", sessionID, len(defs))
 	} else {
-		logging.Infof("xiaozhi-connector[%s]: no MCP servers in config, total tools: %d", sessionID, len(connMgr.Registry().Definitions()))
+		logging.Infof("xiaozhi-channel[%s]: no MCP servers in config, total tools: %d", sessionID, len(connMgr.Registry().Definitions()))
 	}
 
 	if hello.Features["mcp"] {
@@ -366,7 +366,7 @@ func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wspro
 		ReviewConfig: memory.ReviewConfig{Enabled: true},
 	})
 	if err != nil {
-		logging.Warnf("xiaozhi-connector[%s]: memory init: %v", sessionID, err)
+		logging.Warnf("xiaozhi-channel[%s]: memory init: %v", sessionID, err)
 		memSvc = nil
 	}
 
@@ -394,12 +394,12 @@ func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wspro
 		store := memSvc.CuratedStore()
 		connAgent.RegisterBuiltinTool(tools.MemoryToolSpec(store))
 		connAgent.RegisterBuiltinTool(tools.SessionSearchToolSpec(managerURLFromDeps(s.deps), deviceID))
-		logging.Infof("xiaozhi-connector[%s]: registered memory system tools", sessionID)
+		logging.Infof("xiaozhi-channel[%s]: registered memory system tools", sessionID)
 	}
 
 	knowClient := knowledge.NewSearchClient(managerURLFromDeps(s.deps), deviceID)
 	connAgent.RegisterBuiltinTool(tools.KnowledgeSearchToolSpec(knowClient))
-	logging.Infof("xiaozhi-connector[%s]: registered knowledge search tool", sessionID)
+	logging.Infof("xiaozhi-channel[%s]: registered knowledge search tool", sessionID)
 
 	if err := ttsProc.Start(ctx); err != nil {
 		cancel()
@@ -433,7 +433,7 @@ func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wspro
 	go func() {
 		for msg := range pl.Output() {
 			if msg.IsError() {
-				logging.Warnf("xiaozhi-connector[%s]: pipeline error: %v", sessionID, msg.Metadata.Error)
+				logging.Warnf("xiaozhi-channel[%s]: pipeline error: %v", sessionID, msg.Metadata.Error)
 			}
 		}
 	}()
@@ -441,7 +441,7 @@ func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wspro
 	if devMCP != nil {
 		go func() {
 			if err := devMCP.Initialize(ctx); err != nil {
-				logging.Warnf("xiaozhi-connector[%s]: device MCP initialize failed: %v", sessionID, err)
+				logging.Warnf("xiaozhi-channel[%s]: device MCP initialize failed: %v", sessionID, err)
 			}
 		}()
 	}
@@ -465,7 +465,7 @@ func (s *XiaozhiWSConnector) newConnection(rawConn *websocket.Conn, hello *wspro
 	}, nil
 }
 
-func (s *XiaozhiWSConnector) newRecognizer(cfg *config.AppConfig) (asr.Recognizer, error) {
+func (s *XiaozhiWSChannel) newRecognizer(cfg *config.AppConfig) (asr.Recognizer, error) {
 	asrCfg := cfg.Provider.ASR.Aliyun
 	return asr.NewRecognizer(asr.ProviderConfig{
 		Type: cfg.Provider.ASR.Type,
@@ -479,7 +479,7 @@ func (s *XiaozhiWSConnector) newRecognizer(cfg *config.AppConfig) (asr.Recognize
 	})
 }
 
-func (s *XiaozhiWSConnector) newTTSProvider(cfg *config.AppConfig) (tts.Provider, error) {
+func (s *XiaozhiWSChannel) newTTSProvider(cfg *config.AppConfig) (tts.Provider, error) {
 	ttsCfg := cfg.Provider.TTS.Aliyun
 	return tts.NewProvider(tts.ProviderConfig{
 		Type: cfg.Provider.TTS.Type,
@@ -502,7 +502,7 @@ func (s *XiaozhiWSConnector) newTTSProvider(cfg *config.AppConfig) (tts.Provider
 }
 
 // readHello blocks for the first text frame and parses it as a hello.
-func (s *XiaozhiWSConnector) readHello(conn *websocket.Conn) (*wsproto.HelloMessage, error) {
+func (s *XiaozhiWSChannel) readHello(conn *websocket.Conn) (*wsproto.HelloMessage, error) {
 	_ = conn.SetReadDeadline(time.Now().Add(helloTimeout))
 	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
 
@@ -541,7 +541,7 @@ func computePreBufferFrames(playBufferDurationMs, frameDurationMs int) int {
 }
 
 // managerURLFromDeps extracts the manager URL from dependencies.
-func managerURLFromDeps(deps *connector.Dependencies) string {
+func managerURLFromDeps(deps *channels.Dependencies) string {
 	if deps != nil && deps.DeviceCfgLoader != nil {
 		return deps.DeviceCfgLoader.ManagerURL()
 	}
@@ -575,9 +575,9 @@ func (c *wsConnection) sendHelloResponse(hello *wsproto.HelloMessage) error {
 	if format == "" {
 		format = string(defaultAudioFormat)
 	}
-	channels := hello.AudioParams.Channels
-	if channels <= 0 {
-		channels = audio.InternalChannels
+	ch := hello.AudioParams.Channels
+	if ch <= 0 {
+		ch = audio.InternalChannels
 	}
 	frameDurationMs := hello.AudioParams.FrameDuration
 	if frameDurationMs <= 0 {
@@ -586,7 +586,7 @@ func (c *wsConnection) sendHelloResponse(hello *wsproto.HelloMessage) error {
 	resp := wsproto.NewHelloResponse(c.sessionID, wsproto.AudioParams{
 		Format:        format,
 		SampleRate:    ttsSampleRate,
-		Channels:      channels,
+		Channels:      ch,
 		FrameDuration: frameDurationMs,
 		BitsPerSample: supportedBitsPerSample,
 	}, c.mode, "")
@@ -594,15 +594,15 @@ func (c *wsConnection) sendHelloResponse(hello *wsproto.HelloMessage) error {
 }
 
 func (c *wsConnection) close() {
-	logging.Infof("xiaozhi-connector[%s]: cleaning up connection resources", c.sessionID)
+	logging.Infof("xiaozhi-channel[%s]: cleaning up connection resources", c.sessionID)
 	if c.pl != nil {
 		if err := c.pl.Stop(); err != nil {
-			logging.Warnf("xiaozhi-connector[%s]: stop pipeline error: %v", c.sessionID, err)
+			logging.Warnf("xiaozhi-channel[%s]: stop pipeline error: %v", c.sessionID, err)
 		}
 	}
 	if c.ttsProc != nil {
 		if err := c.ttsProc.Stop(); err != nil {
-			logging.Warnf("xiaozhi-connector[%s]: stop TTSProcessor error: %v", c.sessionID, err)
+			logging.Warnf("xiaozhi-channel[%s]: stop TTSProcessor error: %v", c.sessionID, err)
 		}
 	}
 	if c.audioSrc != nil {
@@ -635,7 +635,7 @@ func (c *wsConnection) readLoop() {
 func (c *wsConnection) handleTextMessage(data []byte) {
 	msg, err := wsproto.ParseClientMessage(data)
 	if err != nil {
-		logging.Warnf("xiaozhi-connector[%s]: ignoring invalid message: %v", c.sessionID, err)
+		logging.Warnf("xiaozhi-channel[%s]: ignoring invalid message: %v", c.sessionID, err)
 		return
 	}
 
@@ -645,7 +645,7 @@ func (c *wsConnection) handleTextMessage(data []byte) {
 	case *wsproto.AbortMessage:
 		c.handleAbort()
 	case *wsproto.HelloMessage:
-		logging.Warnf("xiaozhi-connector[%s]: ignoring duplicate hello after handshake", c.sessionID)
+		logging.Warnf("xiaozhi-channel[%s]: ignoring duplicate hello after handshake", c.sessionID)
 	case *wsproto.IoTMessage:
 		if len(m.Descriptors) > 0 {
 			c.iotMgr.handleDescriptors(m.Descriptors)
@@ -655,12 +655,12 @@ func (c *wsConnection) handleTextMessage(data []byte) {
 		}
 	case *wsproto.MCPMessage:
 		if c.deviceMCP == nil {
-			logging.Warnf("xiaozhi-connector[%s]: received mcp message but device MCP not enabled", c.sessionID)
+			logging.Warnf("xiaozhi-channel[%s]: received mcp message but device MCP not enabled", c.sessionID)
 			return
 		}
 		raw, err := json.Marshal(m.Payload)
 		if err != nil {
-			logging.Warnf("xiaozhi-connector[%s]: device mcp payload marshal error: %v", c.sessionID, err)
+			logging.Warnf("xiaozhi-channel[%s]: device mcp payload marshal error: %v", c.sessionID, err)
 			return
 		}
 		c.deviceMCP.HandleMessage(c.ctx, raw)
@@ -672,13 +672,13 @@ func (c *wsConnection) handleListen(m *wsproto.ListenMessage) {
 	case wsproto.ListenStart:
 		if c.mode == wsproto.ModeManual {
 			if err := c.asrProc.BeginTurn(c.ctx); err != nil {
-				logging.Warnf("xiaozhi-connector[%s]: BeginTurn failed: %v", c.sessionID, err)
+				logging.Warnf("xiaozhi-channel[%s]: BeginTurn failed: %v", c.sessionID, err)
 			}
 		}
 	case wsproto.ListenStop:
 		if c.mode == wsproto.ModeManual {
 			if err := c.asrProc.EndTurn(c.ctx); err != nil {
-				logging.Warnf("xiaozhi-connector[%s]: EndTurn failed: %v", c.sessionID, err)
+				logging.Warnf("xiaozhi-channel[%s]: EndTurn failed: %v", c.sessionID, err)
 			}
 		}
 	case wsproto.ListenDetect:
