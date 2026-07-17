@@ -16,4 +16,3 @@ docs-site/.vitepress/dist
 docs-site/node_modules
 web-ui/dist/
 web-ui/node_modules
-wsserver
