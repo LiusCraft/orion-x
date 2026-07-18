@@ -1,20 +1,22 @@
-package xstages_test
+package xiaozhi_test
 
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/liuscraft/orion-x/internal/audio"
+	"github.com/liuscraft/orion-x/internal/channels/xiaozhi"
 	"github.com/liuscraft/orion-x/internal/channels/xiaozhi/wsproto"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
-	xstages "github.com/liuscraft/orion-x/internal/channels/xiaozhi/stages"
 )
 
 // newTestWSConnPair spins up a real WebSocket server (httptest) and dials
@@ -29,13 +31,21 @@ func newTestWSConnPair(t *testing.T) (server, client *websocket.Conn) {
 	upgrader := websocket.Upgrader{}
 	connCh := make(chan *websocket.Conn, 1)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		if errors.Is(err, syscall.EPERM) {
+			t.Skip("local listeners are not permitted in this environment")
+		}
+		t.Fatalf("listen failed: %v", err)
+	}
+	srv := &httptest.Server{Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
 		connCh <- c
-	}))
+	})}, Listener: listener}
+	srv.Start()
 	t.Cleanup(srv.Close)
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
@@ -100,7 +110,7 @@ func testFrameSamples(start int16, frames int) []int16 {
 
 func TestWSOutputStage_STTMessage(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xiaozhi.NewWSOutputStage(xiaozhi.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -124,7 +134,7 @@ func TestWSOutputStage_STTMessage(t *testing.T) {
 
 func TestWSOutputStage_TTSChunkFlow(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xiaozhi.NewWSOutputStage(xiaozhi.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -166,7 +176,7 @@ func TestWSOutputStage_TTSChunkFlow(t *testing.T) {
 
 func TestWSOutputStage_InterruptSendsStopIfStarted(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xiaozhi.NewWSOutputStage(xiaozhi.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -188,7 +198,7 @@ func TestWSOutputStage_InterruptSendsStopIfStarted(t *testing.T) {
 
 func TestWSOutputStage_InterruptBeforeTTSStartSendsNothing(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xiaozhi.NewWSOutputStage(xiaozhi.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -207,7 +217,7 @@ func TestWSOutputStage_InterruptBeforeTTSStartSendsNothing(t *testing.T) {
 
 func TestWSOutputStage_IgnoresFinishedAndErrorMessages(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xiaozhi.NewWSOutputStage(xiaozhi.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -227,7 +237,7 @@ func TestWSOutputStage_IgnoresFinishedAndErrorMessages(t *testing.T) {
 
 func TestWSOutputStage_PacesFramesBeyondPreBuffer(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xiaozhi.NewWSOutputStage(xiaozhi.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -261,7 +271,7 @@ func TestWSOutputStage_PacesFramesBeyondPreBuffer(t *testing.T) {
 
 func TestWSOutputStage_InterruptDropsQueuedFrames(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	stage := xstages.NewWSOutputStage(xstages.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
+	stage := xiaozhi.NewWSOutputStage(xiaozhi.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -297,7 +307,7 @@ func TestWSOutputStage_InterruptDropsQueuedFrames(t *testing.T) {
 
 func TestSafeConn_ConcurrentWritesDoNotRace(t *testing.T) {
 	server, client := newTestWSConnPair(t)
-	safe := xstages.NewSafeConn(server)
+	safe := xiaozhi.NewSafeConn(server)
 
 	done := make(chan struct{})
 	go func() {

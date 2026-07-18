@@ -35,6 +35,10 @@ export interface Device {
 	name: string;
 	created_at: string;
 	creator: string;
+	telegram: {
+		enabled: boolean;
+		token_hint?: string;
+	};
 }
 
 export const authApi = {
@@ -78,6 +82,15 @@ export const deviceApi = {
 		http.post<Device>(`/voicebots/${voicebotId}/devices`, { id, name }),
 	remove: (voicebotId: string, deviceId: string) =>
 		http.delete(`/voicebots/${voicebotId}/devices/${deviceId}`),
+	setTelegram: (voicebotId: string, deviceId: string, botToken: string) =>
+		http.put<Device>(
+			`/voicebots/${voicebotId}/devices/${deviceId}/channels/telegram`,
+			{ bot_token: botToken },
+		),
+	clearTelegram: (voicebotId: string, deviceId: string) =>
+		http.delete<Device>(
+			`/voicebots/${voicebotId}/devices/${deviceId}/channels/telegram`,
+		),
 };
 
 export interface Provider {

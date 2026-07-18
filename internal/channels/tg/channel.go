@@ -5,6 +5,7 @@ package tg
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -15,7 +16,9 @@ import (
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
+	providerpool "github.com/liuscraft/orion-x/internal/provider"
 	"github.com/liuscraft/orion-x/internal/session"
+	"github.com/liuscraft/orion-x/internal/task"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 
@@ -33,12 +36,15 @@ type tgBotState struct {
 // It polls the manager for devices with TG Bot Tokens and manages one
 // polling goroutine per token.
 type TGChannel struct {
-	deps     *channels.Dependencies
-	toolsMgr *tools.Manager
-	memSvc   *memory.Service
+	deps      *channels.Dependencies
+	toolsMgr  *tools.Manager
+	memSvc    *memory.Service
+	sessions  *session.Manager
+	tasks     *task.Registry
+	providers *providerpool.Pool
 
-	mu    sync.Mutex
-	bots  map[string]*tgBotState // device_id → bot state
+	mu   sync.Mutex
+	bots map[string]*tgBotState // device_id → bot state
 
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
@@ -47,13 +53,38 @@ type TGChannel struct {
 
 // NewTGChannel creates a new Telegram Bot channel.
 func NewTGChannel(deps *channels.Dependencies, toolsMgr *tools.Manager, memSvc *memory.Service) *TGChannel {
+	sessions := tgSessions(deps)
 	return &TGChannel{
-		deps:     deps,
-		toolsMgr: toolsMgr,
-		memSvc:   memSvc,
-		bots:     make(map[string]*tgBotState),
-		done:     make(chan struct{}),
+		deps:      deps,
+		toolsMgr:  toolsMgr,
+		memSvc:    memSvc,
+		sessions:  sessions,
+		tasks:     tgTasks(deps, sessions),
+		providers: tgProviders(deps),
+		bots:      make(map[string]*tgBotState),
+		done:      make(chan struct{}),
 	}
+}
+
+func tgSessions(deps *channels.Dependencies) *session.Manager {
+	if deps != nil && deps.Sessions != nil {
+		return deps.Sessions
+	}
+	return session.NewManager()
+}
+
+func tgTasks(deps *channels.Dependencies, sessions *session.Manager) *task.Registry {
+	if deps != nil && deps.Tasks != nil {
+		return deps.Tasks
+	}
+	return task.NewRegistry(sessions)
+}
+
+func tgProviders(deps *channels.Dependencies) *providerpool.Pool {
+	if deps != nil && deps.Providers != nil {
+		return deps.Providers
+	}
+	return providerpool.NewPool()
 }
 
 func (c *TGChannel) Name() string { return "tg" }
@@ -232,6 +263,7 @@ func (c *TGChannel) handleCommand(ctx context.Context, deviceID string, chatID i
 }
 
 func (c *TGChannel) handleText(ctx context.Context, deviceID string, chatID int64, tgUserID int64, text string, sess *session.Session, deviceCfg *config.AppConfig) {
+	defer c.sessions.CloseSession(sess.ID)
 	logging.Infof("tg[%s]: text from %d: %q", deviceID, tgUserID, text)
 
 	bot := c.botForDevice(deviceID)
@@ -250,7 +282,29 @@ func (c *TGChannel) handleText(ctx context.Context, deviceID string, chatID int6
 		RulesPrompt: deviceCfg.Provider.LLM.OpenAI.RulesPrompt,
 		ExtraFields: deviceCfg.Provider.LLM.OpenAI.ExtraFields,
 	}
-	agt, err := agent.New(ctx, agentCfg, connMgr, c.memSvc)
+	llmClient, err := c.providers.GetOrCreateLLM(ctx, deviceCfg.Provider.LLM.Type, deviceCfg.Provider.LLM.OpenAI)
+	if err != nil {
+		logging.Errorf("tg[%s]: get LLM client: %v", deviceID, err)
+		c.reply(deviceID, chatID, "初始化失败，请稍后再试。")
+		return
+	}
+	for _, spec := range c.tasks.ToolSpecs(sess.ID, func(_ context.Context, taskRecord *task.Task) error {
+		taskMgr := connMgr.Clone()
+		taskAgent, err := agent.NewWithClient(agentCfg, llmClient, taskMgr, c.memSvc)
+		if err != nil {
+			return err
+		}
+		taskSession := session.New(session.SessionMeta{Model: agentCfg.Model})
+		taskSession.Add(session.Message{Role: session.RoleUser, Content: taskRecord.Title})
+		subAgent := agent.NewSubAgent("sub_"+taskRecord.ID, taskRecord.ID, taskAgent)
+		if err := subAgent.Start(c.rootCtx, taskSession); err != nil {
+			return err
+		}
+		return c.tasks.AttachSubAgent(taskRecord.ID, subAgent)
+	}) {
+		connMgr.Registry().Add(spec)
+	}
+	agt, err := agent.NewWithClient(agentCfg, llmClient, connMgr, c.memSvc)
 	if err != nil {
 		logging.Errorf("tg[%s]: create agent: %v", deviceID, err)
 		c.reply(deviceID, chatID, "初始化失败，请稍后再试。")
@@ -304,12 +358,16 @@ func (c *TGChannel) botForDevice(deviceID string) *tgbotapi.BotAPI {
 	return nil
 }
 
-// sessionsMu guards the sessions map. Re-initialised per-device.
-
 // getOrCreateSession returns an existing session for this (device, chat) pair.
 func (c *TGChannel) getOrCreateSession(deviceID string, chatID int64, deviceCfg *config.AppConfig) *session.Session {
-	// Use a simple map for now. For MVP this is fine.
-	return session.New(session.SessionMeta{
+	id := fmt.Sprintf("tg:%s:%d", deviceID, chatID)
+	if sess, ok := c.sessions.Get(id); ok {
+		return sess
+	}
+	sess := session.New(session.SessionMeta{
 		Model: deviceCfg.Provider.LLM.OpenAI.Model,
 	})
+	sess.ID = id
+	c.sessions.Add(sess)
+	return sess
 }

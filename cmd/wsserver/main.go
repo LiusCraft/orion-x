@@ -7,13 +7,17 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
+	"github.com/liuscraft/orion-x/internal/provider"
 	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
 	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
+	"github.com/liuscraft/orion-x/internal/session"
+	"github.com/liuscraft/orion-x/internal/task"
 	"github.com/liuscraft/orion-x/internal/tools"
 
 	"github.com/liuscraft/orion-x/internal/channels"
@@ -30,6 +34,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
+	if err := xiaozhi.ValidateManagerURL(cfg.Manager.URL); err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid manager configuration: %v\n", err)
+		os.Exit(1)
+	}
+	cfg.Manager.URL = strings.TrimRight(strings.TrimSpace(cfg.Manager.URL), "/")
 
 	if err := logging.Init(logging.Config{
 		Level:  cfg.Logging.Level,
@@ -73,8 +82,12 @@ func main() {
 
 	// Shared dependencies for channels
 	deviceCfgLoader := xiaozhi.NewHTTPDeviceConfigLoader(cfg.Manager.URL)
+	sessions := session.NewManager()
 	deps := &channels.Dependencies{
 		DeviceCfgLoader: deviceCfgLoader,
+		Sessions:        sessions,
+		Tasks:           task.NewRegistry(sessions),
+		Providers:       provider.NewPool(),
 	}
 
 	chMgr := channels.NewManager(deps)

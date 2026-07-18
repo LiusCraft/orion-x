@@ -2,8 +2,11 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"sync"
 )
+
+var ErrNotStarted = errors.New("pipeline is not started")
 
 // Pipeline 流式数据处理管道
 type Pipeline interface {
@@ -21,6 +24,10 @@ type Pipeline interface {
 
 	// Input 获取 Pipeline 输入流（用于发送消息）
 	Input() chan<- Message
+
+	// Emit injects a message into the final output stream without sending it
+	// through source stages.
+	Emit(Message) error
 }
 
 // PipelineObserver 观察 Pipeline 事件
@@ -36,6 +43,7 @@ type linearPipeline struct {
 	stages      []Stage
 	input       chan Message
 	output      chan Message
+	emitted     chan Message
 	ctx         context.Context
 	cancel      context.CancelFunc
 	observer    PipelineObserver
@@ -56,6 +64,7 @@ func (p *linearPipeline) Start(ctx context.Context) error {
 	p.mu.Unlock()
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
+	p.emitted = make(chan Message, 16)
 
 	// 连接各 Stage
 	var currentInput <-chan Message = p.input
@@ -86,6 +95,12 @@ func (p *linearPipeline) Start(ctx context.Context) error {
 			select {
 			case <-p.ctx.Done():
 				return
+			case msg := <-p.emitted:
+				select {
+				case p.output <- msg:
+				case <-p.ctx.Done():
+					return
+				}
 			case msg, ok := <-currentInput:
 				if !ok {
 					return
@@ -155,6 +170,7 @@ func (p *linearPipeline) Stop() error {
 	// 关闭输入 channel（如果还未关闭）
 	if !p.inputClosed {
 		close(p.input)
+		close(p.emitted)
 		p.inputClosed = true
 	}
 
@@ -196,4 +212,18 @@ func (p *linearPipeline) Output() <-chan Message {
 // Input 获取输入流
 func (p *linearPipeline) Input() chan<- Message {
 	return p.input
+}
+
+func (p *linearPipeline) Emit(msg Message) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.started || p.ctx == nil {
+		return ErrNotStarted
+	}
+	select {
+	case p.emitted <- msg:
+		return nil
+	case <-p.ctx.Done():
+		return ErrNotStarted
+	}
 }

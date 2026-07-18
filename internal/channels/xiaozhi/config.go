@@ -3,6 +3,7 @@ package xiaozhi
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -71,4 +72,20 @@ func applyEnv(cfg *Config) {
 	if v := strings.TrimSpace(os.Getenv("LOG_LEVEL")); v != "" {
 		cfg.Logging.Level = v
 	}
+}
+
+// ValidateManagerURL ensures channels can reach the manager before startup.
+func ValidateManagerURL(rawURL string) error {
+	managerURL := strings.TrimSpace(rawURL)
+	if managerURL == "" {
+		return errors.New("manager.url is required (set it in the config file or MANAGER_URL)")
+	}
+	u, err := url.Parse(managerURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("manager.url must be an absolute http(s) URL: %q", managerURL)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("manager.url must use http or https: %q", managerURL)
+	}
+	return nil
 }

@@ -6,6 +6,9 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/provider"
+	"github.com/liuscraft/orion-x/internal/session"
+	"github.com/liuscraft/orion-x/internal/task"
 )
 
 // DeviceConfigLoader 从 manager 服务加载设备配置。
@@ -32,6 +35,11 @@ type DeviceTGBotInfo struct {
 type Dependencies struct {
 	// DeviceCfgLoader 用于按设备 ID 加载配置（含 LLM/ASR/TTS/MCP 等）。
 	DeviceCfgLoader DeviceConfigLoader
+	// Sessions and Tasks are process-wide so a task can be mounted from any
+	// channel into any currently active session.
+	Sessions  *session.Manager
+	Tasks     *task.Registry
+	Providers *provider.Pool
 }
 
 // Manager 管理多个 Channel 的生命周期。进程级单例。
