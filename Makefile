@@ -7,7 +7,7 @@ endif
 
 GO := GOTOOLCHAIN=$(GO_TOOLCHAIN) $(CGO_FLAGS) go
 
-.PHONY: all build build-voicebot run-voicebot build-wsserver run-wsserver build-manager run-manager install-frontend dev-frontend build-frontend test test-audio lint clean
+.PHONY: all build build-voicebot run-voicebot build-wsserver run-wsserver build-manager run-manager install-frontend dev-frontend build-frontend swagger test test-audio lint clean
 
 all: build
 
@@ -32,6 +32,10 @@ run-wsserver: build-wsserver
 build-manager:
 	mkdir -p bin
 	go build -o bin/manager ./cmd/manager
+
+# Regenerate Swagger/OpenAPI files after changing cmd/manager/swagger.go.
+swagger:
+	go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g cmd/manager/swagger.go -d . -o docs/manager
 
 run-manager: build-manager
 	./bin/manager

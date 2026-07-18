@@ -24,7 +24,6 @@
   },
   "homepage": "https://github.com/LiusCraft/orion-x#readme",
   "devDependencies": {
-    "mermaid": "^11.15.0",
     "vitepress": "^1.6.4"
   }
 }
