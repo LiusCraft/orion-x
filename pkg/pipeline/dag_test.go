@@ -115,6 +115,34 @@ func TestDAGPipelineLinear(t *testing.T) {
 	}
 }
 
+func TestDAGPipelineEmitBypassesStages(t *testing.T) {
+	p, err := NewDAGBuilder().
+		AddStage(newPassthroughStage("source", func(s string) string { return s + "-processed" })).
+		Build()
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if err := p.Emit(NewMessage(MessageTypeData, "before-start")); err != ErrNotStarted {
+		t.Fatalf("Emit() before Start = %v, want %v", err, ErrNotStarted)
+	}
+	if err := p.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = p.Stop() }()
+
+	if err := p.Emit(NewMessage(MessageTypeData, "mounted-result")); err != nil {
+		t.Fatalf("Emit() error = %v", err)
+	}
+	select {
+	case msg := <-p.Output():
+		if msg.Payload != "mounted-result" {
+			t.Fatalf("emitted payload = %v", msg.Payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for emitted output")
+	}
+}
+
 func TestDAGPipelineFanOut(t *testing.T) {
 	var mu sync.Mutex
 	var received []string

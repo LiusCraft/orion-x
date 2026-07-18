@@ -1,4 +1,4 @@
-package xstages
+package xiaozhi
 
 import (
 	"sync"

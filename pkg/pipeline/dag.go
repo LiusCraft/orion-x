@@ -12,8 +12,9 @@ type dagPipeline struct {
 	nodes map[string]Stage
 	edges map[string][]string // from -> downstream nodes
 
-	input  chan Message
-	output chan Message
+	input   chan Message
+	output  chan Message
+	emitted chan Message
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -64,6 +65,7 @@ func (d *dagPipeline) Start(ctx context.Context) error {
 
 	d.ctx, d.cancel = context.WithCancel(ctx)
 	d.input = make(chan Message, d.inputBufSize)
+	d.emitted = make(chan Message, d.fanoutBufSize)
 
 	// nodeOutputs: 每个节点处理后的输出 channel
 	nodeOutputs := make(map[string]<-chan Message)
@@ -214,16 +216,7 @@ func (d *dagPipeline) drainOutput(sinkOutputs []<-chan Message) {
 	defer d.wg.Done()
 	defer close(d.output)
 
-	if len(sinkOutputs) == 0 {
-		return
-	}
-
-	var merged <-chan Message
-	if len(sinkOutputs) == 1 {
-		merged = sinkOutputs[0]
-	} else {
-		merged = d.mergeChannels(sinkOutputs)
-	}
+	merged := d.mergeChannels(append(sinkOutputs, d.emitted))
 
 	for {
 		select {
@@ -309,6 +302,7 @@ func (d *dagPipeline) Stop() error {
 
 	if !d.inputClosed {
 		close(d.input)
+		close(d.emitted)
 		d.inputClosed = true
 	}
 
@@ -348,6 +342,20 @@ func (d *dagPipeline) Output() <-chan Message {
 // Input 获取输入流
 func (d *dagPipeline) Input() chan<- Message {
 	return d.input
+}
+
+func (d *dagPipeline) Emit(msg Message) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.started || d.ctx == nil {
+		return ErrNotStarted
+	}
+	select {
+	case d.emitted <- msg:
+		return nil
+	case <-d.ctx.Done():
+		return ErrNotStarted
+	}
 }
 
 // topologicalSort Kahn 算法拓扑排序，检测环

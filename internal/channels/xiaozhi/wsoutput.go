@@ -1,4 +1,4 @@
-package xstages
+package xiaozhi
 
 import (
 	"context"
@@ -11,10 +11,10 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
+	"github.com/liuscraft/orion-x/internal/channels/xiaozhi/wsproto"
 	"github.com/liuscraft/orion-x/internal/logging"
 	textutil "github.com/liuscraft/orion-x/internal/text"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
-	"github.com/liuscraft/orion-x/internal/channels/xiaozhi/wsproto"
 )
 
 // defaultAudioFrameDurationMs is the fallback used when NewWSOutputStage is
@@ -112,7 +112,7 @@ type WSOutputStage struct {
 // preBufferFrames come from the connection's negotiated audio_params
 // (frame_duration/play_buffer_duration); non-positive values fall back to
 // defaultAudioFrameDurationMs/defaultAudioPreBufferFrames.
-func NewWSOutputStage(conn *SafeConn, sessionID string, c codec.Codec, sampleRate, frameDurationMs, preBufferFrames int) pipeline.Stage {
+func NewWSOutputStage(conn *SafeConn, sessionID string, c codec.Codec, sampleRate, frameDurationMs, preBufferFrames int) *WSOutputStage {
 	if sampleRate <= 0 {
 		sampleRate = audio.InternalSampleRate
 	}
@@ -173,6 +173,23 @@ func (s *WSOutputStage) Process(ctx context.Context, input <-chan pipeline.Messa
 	}()
 
 	return output
+}
+
+// Handle forwards one already-processed message from the channel gateway.
+func (s *WSOutputStage) Handle(msg pipeline.Message) {
+	s.handleMessage(msg)
+}
+
+// Close releases transport-side resources after the pipeline output stream
+// has stopped. It is separate from Process so the channel can own protocol IO.
+func (s *WSOutputStage) Close() {
+	s.pacer.stop()
+	if s.debugDump != nil {
+		_ = s.debugDump.Close()
+	}
+	if s.debugEncoded != nil {
+		_ = s.debugEncoded.Close()
+	}
 }
 
 func (s *WSOutputStage) handleMessage(msg pipeline.Message) {

@@ -61,7 +61,7 @@ import {
 	DialogTitle,
 	DialogFooter,
 } from "@/components/ui/dialog";
-import { ChevronLeft, Plus, Play } from "lucide-react";
+import { ChevronLeft, Plus, Play, Send } from "lucide-react";
 import QuickChat from "./QuickChat";
 
 interface BotConfig {
@@ -210,6 +210,7 @@ export default function AgentDetailPage() {
 	const [devOpen, setDevOpen] = useState(false);
 	const [newDevId, setNewDevId] = useState("");
 	const [newDevName, setNewDevName] = useState("");
+	const [deviceSearch, setDeviceSearch] = useState("");
 	const [mcpSearch, setMcpSearch] = useState("");
 	const [mcpFilter, setMcpFilter] = useState<"all" | "bound" | "unbound">(
 		"all",
@@ -219,6 +220,10 @@ export default function AgentDetailPage() {
 	const [detailMcp, setDetailMcp] = useState<MCPServer | null>(null);
 	const [devAdding, setDevAdding] = useState(false);
 	const [devErr, setDevErr] = useState("");
+	const [channelDeviceID, setChannelDeviceID] = useState<string | null>(null);
+	const [telegramToken, setTelegramToken] = useState("");
+	const [telegramSaving, setTelegramSaving] = useState(false);
+	const [telegramErr, setTelegramErr] = useState("");
 
 	// Knowledge base state
 	const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
@@ -427,6 +432,64 @@ export default function AgentDetailPage() {
 		if (!id || !confirm(`确认删除设备 ${devId}？`)) return;
 		await deviceApi.remove(id, devId);
 		setDevices((prev) => prev.filter((d) => d.id !== devId));
+	};
+
+	const filteredDevices = devices.filter((device) => {
+		const query = deviceSearch.trim().toLowerCase();
+		return (
+			query === "" ||
+			device.id.toLowerCase().includes(query) ||
+			device.name.toLowerCase().includes(query)
+		);
+	});
+
+	const updateDevice = (device: Device) => {
+		setDevices((prev) => prev.map((d) => (d.id === device.id ? device : d)));
+	};
+
+	const openChannelSettings = (deviceID: string) => {
+		setChannelDeviceID((current) => (current === deviceID ? null : deviceID));
+		setTelegramToken("");
+		setTelegramErr("");
+	};
+
+	const handleSaveTelegram = async (deviceID: string) => {
+		if (!id || !telegramToken.trim()) return;
+		setTelegramSaving(true);
+		setTelegramErr("");
+		try {
+			const { data } = await deviceApi.setTelegram(
+				id,
+				deviceID,
+				telegramToken.trim(),
+			);
+			updateDevice(data);
+			setTelegramToken("");
+		} catch (e: unknown) {
+			setTelegramErr(
+				(e as { response?: { data?: { error?: string } } })?.response?.data
+					?.error ?? "保存 Telegram 配置失败",
+			);
+		} finally {
+			setTelegramSaving(false);
+		}
+	};
+
+	const handleClearTelegram = async (deviceID: string) => {
+		if (!id || !confirm("确认断开此设备的 Telegram Bot？")) return;
+		setTelegramSaving(true);
+		setTelegramErr("");
+		try {
+			const { data } = await deviceApi.clearTelegram(id, deviceID);
+			updateDevice(data);
+		} catch (e: unknown) {
+			setTelegramErr(
+				(e as { response?: { data?: { error?: string } } })?.response?.data
+					?.error ?? "断开 Telegram Bot 失败",
+			);
+		} finally {
+			setTelegramSaving(false);
+		}
 	};
 
 	// ── Knowledge base handlers ──
@@ -1596,7 +1659,16 @@ export default function AgentDetailPage() {
 
 						{/* ── 设备 ── */}
 						<TabsContent value="devices" className="space-y-4 pt-1">
-							<div className="flex justify-end">
+							<div className="flex items-center justify-between gap-3">
+								<div className="relative w-full max-w-xs">
+									<Search className="absolute left-2.5 top-1/2 w-3.5 h-3.5 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+									<Input
+										value={deviceSearch}
+										onChange={(e) => setDeviceSearch(e.target.value)}
+										placeholder="搜索设备 ID 或名称"
+										className={`${inp} pl-8`}
+									/>
+								</div>
 								<Button
 									onClick={() => setDevOpen(true)}
 									className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-3 text-sm gap-1.5"
@@ -1612,21 +1684,31 @@ export default function AgentDetailPage() {
 										填写设备 ID 即可绑定硬件
 									</p>
 								</div>
+							) : filteredDevices.length === 0 ? (
+								<div className="text-center py-14 border border-dashed border-zinc-800 rounded-xl">
+									<p className="text-zinc-500 text-sm">未找到匹配的设备</p>
+									<p className="text-zinc-600 text-xs mt-1">尝试设备 ID 或名称</p>
+								</div>
 							) : (
 								<div className="space-y-2">
-									{devices.map((d) => (
-										<div
-											key={d.id}
-											className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3"
-										>
-											<div>
+									{filteredDevices.map((d) => (
+										<div key={d.id} className="bg-zinc-900 border border-zinc-800 rounded-lg">
+											<div className="flex items-center justify-between px-4 py-3">
+												<div>
 												<p className="text-sm font-mono text-white">{d.id}</p>
 												<p className="text-xs text-zinc-500 mt-0.5">
 													{d.name && <span className="mr-2">{d.name}</span>}
 													{new Date(d.created_at).toLocaleDateString("zh-CN")}
 												</p>
 											</div>
-											<div className="flex items-center gap-2">
+												<div className="flex items-center gap-2">
+													<button
+														onClick={() => openChannelSettings(d.id)}
+														className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors px-2 py-1"
+													>
+														<Send className="w-3.5 h-3.5" />
+														Channels
+													</button>
 												<button
 													onClick={() =>
 														navigate(
@@ -1643,7 +1725,52 @@ export default function AgentDetailPage() {
 												>
 													删除
 												</button>
+												</div>
 											</div>
+											{channelDeviceID === d.id && (
+												<div className="border-t border-zinc-800 px-4 py-3 space-y-3">
+													<div className="flex items-center justify-between gap-3">
+														<div className="flex items-center gap-2 min-w-0">
+															<Send className="w-4 h-4 text-sky-400 shrink-0" />
+															<div>
+																<p className="text-sm text-zinc-200">Telegram Bot</p>
+																<p className="text-xs text-zinc-500 mt-0.5">
+																	{d.telegram.enabled
+																		? `已连接 ${d.telegram.token_hint ?? ""}`
+																		: "未连接"}
+																</p>
+															</div>
+														</div>
+														{d.telegram.enabled && (
+															<Button
+																variant="outline"
+																onClick={() => handleClearTelegram(d.id)}
+																disabled={telegramSaving}
+																className="h-8 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-red-300"
+															>
+																断开
+															</Button>
+														)}
+													</div>
+													<div className="flex gap-2">
+														<Input
+															type="password"
+															value={telegramToken}
+															onChange={(e) => setTelegramToken(e.target.value)}
+															placeholder={d.telegram.enabled ? "输入新 Bot Token 以替换" : "Bot Token"}
+															className={inp}
+														/>
+														<Button
+															onClick={() => handleSaveTelegram(d.id)}
+															disabled={telegramSaving || !telegramToken.trim()}
+															className="h-9 bg-violet-600 hover:bg-violet-500 text-white shrink-0"
+														>
+															{telegramSaving ? "保存中..." : "保存"}
+														</Button>
+													</div>
+													{telegramErr && <p className="text-xs text-red-400">{telegramErr}</p>}
+												</div>
+											)}
 										</div>
 									))}
 								</div>

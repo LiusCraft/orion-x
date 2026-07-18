@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/llm"
+	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 // Role represents the role of a chat message.
@@ -49,6 +50,10 @@ type Session struct {
 	Meta      SessionMeta `json:"meta"`
 	Messages  []Message   `json:"messages"`
 	UpdatedAt time.Time   `json:"updated_at"`
+
+	// Pipeline is assigned by a channel after it has assembled the session's
+	// processing graph. It is intentionally not serialized with chat history.
+	Pipeline pipeline.Pipeline `json:"-"`
 }
 
 // New creates a new session with auto-generated ID and timestamp defaults.

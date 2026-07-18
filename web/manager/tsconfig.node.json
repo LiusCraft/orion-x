@@ -11,6 +11,7 @@
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "ignoreDeprecations": "6.0",
 
 "noUnusedLocals": true,
     "noUnusedParameters": true,

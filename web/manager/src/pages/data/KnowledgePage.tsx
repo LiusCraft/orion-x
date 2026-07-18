@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import {
-	Brain, Trash2, Upload, Search, ChevronRight, ChevronDown, RotateCw,
+	Trash2, Upload, Search, ChevronRight, ChevronDown, RotateCw,
 	BookOpen, FileText, Link2, CheckCircle2, Clock, AlertCircle, Loader2, Plus
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -16,10 +16,6 @@ const STATUS_MAP: Record<string, { label: string; icon: React.ElementType; cls: 
 	embedding: { label: "向量化", icon: Loader2, cls: "text-amber-400 animate-spin" },
 	storing: { label: "存储中", icon: Loader2, cls: "text-amber-400 animate-spin" },
 	error: { label: "失败", icon: AlertCircle, cls: "text-red-400" },
-}
-
-function shortId(id: string) {
-	return id.length > 8 ? id.slice(0, 8) + "…" : id
 }
 
 function formatSize(chars: number) {

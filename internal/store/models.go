@@ -38,7 +38,9 @@ type Device struct {
 	ID         string `gorm:"primaryKey;type:varchar(128)" json:"id"` // 即 hello.DeviceID
 	VoicebotID string `gorm:"not null;index;type:varchar(36)" json:"voicebot_id"`
 	Name       string `gorm:"type:varchar(128)" json:"name"`
-	TgBotToken string `gorm:"type:varchar(256)" json:"tg_bot_token,omitempty"` // 设备绑定的 TG Bot Token
+	// TgBotToken is only exposed to the internal service-to-service endpoint.
+	// Public manager API responses use a masked channel status instead.
+	TgBotToken string `gorm:"type:varchar(256)" json:"-"` // 设备绑定的 TG Bot Token
 	BaseModel
 }
 
@@ -170,4 +172,3 @@ type VoicebotMCPBinding struct {
 	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 	Creator     string    `gorm:"type:varchar(36)" json:"creator"`
 }
-

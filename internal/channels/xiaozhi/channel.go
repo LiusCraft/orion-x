@@ -14,17 +14,16 @@ import (
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
 	"github.com/liuscraft/orion-x/internal/channels"
-	xstages "github.com/liuscraft/orion-x/internal/channels/xiaozhi/stages"
+	"github.com/liuscraft/orion-x/internal/channels/xiaozhi/wsproto"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
-	"github.com/liuscraft/orion-x/internal/provider/asr"
-	"github.com/liuscraft/orion-x/internal/provider/tts"
+	providerpool "github.com/liuscraft/orion-x/internal/provider"
 	"github.com/liuscraft/orion-x/internal/session"
+	"github.com/liuscraft/orion-x/internal/task"
 	"github.com/liuscraft/orion-x/internal/tools"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
-	"github.com/liuscraft/orion-x/internal/channels/xiaozhi/wsproto"
 )
 
 // independent of cmd/voicebot's 22050Hz (each entry point constructs its
@@ -54,11 +53,14 @@ const (
 // WebSocket voice protocol. It manages an HTTP server for WebSocket upgrades
 // and creates per-connection DAG pipelines (ASR → Agent → TTS → output).
 type XiaozhiWSChannel struct {
-	cfg   *Config
-	deps  *channels.Dependencies
+	cfg  *Config
+	deps *channels.Dependencies
 
 	toolsMgr  *tools.Manager
 	memorySvc *memory.Service
+	sessions  *session.Manager
+	tasks     *task.Registry
+	providers *providerpool.Pool
 
 	upgrader   websocket.Upgrader
 	httpServer *http.Server
@@ -70,15 +72,40 @@ type XiaozhiWSChannel struct {
 
 // NewXiaozhiWSChannel creates a new Xiaozhi WS channel.
 func NewXiaozhiWSChannel(cfg *Config, deps *channels.Dependencies, toolsMgr *tools.Manager, memorySvc *memory.Service) *XiaozhiWSChannel {
+	sessions := dependencySessions(deps)
 	return &XiaozhiWSChannel{
 		cfg:       cfg,
 		deps:      deps,
 		toolsMgr:  toolsMgr,
 		memorySvc: memorySvc,
+		sessions:  sessions,
+		tasks:     dependencyTasks(deps, sessions),
+		providers: dependencyProviders(deps),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
+}
+
+func dependencySessions(deps *channels.Dependencies) *session.Manager {
+	if deps != nil && deps.Sessions != nil {
+		return deps.Sessions
+	}
+	return session.NewManager()
+}
+
+func dependencyTasks(deps *channels.Dependencies, sessions *session.Manager) *task.Registry {
+	if deps != nil && deps.Tasks != nil {
+		return deps.Tasks
+	}
+	return task.NewRegistry(sessions)
+}
+
+func dependencyProviders(deps *channels.Dependencies) *providerpool.Pool {
+	if deps != nil && deps.Providers != nil {
+		return deps.Providers
+	}
+	return providerpool.NewPool()
 }
 
 // Name returns the channel identifier.
@@ -260,9 +287,16 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 
 	sess := session.New(session.SessionMeta{Model: connCfg.Provider.LLM.OpenAI.Model})
 	sessionID := sess.ID
+	s.sessions.Add(sess)
+	connectionReady := false
+	defer func() {
+		if !connectionReady {
+			s.sessions.CloseSession(sessionID)
+		}
+	}()
 
 	// Recognizer
-	recognizer, err := s.newRecognizer(connCfg)
+	recognizer, err := s.providers.GetOrCreateASR(connCfg.Provider.ASR.Type, connCfg.Provider.ASR.Aliyun)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +316,7 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 	}
 
 	// TTS provider + processor
-	ttsProvider, err := s.newTTSProvider(connCfg)
+	ttsProvider, err := s.providers.GetOrCreateTTS(connCfg.Provider.TTS.Type, connCfg.Provider.TTS.Aliyun, ttsSampleRate)
 	if err != nil {
 		return nil, err
 	}
@@ -300,8 +334,8 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		return nil, err
 	}
 
-	audioSrc := xstages.NewWSAudioSource(inputCodec, clientSampleRate)
-	safeConn := xstages.NewSafeConn(rawConn)
+	audioSrc := NewWSAudioSource(inputCodec, clientSampleRate)
+	safeConn := NewSafeConn(rawConn)
 
 	connMgr := s.toolsMgr.Clone()
 	iotMgr := newIoTManager(safeConn, connMgr.Registry())
@@ -379,11 +413,36 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		RulesPrompt: connCfg.Provider.LLM.OpenAI.RulesPrompt,
 		ExtraFields: connCfg.Provider.LLM.OpenAI.ExtraFields,
 	}
+	llmClient, err := s.providers.GetOrCreateLLM(ctx, connCfg.Provider.LLM.Type, connCfg.Provider.LLM.OpenAI)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("get LLM client: %w", err)
+	}
+	taskMemory := memSvc
+	if taskMemory == nil {
+		taskMemory = s.memorySvc
+	}
+	for _, spec := range s.tasks.ToolSpecs(sessionID, func(_ context.Context, taskRecord *task.Task) error {
+		taskMgr := connMgr.Clone()
+		taskAgent, err := agent.NewWithClient(connAgentCfg, llmClient, taskMgr, taskMemory)
+		if err != nil {
+			return err
+		}
+		taskSession := session.New(session.SessionMeta{Model: connAgentCfg.Model})
+		taskSession.Add(session.Message{Role: session.RoleUser, Content: taskRecord.Title})
+		subAgent := agent.NewSubAgent("sub_"+taskRecord.ID, taskRecord.ID, taskAgent)
+		if err := subAgent.Start(s.rootCtx, taskSession); err != nil {
+			return err
+		}
+		return s.tasks.AttachSubAgent(taskRecord.ID, subAgent)
+	}) {
+		connMgr.Registry().Add(spec)
+	}
 	var connAgent *agent.Agent
 	if memSvc != nil {
-		connAgent, err = agent.New(ctx, connAgentCfg, connMgr, memSvc)
+		connAgent, err = agent.NewWithClient(connAgentCfg, llmClient, connMgr, memSvc)
 	} else {
-		connAgent, err = agent.New(ctx, connAgentCfg, connMgr, s.memorySvc)
+		connAgent, err = agent.NewWithClient(connAgentCfg, llmClient, connMgr, s.memorySvc)
 	}
 	if err != nil {
 		cancel()
@@ -406,16 +465,17 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		return nil, err
 	}
 
+	outputGateway := NewWSOutputStage(safeConn, sessionID, outputCodec, ttsSampleRate, frameDurationMs, preBufferFrames)
 	pl, err := pipeline.NewDAGBuilder().
 		AddStage(audio.NewASRStage(asrProc, audioSrc)).
 		AddStage(agent.NewAgentStage(connAgent, sess)).
 		AddStage(audio.NewTTSStage(ttsProc)).
-		AddStage(xstages.NewWSOutputStage(safeConn, sessionID, outputCodec, ttsSampleRate, frameDurationMs, preBufferFrames)).
+		AddStage(audio.NewOutputStage()).
 		Connect("asr", "agent").
-		Connect("asr", "ws_output").
+		Connect("asr", "session_output").
 		Connect("agent", "tts").
-		Connect("agent", "ws_output").
-		Connect("tts", "ws_output").
+		Connect("agent", "session_output").
+		Connect("tts", "session_output").
 		SetObserver(pipeline.NewLoggingObserver(false)).
 		Build()
 	if err != nil {
@@ -429,9 +489,11 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		cancel()
 		return nil, err
 	}
+	sess.Pipeline = pl
 
 	go func() {
 		for msg := range pl.Output() {
+			outputGateway.Handle(msg)
 			if msg.IsError() {
 				logging.Warnf("xiaozhi-channel[%s]: pipeline error: %v", sessionID, msg.Metadata.Error)
 			}
@@ -446,6 +508,7 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		}()
 	}
 
+	connectionReady = true
 	return &wsConnection{
 		rawConn:   rawConn,
 		safeConn:  safeConn,
@@ -460,45 +523,11 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		memSvc:    memSvc,
 		iotMgr:    iotMgr,
 		deviceMCP: devMCP,
+		sessions:  s.sessions,
+		output:    outputGateway,
 		ctx:       ctx,
 		cancel:    cancel,
 	}, nil
-}
-
-func (s *XiaozhiWSChannel) newRecognizer(cfg *config.AppConfig) (asr.Recognizer, error) {
-	asrCfg := cfg.Provider.ASR.Aliyun
-	return asr.NewRecognizer(asr.ProviderConfig{
-		Type: cfg.Provider.ASR.Type,
-		Config: asr.Config{
-			APIKey:     asrCfg.APIKey,
-			Endpoint:   asrCfg.Endpoint,
-			Model:      asrCfg.Model,
-			Format:     "pcm",
-			SampleRate: audio.InternalSampleRate,
-		},
-	})
-}
-
-func (s *XiaozhiWSChannel) newTTSProvider(cfg *config.AppConfig) (tts.Provider, error) {
-	ttsCfg := cfg.Provider.TTS.Aliyun
-	return tts.NewProvider(tts.ProviderConfig{
-		Type: cfg.Provider.TTS.Type,
-		Config: tts.Config{
-			APIKey:               ttsCfg.APIKey,
-			Endpoint:             ttsCfg.Endpoint,
-			Workspace:            ttsCfg.Workspace,
-			Model:                ttsCfg.Model,
-			Voice:                ttsCfg.Voice,
-			Format:               "pcm",
-			SampleRate:           ttsSampleRate,
-			Volume:               ttsCfg.Volume,
-			Rate:                 ttsCfg.Rate,
-			Pitch:                ttsCfg.Pitch,
-			EnableSSML:           ttsCfg.EnableSSML,
-			TextType:             ttsCfg.TextType,
-			EnableDataInspection: ttsCfg.EnableDataInspection,
-		},
-	})
 }
 
 // readHello blocks for the first text frame and parses it as a hello.
@@ -551,20 +580,22 @@ func managerURLFromDeps(deps *channels.Dependencies) string {
 // wsConnection holds all per-connection state and resources.
 type wsConnection struct {
 	rawConn   *websocket.Conn
-	safeConn  *xstages.SafeConn
+	safeConn  *SafeConn
 	sessionID string
 	mode      wsproto.Mode
 
 	asrProc  audio.ASRProcessor
 	ttsProc  audio.TTSProcessor
 	pl       pipeline.Pipeline
-	audioSrc *xstages.WSAudioSource
+	audioSrc *WSAudioSource
 
 	connMgr   *tools.Registry
 	connAgent *agent.Agent
 	memSvc    *memory.Service
 	iotMgr    *iotManager
 	deviceMCP *deviceMCPClient
+	sessions  *session.Manager
+	output    *WSOutputStage
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -595,10 +626,15 @@ func (c *wsConnection) sendHelloResponse(hello *wsproto.HelloMessage) error {
 
 func (c *wsConnection) close() {
 	logging.Infof("xiaozhi-channel[%s]: cleaning up connection resources", c.sessionID)
-	if c.pl != nil {
+	if c.sessions != nil {
+		c.sessions.CloseSession(c.sessionID)
+	} else if c.pl != nil {
 		if err := c.pl.Stop(); err != nil {
 			logging.Warnf("xiaozhi-channel[%s]: stop pipeline error: %v", c.sessionID, err)
 		}
+	}
+	if c.output != nil {
+		c.output.Close()
 	}
 	if c.ttsProc != nil {
 		if err := c.ttsProc.Stop(); err != nil {

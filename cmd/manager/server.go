@@ -57,8 +57,8 @@ func newRouter(
 	langH := handler.NewLanguageHandler()
 	mcpH := handler.NewMCPHandler(mcpMarket, mcpServers, mcpBindings, voicebots)
 	internalH := handler.NewInternalHandler(voicebots, devices, models, voices, mcpBindings)
-	
-		availableH := handler.NewAvailableHandler(providers, models, voices)
+
+	availableH := handler.NewAvailableHandler(providers, models, voices)
 	memH := handler.NewMemoryHandler(memStore)
 	dataMemH := handler.NewDataMemoryHandler(memStore, devices, voicebots)
 	dataKnowH := handler.NewDataKnowledgeHandler(kbSvc, kbStore, docStore, devices, voicebots, voicebotKBs)
@@ -86,6 +86,8 @@ func newRouter(
 		bots.GET("/:id/devices", devH.List)
 		bots.POST("/:id/devices", devH.Create)
 		bots.DELETE("/:id/devices/:did", devH.Delete)
+		bots.PUT("/:id/devices/:did/channels/telegram", devH.SetTelegramChannel)
+		bots.DELETE("/:id/devices/:did/channels/telegram", devH.DeleteTelegramChannel)
 
 		pvd := api.Group("/providers", jwtMw)
 		pvd.GET("", providerH.List)

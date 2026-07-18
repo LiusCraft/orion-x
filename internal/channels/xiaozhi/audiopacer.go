@@ -1,4 +1,4 @@
-package xstages
+package xiaozhi
 
 import (
 	"sync"
@@ -55,8 +55,8 @@ type pacedFrame struct {
 // to fix. Memory use is bounded by how much audio a single turn produces,
 // which in practice is at most a few hundred KB even for a long reply.
 type audioPacer struct {
-	interval      time.Duration
-	preBuffer     int
+	interval        time.Duration
+	preBuffer       int
 	sendFn          func([]byte) error
 	onTurnEnd       func()
 	onSentenceStart func(text string)
@@ -78,9 +78,9 @@ func newAudioPacer(interval time.Duration, preBuffer int, sendFn func([]byte) er
 		onTurnEnd:       onTurnEnd,
 		onSentenceStart: onSentenceStart,
 		onSentenceEnd:   onSentenceEnd,
-		notify:        make(chan struct{}, 1),
-		stopCh:        make(chan struct{}),
-		doneCh:        make(chan struct{}),
+		notify:          make(chan struct{}, 1),
+		stopCh:          make(chan struct{}),
+		doneCh:          make(chan struct{}),
 	}
 	go p.run()
 	return p
