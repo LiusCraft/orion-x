@@ -16,7 +16,7 @@ const agentsURL = `${managerOrigin}/agents`;
     <nav class="header-nav" aria-label="主导航">
       <a href="#build">塑造智能体</a>
       <a href="#continuity">跨渠道连续对话</a>
-      <a href="/api-docs">API 文档</a>
+      <a href="/api-docs/">API 文档</a>
       <a href="https://github.com/LiusCraft/orion-x">GitHub</a>
       <a class="nav-cta" :href="loginURL">登录</a>
     </nav>

@@ -8,6 +8,8 @@
     "doc": "docs"
   },
   "scripts": {
+    "prebuild": "npm run prepare:api-docs",
+    "prepare:api-docs": "mkdir -p public/openapi && cp ../docs/manager/swagger.json public/openapi/swagger.json",
     "dev": "vitepress dev",
     "build": "vitepress build",
     "preview": "vitepress preview"
