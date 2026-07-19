@@ -130,15 +130,46 @@ a { color: inherit; }
 
 .api-docs-page {
 	width: 100%;
-	height: 100vh;
+	min-height: 100vh;
 	background: #fff;
 }
 
-.api-docs-frame {
-	display: block;
+.api-reference-shell {
+	position: relative;
 	width: 100%;
-	height: 100%;
-	border: 0;
+	min-height: 100vh;
+}
+
+.api-reference-loading,
+.api-reference-error {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-content: center;
+	gap: 14px;
+	padding: 24px;
+	color: var(--muted);
+	font-size: 14px;
+	text-align: center;
+	background: var(--paper);
+}
+
+.api-reference-spinner {
+	justify-self: center;
+	width: 28px;
+	height: 28px;
+	border: 2px solid #b7d7cc;
+	border-top-color: var(--teal);
+	border-radius: 50%;
+	animation: api-reference-spin .8s linear infinite;
+}
+
+.api-reference-error {
+	color: #9c3f2d;
+}
+
+@keyframes api-reference-spin {
+	to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }
