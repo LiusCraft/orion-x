@@ -6,6 +6,10 @@
         "contact": {},
         "version": "1.0"
     },
+    "host": "dash.orion-x.org",
+    "schemes": [
+        "https"
+    ],
     "basePath": "/",
     "paths": {
         "/api/auth/bind-email": {

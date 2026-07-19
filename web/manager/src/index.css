@@ -1,75 +1,132 @@
+@import "@fontsource-variable/geist";
 @import "tailwindcss";
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --background: 72 18% 96%;
+    --foreground: 160 30% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
-    --radius: 0.5rem;
+    --card-foreground: 160 30% 12%;
+    --muted: 150 13% 92%;
+    --muted-foreground: 156 12% 39%;
+    --primary: 174 88% 26%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 153 28% 91%;
+    --secondary-foreground: 164 55% 19%;
+    --accent: 163 36% 90%;
+    --accent-foreground: 164 55% 19%;
+    --destructive: 12 83% 62%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 141 12% 86%;
+    --input: 141 12% 86%;
+    --ring: 174 88% 26%;
+    --radius: 0.375rem;
   }
+
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --background: 164 42% 10%;
+    --foreground: 150 31% 96%;
+    --card: 161 38% 13%;
+    --card-foreground: 150 31% 96%;
+    --muted: 158 30% 17%;
+    --muted-foreground: 153 18% 62%;
+    --primary: 174 78% 42%;
+    --primary-foreground: 164 42% 10%;
+    --secondary: 158 30% 17%;
+    --secondary-foreground: 150 31% 96%;
+    --accent: 158 30% 17%;
+    --accent-foreground: 150 31% 96%;
+    --destructive: 12 70% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 157 28% 21%;
+    --input: 157 28% 21%;
+    --ring: 174 78% 42%;
   }
+}
+
+/* Map the existing utility-first UI to the documentation site's forest and teal palette. */
+:root,
+.light {
+  --color-zinc-950: #f7f7f3;
+  --color-zinc-900: #fbfcfa;
+  --color-zinc-800: #d8dfd9;
+  --color-zinc-700: #bdc9c4;
+  --color-zinc-600: #72817b;
+  --color-zinc-500: #5b6b66;
+  --color-zinc-400: #465751;
+  --color-zinc-300: #31423c;
+  --color-zinc-200: #24352f;
+  --color-zinc-100: #152723;
+  --color-white: #152723;
+  --color-violet-950: #063f38;
+  --color-violet-900: #07584f;
+  --color-violet-800: #076b60;
+  --color-violet-700: #087d70;
+  --color-violet-600: #087d70;
+  --color-violet-500: #159989;
+  --color-violet-400: #219f8f;
+  --color-violet-300: #6fcdb9;
+  --color-violet-200: #b3e9dc;
+  --color-violet-100: #dff3ed;
+  --color-violet-50: #f1faf7;
+  --color-purple-600: #07584f;
+  --color-emerald-600: #087d70;
+  --color-emerald-500: #159989;
+  --color-emerald-400: #219f8f;
+}
+
+.dark {
+  --color-zinc-950: #0f2420;
+  --color-zinc-900: #132d28;
+  --color-zinc-800: #24433b;
+  --color-zinc-700: #37584f;
+  --color-zinc-600: #668077;
+  --color-zinc-500: #8da79d;
+  --color-zinc-400: #b1c6be;
+  --color-zinc-300: #d1e0da;
+  --color-zinc-200: #e1ebe6;
+  --color-zinc-100: #eff6f2;
+  --color-white: #f7fbf9;
+  --color-violet-950: #dff3ed;
+  --color-violet-900: #b3e9dc;
+  --color-violet-800: #79d1be;
+  --color-violet-700: #4fc0ac;
+  --color-violet-600: #159989;
+  --color-violet-500: #219f8f;
+  --color-violet-400: #48bba8;
+  --color-violet-300: #7bd1bd;
+  --color-violet-200: #b3e9dc;
+  --color-violet-100: #dff3ed;
+  --color-violet-50: #f1faf7;
+  --color-purple-600: #07584f;
+  --color-emerald-600: #159989;
+  --color-emerald-500: #219f8f;
+  --color-emerald-400: #48bba8;
 }
 
 @layer base {
   * { border-color: hsl(var(--border)); }
+
   body {
+    min-width: 320px;
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
+    font-family: "Geist Variable", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+    text-wrap: pretty;
   }
+
+  button, input, select, textarea { font: inherit; }
+  :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 }
 
-/* ── Global scrollbar ── */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(139, 92, 246, 0.25);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(139, 92, 246, 0.6);
-}
-::-webkit-scrollbar-thumb:active {
-  background: rgba(139, 92, 246, 0.8);
-}
+/* Global scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, #159989 28%, transparent); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, #159989 58%, transparent); }
+::-webkit-scrollbar-thumb:active { background: #087d70; }
 
-/* ── Global cursor ── */
+/* Global cursor */
 a, button, [role="button"], [role="tab"], [role="menuitem"],
 [role="radio"], [role="checkbox"], [role="switch"],
 [role="option"], select, summary, label,
@@ -78,19 +135,14 @@ input[type="radio"], details summary, .cursor-pointer {
   cursor: pointer;
 }
 
-/* ── Light mode: override zinc palette to swap dark→light ── */
-.light {
-  --color-zinc-950: #ffffff;
-  --color-zinc-900: #f8f8fa;
-  --color-zinc-800: #ebebeb;
-  --color-zinc-700: #e0e0e0;
-  --color-zinc-600: #a0a0a0;
-  --color-zinc-500: #828282;
-  --color-zinc-400: #5c5c5c;
-  --color-zinc-300: #4a4a4a;
-  --color-zinc-200: #383838;
-  --color-zinc-100: #262626;
-  --color-white: #141414;
-}
-.light .bg-violet-600 { color: #fff; }
+/* Utility classes with light text are used on the teal primary action. */
+.light .bg-violet-600,
 .light .bg-emerald-600 { color: #fff; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}
