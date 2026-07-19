@@ -16,12 +16,12 @@ export default defineConfig({
 			strictPort: true,
 			proxy: {
 				"/manager-api-docs": {
-					target: "http://localhost:9090",
+					target: "http://127.0.0.1:9090",
 					rewrite: (path) => path.replace(/^\/manager-api-docs/, "/api-docs"),
 				},
-				"/swagger": "http://localhost:9090",
-				"^/api(?:/|$)": "http://localhost:9090",
-				"^/internal(?:/|$)": "http://localhost:9090",
+				"/swagger": "http://127.0.0.1:9090",
+				"^/api(?:/|$)": "http://127.0.0.1:9090",
+				"^/internal(?:/|$)": "http://127.0.0.1:9090",
 			},
 		},
 	},

@@ -6,6 +6,9 @@ const isLoading = ref(true);
 const loadError = ref(false);
 let apiReference;
 let observer;
+const apiSpecURL = import.meta.env.DEV
+	? "/swagger/doc.json"
+	: "/openapi/swagger.json";
 
 const finishLoading = () => {
 	if (!apiReferenceRoot.value?.querySelector(".scalar-api-reference")) {
@@ -20,7 +23,7 @@ onMounted(() => {
 	const initialize = () => {
 		try {
 			apiReference = window.Scalar.createApiReference(apiReferenceRoot.value, {
-				url: "/openapi/swagger.json",
+				url: apiSpecURL,
 				_integration: "html",
 				layout: "modern",
 				hideDownloadButton: false,
