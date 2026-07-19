@@ -13,7 +13,7 @@ manager 前端由 Nginx 托管；dogset 前端继续使用 GitHub Pages，不在
 
 ## 首次上线
 
-GitHub Actions 在推送 `main`、创建 `v*` tag 或手动触发时，分别构建并发布 `runtime`（manager、wsserver）和 `nginx`（manager 前端）镜像到 GHCR。服务器不编译源代码，只需保留 `deploy/`、`models/` 和 `deploy/.env`。
+GitHub Actions 仅在 GitHub Release 发布时构建并发布镜像；Release 必须关联版本 tag。工作流分别发布 `runtime`（manager、wsserver）和 `nginx`（manager 前端）镜像到 GHCR。服务器不编译源代码，只需保留 `deploy/`、`models/` 和 `deploy/.env`。
 
 首次部署时，在仓库根目录执行：
 
