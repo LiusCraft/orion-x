@@ -34,6 +34,7 @@ func newRouter(
 	r := gin.New()
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
+	r.GET("/healthz", func(c *gin.Context) { c.Status(200) })
 	r.GET("/api-docs", apiDocs)
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 

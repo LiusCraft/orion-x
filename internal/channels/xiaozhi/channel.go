@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -125,22 +126,30 @@ func (s *XiaozhiWSChannel) Info() channels.ChannelInfo {
 func (s *XiaozhiWSChannel) Start(ctx context.Context) error {
 	s.rootCtx, s.rootCancel = context.WithCancel(ctx)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc(s.cfg.Server.WsPath, s.handleWS)
+	listener, err := net.Listen("tcp", s.cfg.Server.Addr)
+	if err != nil {
+		return fmt.Errorf("xiaozhi-channel: listen on %s: %w", s.cfg.Server.Addr, err)
+	}
 
 	s.httpServer = &http.Server{
 		Addr:    s.cfg.Server.Addr,
-		Handler: mux,
+		Handler: s.wsHandler(),
 	}
 
 	go func() {
 		logging.Infof("xiaozhi-channel: listening on %s (ws: %s)", s.cfg.Server.Addr, s.cfg.Server.WsPath)
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			logging.Errorf("xiaozhi-channel: HTTP server error: %v", err)
 		}
 	}()
 
 	return nil
+}
+
+func (s *XiaozhiWSChannel) wsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc(s.cfg.Server.WsPath, s.handleWS)
+	return mux
 }
 
 // Stop gracefully shuts down the HTTP server and waits for all connections

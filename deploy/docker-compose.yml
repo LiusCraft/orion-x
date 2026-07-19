@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-orion}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-orionx}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  manager:
+    image: ${ORION_X_IMAGE:?set ORION_X_IMAGE in deploy/.env}:${ORION_X_TAG:-latest}
+    command: ["manager"]
+    restart: unless-stopped
+    environment:
+      DB_DSN: postgres://${POSTGRES_USER:-orion}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-orionx}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      # Required only until the initial administrator has been created.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9090/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  wsserver:
+    image: ${ORION_X_IMAGE:?set ORION_X_IMAGE in deploy/.env}:${ORION_X_TAG:-latest}
+    command: ["wsserver"]
+    restart: unless-stopped
+    environment:
+      MANAGER_URL: http://manager:9090
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      # Keep VAD models out of the application image and allow independent updates.
+      - type: bind
+        source: ../models
+        target: /app/models
+        read_only: true
+    depends_on:
+      manager:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  nginx:
+    image: ${ORION_X_NGINX_IMAGE:?set ORION_X_NGINX_IMAGE in deploy/.env}:${ORION_X_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      manager:
+        condition: service_healthy
+      wsserver:
+        condition: service_healthy
+
+volumes:
+  postgres-data:

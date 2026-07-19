@@ -78,4 +78,10 @@ func applyManagerEnv(cfg *ManagerConfig) {
 	if v := strings.TrimSpace(os.Getenv("LOG_LEVEL")); v != "" {
 		cfg.Logging.Level = v
 	}
+	if v := strings.TrimSpace(os.Getenv("ADMIN_USERNAME")); v != "" {
+		cfg.Admin.Username = v
+	}
+	if v := strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")); v != "" {
+		cfg.Admin.Password = v
+	}
 }

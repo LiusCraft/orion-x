@@ -2,6 +2,9 @@ server:
   addr: ":8080"
   ws_path: "/ws"
 
+health:
+  addr: ":8081"  # 进程级健康检查，仅供容器编排/监控使用
+
 manager:
   url: "http://localhost:9090"   # manager 服务地址，用于查询设备配置
 

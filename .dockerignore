@@ -1,0 +1,11 @@
+.git
+.DS_Store
+.agents
+.codex
+.superpowers
+bin
+data
+docs-site
+web/manager/node_modules
+web/manager/dist
+deploy/.env
