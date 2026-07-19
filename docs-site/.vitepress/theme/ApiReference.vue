@@ -1,23 +1,36 @@
 <script setup>
-import { onMounted } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
+
+const apiReferenceRoot = ref(null);
+let apiReference;
 
 onMounted(() => {
-	const reference = document.createElement("script");
-	reference.id = "api-reference";
-	reference.dataset.url = "/openapi/swagger.json";
-	reference.dataset.configuration = JSON.stringify({
-		layout: "modern",
-		hideDownloadButton: false,
-		hideModels: false,
-	});
-	document.body.appendChild(reference);
+	const initialize = () => {
+		apiReference = window.Scalar.createApiReference(apiReferenceRoot.value, {
+			url: "/openapi/swagger.json",
+			_integration: "html",
+			layout: "modern",
+			hideDownloadButton: false,
+			hideModels: false,
+		});
+	};
+
+	if (window.Scalar) {
+		initialize();
+		return;
+	}
 
 	const scalar = document.createElement("script");
 	scalar.src = "https://cdn.jsdelivr.net/npm/@scalar/api-reference";
-	document.body.appendChild(scalar);
+	scalar.onload = initialize;
+	document.head.appendChild(scalar);
+});
+
+onBeforeUnmount(() => {
+	apiReference?.destroy();
 });
 </script>
 
 <template>
-	<div class="api-reference-root" />
+	<div ref="apiReferenceRoot" class="api-reference-root" />
 </template>
