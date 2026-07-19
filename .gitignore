@@ -13,6 +13,7 @@ cmd/voicebot/config/voicebot.json
 data/
 docs-site/.vitepress/cache
 docs-site/.vitepress/dist
+docs-site/public/openapi
 docs-site/node_modules
 web-ui/dist/
 web-ui/node_modules
