@@ -14,6 +14,7 @@ import (
 // (not device-level — those come from the manager service).
 type Config struct {
 	Server  ServerConfig  `yaml:"server"`
+	Health  HealthConfig  `yaml:"health"`
 	Manager ManagerConfig `yaml:"manager"`
 	Logging LoggingConfig `yaml:"logging"`
 }
@@ -22,6 +23,11 @@ type Config struct {
 type ServerConfig struct {
 	Addr   string `yaml:"addr"`
 	WsPath string `yaml:"ws_path"`
+}
+
+// HealthConfig holds the process-level health endpoint settings.
+type HealthConfig struct {
+	Addr string `yaml:"addr"`
 }
 
 // ManagerConfig holds the manager service URL.
@@ -39,6 +45,7 @@ type LoggingConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Server:  ServerConfig{Addr: ":8080", WsPath: "/ws"},
+		Health:  HealthConfig{Addr: ":8081"},
 		Manager: ManagerConfig{},
 		Logging: LoggingConfig{Level: "info", Format: "console"},
 	}
@@ -71,6 +78,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := strings.TrimSpace(os.Getenv("LOG_LEVEL")); v != "" {
 		cfg.Logging.Level = v
+	}
+	if v := strings.TrimSpace(os.Getenv("HEALTH_ADDR")); v != "" {
+		cfg.Health.Addr = v
 	}
 }
 

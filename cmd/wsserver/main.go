@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	"github.com/liuscraft/orion-x/internal/logging"
@@ -107,6 +108,10 @@ func main() {
 	if err := chMgr.Start(ctx); err != nil {
 		logging.Fatalf("Failed to start channels: %v", err)
 	}
+	health := newHealthServer(cfg.Health.Addr)
+	if err := health.Start(); err != nil {
+		logging.Fatalf("Failed to start health server: %v", err)
+	}
 
 	logging.Infof("========================================")
 	logging.Infof("     Orion-X Server is Running!        ")
@@ -118,6 +123,11 @@ func main() {
 	<-sigCh
 
 	logging.Infof("Shutting down...")
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := health.Stop(shutdownCtx); err != nil {
+		logging.Warnf("Health server shutdown failed: %v", err)
+	}
+	shutdownCancel()
 	cancel()
 	chMgr.Stop()
 

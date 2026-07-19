@@ -3,7 +3,9 @@ layout: false
 ---
 
 <script setup>
-const managerOrigin = import.meta.env.DEV ? "http://localhost:5173" : "";
+const managerOrigin = import.meta.env.DEV
+  ? "http://localhost:5173"
+  : "https://dash.orion-x.org";
 const loginURL = `${managerOrigin}/login`;
 const agentsURL = `${managerOrigin}/agents`;
 </script>
