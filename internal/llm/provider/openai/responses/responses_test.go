@@ -8,7 +8,7 @@ import (
 )
 
 func TestQwenDisabledThinkingUsesNoneEffort(t *testing.T) {
-	a := &adapter{cfg: Config{Model: "qwen-plus", Dialect: "qwen"}}
+	a := &adapter{cfg: Config{Model: "qwen-plus"}}
 	params, err := a.params(llm.Request{Thinking: llm.ThinkingConfig{Mode: llm.ThinkingModeDisabled}})
 	if err != nil {
 		t.Fatal(err)

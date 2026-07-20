@@ -17,7 +17,6 @@ type Config struct {
 	APIKey          string
 	BaseURL         string
 	Model           string
-	Dialect         string
 	Scope           string
 	Options         []byte
 	Thinking        llm.ThinkingConfig
@@ -35,7 +34,7 @@ type contextData struct {
 
 func init() {
 	provider.Register("openai-responses", func(ctx context.Context, cfg provider.Config) (provider.Adapter, error) {
-		return New(ctx, Config{APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model, Dialect: cfg.Dialect, Scope: cfg.Scope, Options: cfg.Options, Thinking: cfg.Thinking, MaxOutputTokens: cfg.MaxOutputTokens})
+		return New(ctx, Config{APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model, Scope: cfg.Scope, Options: cfg.Options, Thinking: cfg.Thinking, MaxOutputTokens: cfg.MaxOutputTokens})
 	}, provider.ProviderMeta{Name: "OpenAI Responses", DefaultBaseURL: "https://api.openai.com/v1"})
 }
 
@@ -195,7 +194,7 @@ func (a *adapter) params(req llm.Request) (openairesponses.ResponseNewParams, er
 	if thinking.HasEffort() {
 		body["reasoning"] = map[string]any{"effort": string(thinking.Effort)}
 	}
-	if a.cfg.Dialect == "qwen" && !thinking.HasEffort() && thinking.Mode == llm.ThinkingModeDisabled {
+	if provider.InferDialect(a.cfg.Model) == provider.DialectQwen && !thinking.HasEffort() && thinking.Mode == llm.ThinkingModeDisabled {
 		body["reasoning"] = map[string]any{"effort": "none"}
 	}
 	data, err := json.Marshal(body)

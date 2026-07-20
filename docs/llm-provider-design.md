@@ -108,7 +108,7 @@ delta 只用于低延迟展示。工具执行、session 持久化、usage 和 st
 
 ### 4.6 OpenAI-compatible dialect
 
-`openai-completions` 和 `openai-responses` 表示 wire protocol，不代表所有兼容厂商具有完全相同的参数语义。MiniMax、DeepSeek、Qwen、Kimi 等扩展通过 `dialect + model capability` 映射，详细调研见 [OpenAI-Compatible Thinking 方言调研](./llm-thinking-dialects.md)。
+`openai-completions` 和 `openai-responses` 表示 wire protocol，不代表所有兼容模型具有完全相同的参数语义。Adapter 根据确定的 model ID 推导 MiniMax、DeepSeek、Qwen、Kimi dialect，再结合模型能力映射，详细调研见 [OpenAI-Compatible Thinking 方言调研](./llm-thinking-dialects.md)。Dialect 不是 provider 或用户配置项。
 
 公共层可以定义 `ThinkingConfig` 的 mode、effort、budget、history preservation 等稳定语义；dialect mapper 负责转换为目标字段。不支持的组合必须在请求前拒绝，不能静默忽略或假装生效。
 

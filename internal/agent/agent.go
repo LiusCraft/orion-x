@@ -37,7 +37,6 @@ func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc *memory.
 	}
 	client, err := llmprovider.NewClientWithDefault(ctx, llmprovider.Config{
 		Type:            normalized.Provider,
-		Dialect:         normalized.Dialect,
 		BaseURL:         normalized.BaseURL,
 		Model:           normalized.Model,
 		APIKey:          normalized.APIKey,

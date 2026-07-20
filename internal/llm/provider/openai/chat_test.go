@@ -11,20 +11,19 @@ import (
 func TestApplyDialectThinking(t *testing.T) {
 	tests := []struct {
 		name     string
-		dialect  string
 		model    string
 		thinking llm.ThinkingConfig
 		want     map[string]any
 	}{
-		{name: "minimax disabled", dialect: "minimax", model: "MiniMax-M3", thinking: llm.ThinkingConfig{Mode: llm.ThinkingModeDisabled}, want: map[string]any{"thinking": map[string]any{"type": "disabled"}}},
-		{name: "deepseek enabled", dialect: "deepseek", model: "deepseek-chat", thinking: llm.ThinkingConfig{Mode: llm.ThinkingModeEnabled}, want: map[string]any{"thinking": map[string]any{"type": "enabled"}}},
-		{name: "qwen budget", dialect: "qwen", model: "qwen-plus", thinking: llm.ThinkingConfig{Mode: llm.ThinkingModeEnabled, BudgetTokens: intPtr(2048), PreserveHistory: llm.PreserveModeAll}, want: map[string]any{"enable_thinking": true, "thinking_budget": float64(2048), "preserve_thinking": true}},
-		{name: "kimi k2.6 keep", dialect: "kimi", model: "kimi-k2.6", thinking: llm.ThinkingConfig{Mode: llm.ThinkingModeEnabled, PreserveHistory: llm.PreserveModeAll}, want: map[string]any{"thinking": map[string]any{"type": "enabled", "keep": "all"}}},
+		{name: "minimax disabled", model: "MiniMax-M3", thinking: llm.ThinkingConfig{Mode: llm.ThinkingModeDisabled}, want: map[string]any{"thinking": map[string]any{"type": "disabled"}}},
+		{name: "deepseek enabled", model: "deepseek-chat", thinking: llm.ThinkingConfig{Mode: llm.ThinkingModeEnabled}, want: map[string]any{"thinking": map[string]any{"type": "enabled"}}},
+		{name: "qwen budget", model: "qwen-plus", thinking: llm.ThinkingConfig{Mode: llm.ThinkingModeEnabled, BudgetTokens: intPtr(2048), PreserveHistory: llm.PreserveModeAll}, want: map[string]any{"enable_thinking": true, "thinking_budget": float64(2048), "preserve_thinking": true}},
+		{name: "kimi k2.6 keep", model: "kimi-k2.6", thinking: llm.ThinkingConfig{Mode: llm.ThinkingModeEnabled, PreserveHistory: llm.PreserveModeAll}, want: map[string]any{"thinking": map[string]any{"type": "enabled", "keep": "all"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			params := openaisdk.ChatCompletionNewParams{Model: "model"}
-			if err := applyDialect(&params, tt.dialect, tt.model, tt.thinking, nil); err != nil {
+			if err := applyDialect(&params, tt.model, tt.thinking, nil); err != nil {
 				t.Fatal(err)
 			}
 			var got map[string]any
@@ -46,9 +45,27 @@ func TestApplyDialectThinking(t *testing.T) {
 
 func TestMiniMaxM2CannotDisableThinking(t *testing.T) {
 	params := openaisdk.ChatCompletionNewParams{Model: "model"}
-	err := applyDialect(&params, "minimax", "MiniMax-M2.5", llm.ThinkingConfig{Mode: llm.ThinkingModeDisabled}, nil)
+	err := applyDialect(&params, "MiniMaxAI/MiniMax-M2.5", llm.ThinkingConfig{Mode: llm.ThinkingModeDisabled}, nil)
 	if err == nil {
 		t.Fatal("expected unsupported option error")
+	}
+}
+
+func TestGenericModelDoesNotReceiveThinkingFields(t *testing.T) {
+	params := openaisdk.ChatCompletionNewParams{Model: "model"}
+	if err := applyDialect(&params, "gpt-5", llm.ThinkingConfig{Mode: llm.ThinkingModeEnabled}, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["thinking"]; ok {
+		t.Fatalf("generic model received thinking field: %s", data)
 	}
 }
 

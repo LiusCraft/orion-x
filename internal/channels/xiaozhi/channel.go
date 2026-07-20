@@ -18,6 +18,8 @@ import (
 	"github.com/liuscraft/orion-x/internal/channels/xiaozhi/wsproto"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/knowledge"
+	"github.com/liuscraft/orion-x/internal/llm"
+	llmprovider "github.com/liuscraft/orion-x/internal/llm/provider"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	providerpool "github.com/liuscraft/orion-x/internal/provider"
@@ -415,7 +417,6 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 
 	connAgentCfg := agent.Config{
 		Provider:        connCfg.Provider.LLM.Type,
-		Dialect:         connCfg.Provider.LLM.OpenAI.Dialect,
 		APIKey:          connCfg.Provider.LLM.OpenAI.APIKey,
 		BaseURL:         connCfg.Provider.LLM.OpenAI.BaseURL,
 		Model:           connCfg.Provider.LLM.OpenAI.Model,
@@ -426,6 +427,14 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		Thinking:        connCfg.Provider.LLM.OpenAI.Thinking,
 		MaxOutputTokens: connCfg.Provider.LLM.OpenAI.MaxOutputTokens,
 	}
+	logging.Infof(
+		"xiaozhi-channel[%s]: agent configured (model=%q, dialect=%s, thinking_enabled=%t, thinking_effort=%s)",
+		sessionID,
+		connAgentCfg.Model,
+		llmprovider.InferDialect(connAgentCfg.Model),
+		connAgentCfg.Thinking.Mode == llm.ThinkingModeEnabled,
+		connAgentCfg.Thinking.Effort,
+	)
 	llmClient, err := s.providers.GetOrCreateLLM(ctx, connCfg.Provider.LLM.Type, connCfg.Provider.LLM.OpenAI)
 	if err != nil {
 		cancel()

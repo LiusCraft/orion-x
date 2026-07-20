@@ -57,7 +57,6 @@ type LLMConfig struct {
 	APIKey          string             `json:"api_key"`
 	BaseURL         string             `json:"base_url"`
 	Model           string             `json:"model"`
-	Dialect         string             `json:"dialect,omitempty"`
 	Options         json.RawMessage    `json:"options,omitempty"`
 	Thinking        llm.ThinkingConfig `json:"thinking,omitempty"`
 	MaxOutputTokens int                `json:"max_output_tokens,omitempty"`
