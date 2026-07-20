@@ -43,7 +43,7 @@ export interface Device {
 
 export const authApi = {
 	login: (username: string, password: string) =>
-		http.post<{ token: string; user_id: string; username: string }>(
+		http.post<{ token: string; user_id: string; username: string; is_admin: boolean }>(
 			"/auth/login",
 			{ username, password },
 		),
@@ -57,7 +57,7 @@ export const authApi = {
 			email,
 		}),
 	profile: () =>
-		http.get<{ user_id: string; username: string; email: string }>(
+		http.get<{ user_id: string; username: string; email: string; is_admin: boolean }>(
 			"/auth/profile",
 		),
 };

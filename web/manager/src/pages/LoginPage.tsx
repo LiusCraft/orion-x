@@ -40,7 +40,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const { data } = await authApi.login(username, password);
-      setAuth(data.token, data.user_id, data.username);
+      setAuth(data.token, data.user_id, data.username, data.is_admin);
       navigate("/agents");
     } catch {
       setError("用户名或密码错误");

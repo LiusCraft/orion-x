@@ -13,10 +13,10 @@ import (
 
 type AuthHandler struct {
 	users     *store.UserStore
-	signToken func(userID string) (string, error)
+	signToken func(userID string, isAdmin bool) (string, error)
 }
 
-func NewAuthHandler(users *store.UserStore, signToken func(userID string) (string, error)) *AuthHandler {
+func NewAuthHandler(users *store.UserStore, signToken func(userID string, isAdmin bool) (string, error)) *AuthHandler {
 	return &AuthHandler{users: users, signToken: signToken}
 }
 
@@ -48,13 +48,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, err := h.signToken(u.ID)
+	token, err := h.signToken(u.ID, u.IsAdmin)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token generation failed"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"token": token, "user_id": u.ID, "username": u.Username})
+	c.JSON(http.StatusOK, gin.H{"token": token, "user_id": u.ID, "username": u.Username, "is_admin": u.IsAdmin})
 }
 
 type changePasswordRequest struct {
@@ -131,5 +131,6 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 		"user_id":  u.ID,
 		"username": u.Username,
 		"email":    u.Email,
+		"is_admin": u.IsAdmin,
 	})
 }

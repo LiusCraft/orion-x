@@ -62,12 +62,12 @@ func (s *AIModelStore) Update(id string, updates map[string]any) (*AIModel, erro
 	return s.GetByID(id)
 }
 
-func (s *AIModelStore) Delete(id string) error {
+func (s *AIModelStore) Delete(id string, allowSystem bool) error {
 	var m AIModel
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
 		return err
 	}
-	if m.IsSystem {
+	if m.IsSystem && !allowSystem {
 		return ErrSystemRecord
 	}
 	if err := s.db.Delete(&AIModel{}, "id = ?", id).Error; err != nil {

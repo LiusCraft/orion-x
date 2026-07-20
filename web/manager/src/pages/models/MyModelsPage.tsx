@@ -28,6 +28,7 @@ import {
   type ModelType,
   type Provider,
 } from "@/lib/api";
+import { useAuthStore } from "@/lib/store";
 
 const TYPE_BADGE: Record<string, string> = {
   text: "bg-violet-600/15 text-violet-400 border-violet-500/20",
@@ -46,6 +47,7 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default function MyModelsPage() {
+  const isAdmin = useAuthStore((state) => state.isAdmin);
   const [models, setModels] = useState<AIModel[]>([]);
   const [modelTypes, setModelTypes] = useState<ModelType[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -272,7 +274,7 @@ export default function MyModelsPage() {
                               </span>
                             </div>
                           </div>
-                          {!model.is_system && (
+                          {(!model.is_system || isAdmin) && (
                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={() => openEdit(model)}

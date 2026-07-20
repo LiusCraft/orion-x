@@ -20,6 +20,7 @@ type User struct {
 	Username     string `gorm:"uniqueIndex;not null;type:varchar(64)" json:"username"`
 	PasswordHash string `gorm:"not null" json:"-"`
 	Email        string `gorm:"type:varchar(128)" json:"email,omitempty"`
+	IsAdmin      bool   `gorm:"not null;default:false;index" json:"is_admin"`
 	BaseModel
 }
 
@@ -101,16 +102,16 @@ const (
 
 // ModelVoice TTS 模型下的音色
 type ModelVoice struct {
-	ID          string         `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	ModelID     string         `gorm:"not null;index;type:varchar(36)" json:"model_id"`
-	VoiceID     string         `gorm:"not null;type:varchar(128)" json:"voice_id"`
-	Name        string         `gorm:"not null;type:varchar(128)" json:"name"`
-	Description string         `gorm:"type:text" json:"description,omitempty"`
-	Gender      VoiceGender    `gorm:"type:varchar(16)" json:"gender,omitempty"`
-	AvatarURL   string         `gorm:"type:varchar(512)" json:"avatar_url,omitempty"`
-	PreviewURL  string         `gorm:"type:varchar(512)" json:"preview_url,omitempty"`
-	Tags        pq.StringArray `gorm:"type:text[]" json:"tags,omitempty"`
-	Langs       pq.StringArray `gorm:"type:text[]" json:"langs,omitempty"`
+	ID             string            `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	ModelID        string            `gorm:"not null;index;type:varchar(36)" json:"model_id"`
+	VoiceID        string            `gorm:"not null;type:varchar(128)" json:"voice_id"`
+	Name           string            `gorm:"not null;type:varchar(128)" json:"name"`
+	Description    string            `gorm:"type:text" json:"description,omitempty"`
+	Gender         VoiceGender       `gorm:"type:varchar(16)" json:"gender,omitempty"`
+	AvatarURL      string            `gorm:"type:varchar(512)" json:"avatar_url,omitempty"`
+	PreviewURL     string            `gorm:"type:varchar(512)" json:"preview_url,omitempty"`
+	Tags           pq.StringArray    `gorm:"type:text[]" json:"tags,omitempty"`
+	Langs          pq.StringArray    `gorm:"type:text[]" json:"langs,omitempty"`
 	Emotions       datatypes.JSONMap `gorm:"type:jsonb" json:"emotions,omitempty"`
 	IsSystem       bool              `gorm:"not null;default:false;index" json:"is_system"`
 	IsCloned       bool              `gorm:"not null;default:false" json:"is_cloned"`

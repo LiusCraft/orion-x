@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/components/ui/select";
 import { providerApi, type Provider, type ProviderSlug } from "@/lib/api";
+import { useAuthStore } from "@/lib/store";
 
 const CATEGORY_LABEL: Record<string, string> = {
   llm: "LLM 大语言模型",
@@ -30,6 +31,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 export default function ProvidersPage() {
+  const isAdmin = useAuthStore((state) => state.isAdmin);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [slugOptions, setSlugOptions] = useState<ProviderSlug[]>([]);
   const [loading, setLoading] = useState(true);
@@ -215,7 +217,7 @@ export default function ProvidersPage() {
                       </button>
                     </div>
                   )}
-                  {p.is_system && (
+                  {p.is_system && isAdmin && (
                     <button
                       onClick={() => openEdit(p)}
                       className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-500 hover:text-zinc-300 p-1.5 rounded hover:bg-zinc-800 cursor-pointer"
