@@ -16,7 +16,6 @@ type Adapter interface {
 
 type Config struct {
 	Adapter         string
-	Dialect         string
 	APIKey          string
 	BaseURL         string
 	Model           string

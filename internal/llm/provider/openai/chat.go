@@ -19,7 +19,6 @@ type Config struct {
 	APIKey          string
 	BaseURL         string
 	Model           string
-	Dialect         string
 	Scope           string
 	Options         []byte
 	ExtraFields     map[string]any
@@ -43,7 +42,6 @@ func init() {
 			APIKey:          cfg.APIKey,
 			BaseURL:         cfg.BaseURL,
 			Model:           cfg.Model,
-			Dialect:         cfg.Dialect,
 			Scope:           cfg.Scope,
 			Options:         cfg.Options,
 			ExtraFields:     cfg.ExtraFields,
@@ -184,7 +182,7 @@ func (c *chatAdapter) params(req llm.Request) (openai.ChatCompletionNewParams, e
 	if thinking.IsDefault() {
 		thinking = c.cfg.Thinking
 	}
-	if err := applyDialect(&params, c.cfg.Dialect, c.cfg.Model, thinking, req.ProviderOptions); err != nil {
+	if err := applyDialect(&params, c.cfg.Model, thinking, req.ProviderOptions); err != nil {
 		return params, err
 	}
 	return params, nil
@@ -319,15 +317,15 @@ func applyProviderContext(params interface{ SetExtraFields(map[string]any) }, co
 	}
 }
 
-func applyDialect(params *openai.ChatCompletionNewParams, dialect, model string, thinking llm.ThinkingConfig, raw []byte) error {
-	dialect = strings.ToLower(strings.TrimSpace(dialect))
-	if dialect == "" || dialect == "openai" || dialect == "generic" {
+func applyDialect(params *openai.ChatCompletionNewParams, model string, thinking llm.ThinkingConfig, raw []byte) error {
+	dialect := provider.InferDialect(model)
+	if dialect == provider.DialectGeneric {
 		return nil
 	}
 	fields := map[string]any{}
 	switch dialect {
-	case "minimax":
-		if thinking.Mode == llm.ThinkingModeDisabled && strings.HasPrefix(strings.ToLower(model), "minimax-m2") {
+	case provider.DialectMiniMax:
+		if thinking.Mode == llm.ThinkingModeDisabled && strings.Contains(strings.ToLower(model), "minimax-m2") {
 			return &llm.UnsupportedOptionError{Adapter: "minimax", Option: "thinking.disabled", Reason: "M2.x thinking cannot be disabled"}
 		}
 		switch thinking.Mode {
@@ -339,7 +337,7 @@ func applyDialect(params *openai.ChatCompletionNewParams, dialect, model string,
 		if thinking.ExposeSummary {
 			fields["reasoning_split"] = true
 		}
-	case "deepseek":
+	case provider.DialectDeepSeek:
 		switch thinking.Mode {
 		case llm.ThinkingModeEnabled:
 			fields["thinking"] = map[string]string{"type": "enabled"}
@@ -359,7 +357,7 @@ func applyDialect(params *openai.ChatCompletionNewParams, dialect, model string,
 			}
 			params.ReasoningEffort = shared.ReasoningEffort(effort)
 		}
-	case "qwen":
+	case provider.DialectQwen:
 		switch thinking.Mode {
 		case llm.ThinkingModeEnabled:
 			fields["enable_thinking"] = true
@@ -372,7 +370,7 @@ func applyDialect(params *openai.ChatCompletionNewParams, dialect, model string,
 		if thinking.PreserveHistory == llm.PreserveModeAll {
 			fields["preserve_thinking"] = true
 		}
-	case "kimi":
+	case provider.DialectKimi:
 		lowerModel := strings.ToLower(model)
 		if strings.Contains(lowerModel, "k3") || strings.Contains(lowerModel, "k2.7-code") {
 			if thinking.Mode == llm.ThinkingModeDisabled {

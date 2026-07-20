@@ -275,7 +275,6 @@ func (c *TGChannel) handleText(ctx context.Context, deviceID string, chatID int6
 	connMgr := c.toolsMgr.Clone()
 	agentCfg := agent.Config{
 		Provider:        deviceCfg.Provider.LLM.Type,
-		Dialect:         deviceCfg.Provider.LLM.OpenAI.Dialect,
 		APIKey:          deviceCfg.Provider.LLM.OpenAI.APIKey,
 		BaseURL:         deviceCfg.Provider.LLM.OpenAI.BaseURL,
 		Model:           deviceCfg.Provider.LLM.OpenAI.Model,

@@ -15,7 +15,6 @@ var (
 
 type Config struct {
 	Provider        string
-	Dialect         string
 	APIKey          string
 	BaseURL         string
 	Model           string

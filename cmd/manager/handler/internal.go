@@ -181,10 +181,8 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 			if m.Provider != nil {
 				full.Provider.LLM.Type = llmAdapterFromSlug(m.Provider.Slug)
 				full.Provider.LLM.OpenAI.APIKey = m.Provider.APIKeyEnc
-				full.Provider.LLM.OpenAI.Dialect = stringValue(m.Provider.Extra, "dialect")
 				full.Provider.LLM.OpenAI.ExtraFields = mapValue(m.Provider.Extra, "extra_fields")
 			}
-			full.Provider.LLM.OpenAI.Dialect = firstNonEmpty(stringValue(m.Extra, "dialect"), full.Provider.LLM.OpenAI.Dialect)
 			if options := mapValue(m.Extra, "options"); options != nil {
 				full.Provider.LLM.OpenAI.Options, _ = json.Marshal(options)
 			}
@@ -257,23 +255,7 @@ func llmAdapterFromSlug(slug string) string {
 	}
 }
 
-func stringValue(values map[string]any, key string) string {
-	if value, ok := values[key].(string); ok {
-		return value
-	}
-	return ""
-}
-
 func mapValue(values map[string]any, key string) map[string]any {
 	value, _ := values[key].(map[string]any)
 	return value
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }

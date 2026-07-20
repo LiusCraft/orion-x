@@ -83,7 +83,6 @@ func main() {
 	}()
 	agentCfg := agent.Config{
 		Provider:        appConfig.Provider.LLM.Type,
-		Dialect:         llmCfg.Dialect,
 		APIKey:          llmCfg.APIKey,
 		BaseURL:         llmCfg.BaseURL,
 		Model:           llmCfg.Model,

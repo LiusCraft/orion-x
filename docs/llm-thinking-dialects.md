@@ -4,19 +4,19 @@
 
 ## 1. 结论
 
-四家虽然都提供 OpenAI-compatible API，但 thinking 不能作为未经区分的 `extra_fields` 处理。正确的识别维度至少是：
+四家虽然都提供 OpenAI-compatible API，但 thinking 不能作为未经区分的 `extra_fields` 处理。正确的识别维度是：
 
 ```text
-adapter + dialect + model family
+adapter + model ID
 ```
 
 - `adapter` 决定基础协议，例如 `openai-completions` 或 `openai-responses`；
-- `dialect` 决定扩展字段如何映射，例如 `minimax`、`deepseek`、`qwen`、`kimi`；
-- `model family` 决定某个能力是否可关闭、支持哪些 effort、是否强制保留历史 reasoning。
+- adapter 从确定的 `model ID` 内置推导 dialect，例如 `minimax`、`deepseek`、`qwen`、`kimi`；
+- model family 同时决定某个能力是否可关闭、支持哪些 effort、是否强制保留历史 reasoning。
 
 同一厂商也可能因 endpoint 或模型族而使用不同配置。最明显的例子是：Qwen Chat Completions 使用 `enable_thinking`，Qwen Responses 使用 `reasoning.effort`；Kimi K3 使用 `reasoning_effort`，Kimi K2.6 使用 `thinking.type/keep`。
 
-因此，公共层可以提供统一的语义配置，但 adapter 必须通过 dialect/model capability 做严格映射和拒绝，不能把同一 JSON 原样发给所有兼容服务。
+因此，公共层可以提供统一的语义配置，但 adapter 必须通过 model ID 推导出的 dialect/model capability 做严格映射和拒绝，不能把同一 JSON 原样发给所有兼容服务。
 
 ## 2. 总览
 
@@ -275,7 +275,7 @@ PreserveMode:   default | none | all
 映射规则：
 
 1. `default` 表示省略字段，保留 provider/model 默认行为；
-2. dialect mapper 只映射目标确实支持的组合；
+2. adapter 根据确定的 model ID 推导 dialect，dialect mapper 只映射目标确实支持的组合；
 3. 无法兑现的配置返回 `UnsupportedOptionError`，例如 M2.x/Kimi K3 关闭 thinking；
 4. vendor 的兼容降级不应伪装成真实档位，例如 DeepSeek `medium -> high`；
 5. `BudgetTokens` 只发给明确支持的 Qwen Chat 模型；
@@ -319,14 +319,13 @@ params.SetExtraFields(map[string]any{
 
 这仍然是 SDK-first：网络、SSE framing、JSON 到 SDK struct 的解码全部由官方 SDK 完成，Orion-X 只解释 SDK 明确保留的扩展字段。
 
-## 9. 推荐配置模型
+## 9. Dialect 解析模型
 
-Provider 配置应区分 adapter 与 dialect：
+Provider 配置只选择 wire adapter，dialect 由 adapter 根据 model ID 内置推导：
 
 ```json
 {
   "adapter": "openai-completions",
-  "dialect": "deepseek",
   "model": "deepseek-v4-pro",
   "thinking": {
     "mode": "enabled",
@@ -336,12 +335,13 @@ Provider 配置应区分 adapter 与 dialect：
 }
 ```
 
+`dialect` 不是用户配置项，也不从 provider 或 model 的扩展字段读取。未知 model ID 回退为 `generic`，不发送任何厂商私有 thinking 字段。
+
 Qwen Responses 示例：
 
 ```json
 {
   "adapter": "openai-responses",
-  "dialect": "qwen",
   "model": "qwen3.7-plus",
   "thinking": {
     "mode": "enabled",
@@ -355,7 +355,6 @@ MiniMax 返回格式属于 dialect option：
 ```json
 {
   "adapter": "openai-completions",
-  "dialect": "minimax",
   "model": "MiniMax-M3",
   "thinking": {
     "mode": "enabled"
