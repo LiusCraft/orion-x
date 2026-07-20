@@ -93,7 +93,7 @@ func (h *ModelHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if m.IsSystem || m.Creator != middleware.UserID(c) {
+	if (m.IsSystem && !middleware.IsAdmin(c)) || (!m.IsSystem && m.Creator != middleware.UserID(c)) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -137,11 +137,11 @@ func (h *ModelHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if m.Creator != middleware.UserID(c) {
+	if (!m.IsSystem && m.Creator != middleware.UserID(c)) || (m.IsSystem && !middleware.IsAdmin(c)) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
-	if err := h.models.Delete(m.ID); err != nil {
+	if err := h.models.Delete(m.ID, middleware.IsAdmin(c)); err != nil {
 		if errors.Is(err, store.ErrSystemRecord) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "cannot delete system model"})
 			return

@@ -23,7 +23,7 @@ func newRouter(
 	mcpMarket *store.MCPMarketStore,
 	mcpServers *store.MCPServerStore,
 	mcpBindings *store.VoicebotMCPBindingStore,
-	signToken func(userID string) (string, error),
+	signToken func(userID string, isAdmin bool) (string, error),
 	memStore *store.MemoryEntryStore,
 	turnStore *store.TurnStore,
 	kbSvc *knowledge.Service,

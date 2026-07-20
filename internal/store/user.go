@@ -54,3 +54,7 @@ func (s *UserStore) UpdatePassword(id, newHash string) error {
 func (s *UserStore) UpdateEmail(id, email string) error {
 	return s.db.Model(&User{}).Where("id = ?", id).Update("email", email).Error
 }
+
+func (s *UserStore) SetAdmin(id string, isAdmin bool) error {
+	return s.db.Model(&User{}).Where("id = ?", id).Update("is_admin", isAdmin).Error
+}

@@ -90,7 +90,7 @@ func (h *ProviderHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if !p.IsSystem && p.Creator != middleware.UserID(c) {
+	if (p.IsSystem && !middleware.IsAdmin(c)) || (!p.IsSystem && p.Creator != middleware.UserID(c)) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -173,7 +173,7 @@ func (h *ProviderHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if p.Creator != middleware.UserID(c) {
+	if p.IsSystem || p.Creator != middleware.UserID(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}

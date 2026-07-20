@@ -9,7 +9,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const userIDKey = "userID"
+const (
+	userIDKey = "userID"
+	adminKey  = "isAdmin"
+)
 
 // JWT returns a Gin middleware that validates Bearer tokens.
 func JWT(secret []byte) gin.HandlerFunc {
@@ -38,6 +41,9 @@ func JWT(secret []byte) gin.HandlerFunc {
 			return
 		}
 		c.Set(userIDKey, sub)
+		if isAdmin, ok := tok.Claims.(jwt.MapClaims)["is_admin"].(bool); ok {
+			c.Set(adminKey, isAdmin)
+		}
 		c.Next()
 	}
 }
@@ -47,4 +53,10 @@ func UserID(c *gin.Context) string {
 	id, _ := c.Get(userIDKey)
 	s, _ := id.(string)
 	return s
+}
+
+func IsAdmin(c *gin.Context) bool {
+	isAdmin, _ := c.Get(adminKey)
+	v, _ := isAdmin.(bool)
+	return v
 }

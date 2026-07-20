@@ -69,21 +69,30 @@ func main() {
 	kbStore := store.NewKnowledgeBaseStore(db)
 	docStore := store.NewDocumentStore(db)
 	voicebotKBs := store.NewVoicebotKBStore(db)
-	if pass := strings.TrimSpace(cfg.Admin.Password); pass != "" {
-		if _, err := users.GetByUsername(cfg.Admin.Username); errors.Is(err, store.ErrNotFound) {
+	admin, adminErr := users.GetByUsername(cfg.Admin.Username)
+	if errors.Is(adminErr, store.ErrNotFound) {
+		if pass := strings.TrimSpace(cfg.Admin.Password); pass != "" {
 			hash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
 			if err != nil {
 				logging.Fatalf("hash admin password: %v", err)
 			}
-			if _, err := users.Create(cfg.Admin.Username, string(hash), "system"); err != nil {
-				logging.Fatalf("create admin user: %v", err)
+			admin, adminErr = users.Create(cfg.Admin.Username, string(hash), "system")
+			if adminErr != nil {
+				logging.Fatalf("create admin user: %v", adminErr)
 			}
 			logging.Infof("created admin user %q", cfg.Admin.Username)
+		}
+	} else if adminErr != nil {
+		logging.Fatalf("load admin user: %v", adminErr)
+	}
+	if admin != nil && !admin.IsAdmin {
+		if err := users.SetAdmin(admin.ID, true); err != nil {
+			logging.Fatalf("promote admin user: %v", err)
 		}
 	}
 
 	secret := []byte(cfg.JWT.Secret)
-	sign := func(userID string) (string, error) { return signToken(secret, userID) }
+	sign := func(userID string, isAdmin bool) (string, error) { return signToken(secret, userID, isAdmin) }
 
 	// Knowledge base service — always created, users must configure embedding model to use it.
 	kbRet, err := retriever.NewPGVector(db, 1536)
