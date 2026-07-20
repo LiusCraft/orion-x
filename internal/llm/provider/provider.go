@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/liuscraft/orion-x/internal/language"
@@ -10,16 +11,24 @@ import (
 )
 
 type Adapter interface {
-	Chat(ctx context.Context, req llm.Request) (*llm.StreamReader, error)
-	ChatSync(ctx context.Context, req llm.Request) (llm.Message, error)
+	llm.GenerationClient
 }
 
 type Config struct {
-	Type        string
-	APIKey      string
-	BaseURL     string
-	Model       string
-	ExtraFields map[string]any
+	Adapter         string
+	Dialect         string
+	APIKey          string
+	BaseURL         string
+	Model           string
+	Scope           string
+	Headers         map[string]string
+	Options         []byte
+	ExtraFields     map[string]any
+	Thinking        llm.ThinkingConfig
+	MaxOutputTokens int
+
+	// Type is the deprecated name for Adapter.
+	Type string
 }
 
 type AdapterConstructor func(context.Context, Config) (Adapter, error)
@@ -96,14 +105,20 @@ type Client struct {
 }
 
 func NewClient(ctx context.Context, registry *Registry, cfg Config) (llm.Client, error) {
-	providerType := strings.ToLower(strings.TrimSpace(cfg.Type))
+	providerType := strings.ToLower(strings.TrimSpace(cfg.Adapter))
 	if providerType == "" {
-		providerType = "openai"
+		providerType = strings.ToLower(strings.TrimSpace(cfg.Type))
+	}
+	if providerType == "" {
+		providerType = "openai-completions"
+	}
+	if providerType == "openai" {
+		providerType = "openai-completions"
 	}
 
 	constructor, ok := registry.Get(providerType)
 	if !ok {
-		return nil, fmt.Errorf("unsupported llm provider: %s", cfg.Type)
+		return nil, fmt.Errorf("unsupported llm provider: %s", providerType)
 	}
 
 	adapter, err := constructor(ctx, cfg)
@@ -119,11 +134,55 @@ func NewClient(ctx context.Context, registry *Registry, cfg Config) (llm.Client,
 }
 
 func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.StreamReader, error) {
-	return c.adapter.Chat(ctx, req)
+	stream, err := c.adapter.Stream(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	legacy := llm.NewStreamReader(func() { _ = stream.Close() })
+	go func() {
+		defer legacy.Close()
+		for {
+			event, recvErr := stream.Recv()
+			if recvErr != nil {
+				if recvErr != io.EOF {
+					legacy.SendError(recvErr)
+				}
+				return
+			}
+			switch event.Type {
+			case llm.EventTextDelta:
+				legacy.Send(llm.Message{Role: string(llm.RoleAssistant), Content: event.TextDelta})
+			case llm.EventResponseDone:
+				if event.Response == nil {
+					continue
+				}
+				calls := event.Response.Message.Calls()
+				if len(calls) > 0 {
+					legacy.Send(llm.Message{Role: string(llm.RoleAssistant), ToolCalls: calls})
+				}
+			}
+		}
+	}()
+	return legacy, nil
 }
 
 func (c *Client) ChatSync(ctx context.Context, req llm.Request) (llm.Message, error) {
-	return c.adapter.ChatSync(ctx, req)
+	resp, err := c.adapter.Generate(ctx, req)
+	if err != nil {
+		return llm.Message{}, err
+	}
+	msg := resp.Message
+	msg.Content = msg.Text()
+	msg.ToolCalls = msg.Calls()
+	return msg, nil
+}
+
+func (c *Client) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
+	return c.adapter.Generate(ctx, req)
+}
+
+func (c *Client) Stream(ctx context.Context, req llm.Request) (llm.Stream, error) {
+	return c.adapter.Stream(ctx, req)
 }
 
 var defaultRegistry = NewRegistry()
@@ -138,4 +197,12 @@ func Register(key string, constructor AdapterConstructor, meta ProviderMeta) {
 
 func NewClientWithDefault(ctx context.Context, cfg Config) (llm.Client, error) {
 	return NewClient(ctx, defaultRegistry, cfg)
+}
+
+func NewGenerationClientWithDefault(ctx context.Context, cfg Config) (llm.GenerationClient, error) {
+	client, err := NewClient(ctx, defaultRegistry, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return client.(*Client), nil
 }

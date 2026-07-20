@@ -274,13 +274,17 @@ func (c *TGChannel) handleText(ctx context.Context, deviceID string, chatID int6
 
 	connMgr := c.toolsMgr.Clone()
 	agentCfg := agent.Config{
-		Provider:    deviceCfg.Provider.LLM.Type,
-		APIKey:      deviceCfg.Provider.LLM.OpenAI.APIKey,
-		BaseURL:     deviceCfg.Provider.LLM.OpenAI.BaseURL,
-		Model:       deviceCfg.Provider.LLM.OpenAI.Model,
-		SoulPrompt:  deviceCfg.Provider.LLM.OpenAI.SoulPrompt,
-		RulesPrompt: deviceCfg.Provider.LLM.OpenAI.RulesPrompt,
-		ExtraFields: deviceCfg.Provider.LLM.OpenAI.ExtraFields,
+		Provider:        deviceCfg.Provider.LLM.Type,
+		Dialect:         deviceCfg.Provider.LLM.OpenAI.Dialect,
+		APIKey:          deviceCfg.Provider.LLM.OpenAI.APIKey,
+		BaseURL:         deviceCfg.Provider.LLM.OpenAI.BaseURL,
+		Model:           deviceCfg.Provider.LLM.OpenAI.Model,
+		SoulPrompt:      deviceCfg.Provider.LLM.OpenAI.SoulPrompt,
+		RulesPrompt:     deviceCfg.Provider.LLM.OpenAI.RulesPrompt,
+		ExtraFields:     deviceCfg.Provider.LLM.OpenAI.ExtraFields,
+		ProviderOptions: deviceCfg.Provider.LLM.OpenAI.Options,
+		Thinking:        deviceCfg.Provider.LLM.OpenAI.Thinking,
+		MaxOutputTokens: deviceCfg.Provider.LLM.OpenAI.MaxOutputTokens,
 	}
 	llmClient, err := c.providers.GetOrCreateLLM(ctx, deviceCfg.Provider.LLM.Type, deviceCfg.Provider.LLM.OpenAI)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/liuscraft/orion-x/internal/language"
+	"github.com/liuscraft/orion-x/internal/llm"
 	asrprovider "github.com/liuscraft/orion-x/internal/provider/asr"
 	ttsprovider "github.com/liuscraft/orion-x/internal/provider/tts"
 )
@@ -53,12 +54,16 @@ type TTSConfig struct {
 }
 
 type LLMConfig struct {
-	APIKey      string         `json:"api_key"`
-	BaseURL     string         `json:"base_url"`
-	Model       string         `json:"model"`
-	SoulPrompt  string         `json:"soul_prompt,omitempty"`
-	RulesPrompt string         `json:"rules_prompt,omitempty"`
-	ExtraFields map[string]any `json:"extra_fields,omitempty"`
+	APIKey          string             `json:"api_key"`
+	BaseURL         string             `json:"base_url"`
+	Model           string             `json:"model"`
+	Dialect         string             `json:"dialect,omitempty"`
+	Options         json.RawMessage    `json:"options,omitempty"`
+	Thinking        llm.ThinkingConfig `json:"thinking,omitempty"`
+	MaxOutputTokens int                `json:"max_output_tokens,omitempty"`
+	SoulPrompt      string             `json:"soul_prompt,omitempty"`
+	RulesPrompt     string             `json:"rules_prompt,omitempty"`
+	ExtraFields     map[string]any     `json:"extra_fields,omitempty"`
 }
 
 type ProviderConfig struct {
@@ -184,8 +189,9 @@ func DefaultConfig() *AppConfig {
 		},
 	}
 	defaultLLM := LLMConfig{
-		BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
-		Model:   "glm-4-flash",
+		BaseURL:  "https://open.bigmodel.cn/api/coding/paas/v4",
+		Model:    "glm-4-flash",
+		Thinking: llm.ThinkingConfig{Mode: llm.ThinkingModeDisabled},
 	}
 
 	return &AppConfig{
@@ -326,8 +332,10 @@ func (c *AppConfig) Validate() error {
 	if strings.ToLower(strings.TrimSpace(c.Provider.TTS.Type)) != "aliyun" {
 		return fmt.Errorf("provider.tts.type must be aliyun")
 	}
-	if strings.ToLower(strings.TrimSpace(c.Provider.LLM.Type)) != "openai" {
-		return fmt.Errorf("provider.llm.type must be openai")
+	switch strings.ToLower(strings.TrimSpace(c.Provider.LLM.Type)) {
+	case "openai", "openai-completions", "openai-responses", "anthropic-messages":
+	default:
+		return fmt.Errorf("unsupported provider.llm.type: %s", c.Provider.LLM.Type)
 	}
 	if ttsCfg.SampleRate <= 0 {
 		return errors.New("provider.tts.aliyun.sample_rate must be positive")

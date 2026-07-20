@@ -57,9 +57,10 @@ func (a *Agent) runLoop(ctx context.Context, sess *session.Session, emit func(Ag
 		}
 
 		sess.Add(session.Message{
-			Role:      session.RoleAssistant,
-			Content:   result.text,
-			ToolCalls: toSessionToolCalls(result.toolCalls),
+			Role:            session.RoleAssistant,
+			Content:         result.text,
+			ToolCalls:       toSessionToolCalls(result.toolCalls),
+			ProviderContext: result.providerContext,
 		})
 
 		if len(result.toolCalls) == 0 {

@@ -45,7 +45,9 @@ func (p *Pool) GetOrCreateLLM(ctx context.Context, providerType string, cfg conf
 		return existing, nil
 	}
 	created, err := llmprovider.NewClientWithDefault(ctx, llmprovider.Config{
-		Type: providerType, APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model, ExtraFields: cfg.ExtraFields,
+		Adapter: providerType, Type: providerType, APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model,
+		Dialect: cfg.Dialect, Options: cfg.Options, ExtraFields: cfg.ExtraFields, Thinking: cfg.Thinking,
+		MaxOutputTokens: cfg.MaxOutputTokens,
 	})
 	if err != nil {
 		return nil, err

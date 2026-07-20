@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"github.com/liuscraft/orion-x/internal/config"
+	"github.com/liuscraft/orion-x/internal/llm"
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
@@ -67,7 +69,6 @@ func (h *InternalHandler) DeviceConfig(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", []byte(v.ConfigJSON))
 }
 
-
 // GET /internal/devices/tg-bots — 返回所有配置了 TG Bot Token 的设备列表。
 func (h *InternalHandler) DeviceTGBots(c *gin.Context) {
 	devices, err := h.devices.ListWithTGBot()
@@ -76,10 +77,10 @@ func (h *InternalHandler) DeviceTGBots(c *gin.Context) {
 		return
 	}
 	type tgBotDevice struct {
-		DeviceID    string `json:"device_id"`
-		DeviceName  string `json:"device_name"`
-		TgBotToken  string `json:"tg_bot_token"`
-		VoicebotID  string `json:"voicebot_id"`
+		DeviceID     string `json:"device_id"`
+		DeviceName   string `json:"device_name"`
+		TgBotToken   string `json:"tg_bot_token"`
+		VoicebotID   string `json:"voicebot_id"`
 		VoicebotName string `json:"voicebot_name,omitempty"`
 	}
 	result := make([]tgBotDevice, 0, len(devices))
@@ -178,7 +179,14 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 		if m, err := h.models.GetByID(ac.LLM.ModelID); err == nil {
 			full.Provider.LLM.OpenAI.Model = m.ModelID
 			if m.Provider != nil {
+				full.Provider.LLM.Type = llmAdapterFromSlug(m.Provider.Slug)
 				full.Provider.LLM.OpenAI.APIKey = m.Provider.APIKeyEnc
+				full.Provider.LLM.OpenAI.Dialect = stringValue(m.Provider.Extra, "dialect")
+				full.Provider.LLM.OpenAI.ExtraFields = mapValue(m.Provider.Extra, "extra_fields")
+			}
+			full.Provider.LLM.OpenAI.Dialect = firstNonEmpty(stringValue(m.Extra, "dialect"), full.Provider.LLM.OpenAI.Dialect)
+			if options := mapValue(m.Extra, "options"); options != nil {
+				full.Provider.LLM.OpenAI.Options, _ = json.Marshal(options)
 			}
 			if m.BaseURL != "" {
 				full.Provider.LLM.OpenAI.BaseURL = m.BaseURL
@@ -186,6 +194,10 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 				full.Provider.LLM.OpenAI.BaseURL = m.Provider.BaseURL
 			}
 		}
+	}
+	full.Provider.LLM.OpenAI.Thinking = ac.LLM.Thinking
+	if full.Provider.LLM.OpenAI.Thinking.IsDefault() {
+		full.Provider.LLM.OpenAI.Thinking.Mode = llm.ThinkingModeDisabled
 	}
 	if ac.LLM.SoulPrompt != "" {
 		full.Provider.LLM.OpenAI.SoulPrompt = ac.LLM.SoulPrompt
@@ -230,4 +242,38 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 	}
 
 	return full, nil
+}
+
+func llmAdapterFromSlug(slug string) string {
+	switch strings.ToLower(strings.TrimSpace(slug)) {
+	case "llm/openai-responses", "openai-responses":
+		return "openai-responses"
+	case "llm/anthropic-messages", "anthropic-messages":
+		return "anthropic-messages"
+	case "llm/openai", "openai", "llm/openai-completions", "openai-completions":
+		return "openai-completions"
+	default:
+		return "openai-completions"
+	}
+}
+
+func stringValue(values map[string]any, key string) string {
+	if value, ok := values[key].(string); ok {
+		return value
+	}
+	return ""
+}
+
+func mapValue(values map[string]any, key string) map[string]any {
+	value, _ := values[key].(map[string]any)
+	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

@@ -16,7 +16,9 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/knowledge/retriever"
+	_ "github.com/liuscraft/orion-x/internal/llm/provider/anthropic/messages"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
+	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai/responses"
 	"github.com/liuscraft/orion-x/internal/logging"
 	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
 	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
