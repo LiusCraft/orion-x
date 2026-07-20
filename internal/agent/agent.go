@@ -11,14 +11,17 @@ import (
 )
 
 type Agent struct {
-	client      llm.Client
-	registry    *tools.Registry
-	model       string
-	memorySvc   *memory.Service
-	maxSteps    int
-	soulPrompt  string
-	rulesPrompt string
-	currentLang string // language code currently reflected in system prompt
+	client          llm.Client
+	registry        *tools.Registry
+	model           string
+	memorySvc       *memory.Service
+	maxSteps        int
+	soulPrompt      string
+	rulesPrompt     string
+	currentLang     string // language code currently reflected in system prompt
+	thinking        llm.ThinkingConfig
+	options         []byte
+	maxOutputTokens int
 }
 
 // RegisterBuiltinTool adds a tool spec to the agent's registry.
@@ -33,11 +36,15 @@ func New(ctx context.Context, cfg Config, mgr *tools.Manager, memorySvc *memory.
 		return nil, err
 	}
 	client, err := llmprovider.NewClientWithDefault(ctx, llmprovider.Config{
-		Type:        normalized.Provider,
-		BaseURL:     normalized.BaseURL,
-		Model:       normalized.Model,
-		APIKey:      normalized.APIKey,
-		ExtraFields: normalized.ExtraFields,
+		Type:            normalized.Provider,
+		Dialect:         normalized.Dialect,
+		BaseURL:         normalized.BaseURL,
+		Model:           normalized.Model,
+		APIKey:          normalized.APIKey,
+		ExtraFields:     normalized.ExtraFields,
+		Options:         normalized.ProviderOptions,
+		Thinking:        normalized.Thinking,
+		MaxOutputTokens: normalized.MaxOutputTokens,
 	})
 	if err != nil {
 		return nil, err
@@ -63,7 +70,7 @@ func newWithClientForConfig(client llm.Client, cfg Config, mgr *tools.Manager, m
 	if mgr == nil {
 		return nil, errors.New("tool manager is required")
 	}
-	return newWithClient(client, mgr.Registry(), cfg.Model, memorySvc, cfg.SoulPrompt, cfg.RulesPrompt), nil
+	return newWithClientConfig(client, mgr.Registry(), cfg, memorySvc), nil
 }
 
 // newWithClient 使用已构造好的 llm.Client 组装 Agent，供测试注入 fake client。
@@ -77,6 +84,14 @@ func newWithClient(client llm.Client, registry *tools.Registry, model string, me
 		soulPrompt:  soulPrompt,
 		rulesPrompt: rulesPrompt,
 	}
+}
+
+func newWithClientConfig(client llm.Client, registry *tools.Registry, cfg Config, memorySvc *memory.Service) *Agent {
+	a := newWithClient(client, registry, cfg.Model, memorySvc, cfg.SoulPrompt, cfg.RulesPrompt)
+	a.thinking = cfg.Thinking
+	a.options = append([]byte(nil), cfg.ProviderOptions...)
+	a.maxOutputTokens = cfg.MaxOutputTokens
+	return a
 }
 
 func (a *Agent) SetMaxSteps(n int) {

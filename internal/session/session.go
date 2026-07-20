@@ -28,13 +28,14 @@ type ToolCall struct {
 
 // Message represents a single chat message in a session.
 type Message struct {
-	ID         string     `json:"id"`
-	Role       Role       `json:"role"`
-	Content    string     `json:"content"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	Status     string     `json:"status,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
+	ID              string               `json:"id"`
+	Role            Role                 `json:"role"`
+	Content         string               `json:"content"`
+	ToolCallID      string               `json:"tool_call_id,omitempty"`
+	ToolCalls       []ToolCall           `json:"tool_calls,omitempty"`
+	ProviderContext *llm.ProviderContext `json:"provider_context,omitempty"`
+	Status          string               `json:"status,omitempty"`
+	CreatedAt       time.Time            `json:"created_at"`
 }
 
 // SessionMeta holds metadata about a session.
@@ -115,9 +116,10 @@ func (s *Session) ToLLMMessages() []llm.Message {
 	result := make([]llm.Message, len(s.Messages))
 	for i, msg := range s.Messages {
 		result[i] = llm.Message{
-			Role:       string(msg.Role),
-			Content:    msg.Content,
-			ToolCallID: msg.ToolCallID,
+			Role:            string(msg.Role),
+			Content:         msg.Content,
+			ToolCallID:      msg.ToolCallID,
+			ProviderContext: cloneProviderContext(msg.ProviderContext),
 		}
 		if len(msg.ToolCalls) > 0 {
 			result[i].ToolCalls = make([]llm.ToolCall, len(msg.ToolCalls))
@@ -161,8 +163,18 @@ func (s *Session) Clone() *Session {
 				cloned.Messages[i].ToolCalls = make([]ToolCall, len(s.Messages[i].ToolCalls))
 				copy(cloned.Messages[i].ToolCalls, s.Messages[i].ToolCalls)
 			}
+			cloned.Messages[i].ProviderContext = cloneProviderContext(s.Messages[i].ProviderContext)
 		}
 	}
+	return &cloned
+}
+
+func cloneProviderContext(ctx *llm.ProviderContext) *llm.ProviderContext {
+	if ctx == nil {
+		return nil
+	}
+	cloned := *ctx
+	cloned.Data = append([]byte(nil), ctx.Data...)
 	return &cloned
 }
 

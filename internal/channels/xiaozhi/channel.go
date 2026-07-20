@@ -414,13 +414,17 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 	}
 
 	connAgentCfg := agent.Config{
-		Provider:    connCfg.Provider.LLM.Type,
-		APIKey:      connCfg.Provider.LLM.OpenAI.APIKey,
-		BaseURL:     connCfg.Provider.LLM.OpenAI.BaseURL,
-		Model:       connCfg.Provider.LLM.OpenAI.Model,
-		SoulPrompt:  connCfg.Provider.LLM.OpenAI.SoulPrompt,
-		RulesPrompt: connCfg.Provider.LLM.OpenAI.RulesPrompt,
-		ExtraFields: connCfg.Provider.LLM.OpenAI.ExtraFields,
+		Provider:        connCfg.Provider.LLM.Type,
+		Dialect:         connCfg.Provider.LLM.OpenAI.Dialect,
+		APIKey:          connCfg.Provider.LLM.OpenAI.APIKey,
+		BaseURL:         connCfg.Provider.LLM.OpenAI.BaseURL,
+		Model:           connCfg.Provider.LLM.OpenAI.Model,
+		SoulPrompt:      connCfg.Provider.LLM.OpenAI.SoulPrompt,
+		RulesPrompt:     connCfg.Provider.LLM.OpenAI.RulesPrompt,
+		ExtraFields:     connCfg.Provider.LLM.OpenAI.ExtraFields,
+		ProviderOptions: connCfg.Provider.LLM.OpenAI.Options,
+		Thinking:        connCfg.Provider.LLM.OpenAI.Thinking,
+		MaxOutputTokens: connCfg.Provider.LLM.OpenAI.MaxOutputTokens,
 	}
 	llmClient, err := s.providers.GetOrCreateLLM(ctx, connCfg.Provider.LLM.Type, connCfg.Provider.LLM.OpenAI)
 	if err != nil {

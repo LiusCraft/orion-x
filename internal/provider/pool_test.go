@@ -30,11 +30,13 @@ func (poolTTSProvider) Synthesize(context.Context, string, tts.SynthesisOptions)
 
 type poolLLMAdapter struct{}
 
-func (poolLLMAdapter) Chat(context.Context, llm.Request) (*llm.StreamReader, error) {
-	return llm.NewStreamReader(nil), nil
+func (poolLLMAdapter) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, nil
 }
-func (poolLLMAdapter) ChatSync(context.Context, llm.Request) (llm.Message, error) {
-	return llm.Message{}, nil
+func (poolLLMAdapter) Stream(context.Context, llm.Request) (llm.Stream, error) {
+	stream := llm.NewEventStream(nil)
+	stream.Finish()
+	return stream, nil
 }
 
 func TestPoolCachesTTSButCreatesASRPerSession(t *testing.T) {

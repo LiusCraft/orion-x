@@ -12,7 +12,9 @@ import (
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/config"
+	_ "github.com/liuscraft/orion-x/internal/llm/provider/anthropic/messages"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
+	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai/responses"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/provider/asr"
@@ -80,13 +82,17 @@ func main() {
 		}
 	}()
 	agentCfg := agent.Config{
-		Provider:    appConfig.Provider.LLM.Type,
-		APIKey:      llmCfg.APIKey,
-		BaseURL:     llmCfg.BaseURL,
-		Model:       llmCfg.Model,
-		SoulPrompt:  llmCfg.SoulPrompt,
-		RulesPrompt: llmCfg.RulesPrompt,
-		ExtraFields: llmCfg.ExtraFields,
+		Provider:        appConfig.Provider.LLM.Type,
+		Dialect:         llmCfg.Dialect,
+		APIKey:          llmCfg.APIKey,
+		BaseURL:         llmCfg.BaseURL,
+		Model:           llmCfg.Model,
+		SoulPrompt:      llmCfg.SoulPrompt,
+		RulesPrompt:     llmCfg.RulesPrompt,
+		ExtraFields:     llmCfg.ExtraFields,
+		ProviderOptions: llmCfg.Options,
+		Thinking:        llmCfg.Thinking,
+		MaxOutputTokens: llmCfg.MaxOutputTokens,
 	}
 	toolCfg := tools.ManagerConfig{
 		MCPServers: toToolsMCPServers(appConfig.Tools.MCP),

@@ -11,7 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/liuscraft/orion-x/internal/llm/provider/anthropic/messages"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
+	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai/responses"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/provider"

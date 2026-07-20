@@ -1,6 +1,9 @@
 package handler
 
-import "github.com/liuscraft/orion-x/internal/config"
+import (
+	"github.com/liuscraft/orion-x/internal/config"
+	"github.com/liuscraft/orion-x/internal/llm"
+)
 
 // AgentConfig is the minimal agent config stored in config_json.
 // It only stores model/voice references and user-adjustable parameters.
@@ -32,9 +35,10 @@ type TTSAgentConfig struct {
 }
 
 type LLMAgentConfig struct {
-	ModelID     string `json:"model_id"`
-	SoulPrompt  string `json:"soul_prompt,omitempty"`
-	RulesPrompt string `json:"rules_prompt,omitempty"`
+	ModelID     string             `json:"model_id"`
+	SoulPrompt  string             `json:"soul_prompt,omitempty"`
+	RulesPrompt string             `json:"rules_prompt,omitempty"`
+	Thinking    llm.ThinkingConfig `json:"thinking,omitempty"`
 }
 
 type AudioAgentConfig struct {
