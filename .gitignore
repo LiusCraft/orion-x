@@ -17,3 +17,4 @@ docs-site/public/openapi
 docs-site/node_modules
 web-ui/dist/
 web-ui/node_modules
+.zed/
