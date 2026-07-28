@@ -17,24 +17,12 @@
             "aliyun": {
                 "api_key": "",
                 "endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
-                "workspace": "",
                 "model": "cosyvoice-v3-flash",
                 "voice": "longanyang",
-                "format": "pcm",
                 "sample_rate": 16000,
-                "volume": 50,
-                "rate": 1.0,
-                "pitch": 1.0,
-                "text_type": "PlainText",
-                "enable_ssml": false,
-                "enable_data_inspection": true,
-                "voice_map": {
-                    "happy": "longanyang",
-                    "sad": "zhichu",
-                    "angry": "zhimeng",
-                    "calm": "longxiaochun",
-                    "excited": "longanyang",
-                    "default": "longanyang"
+                "extra": {
+                    "workspace": "",
+                    "data_inspection": true
                 }
             }
         },

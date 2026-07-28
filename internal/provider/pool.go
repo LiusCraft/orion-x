@@ -87,10 +87,9 @@ func (p *Pool) GetOrCreateTTS(providerType string, cfg config.TTSConfig, sampleR
 		return existing, nil
 	}
 	created, err := tts.NewProvider(tts.ProviderConfig{Type: providerType, Config: tts.Config{
-		APIKey: cfg.APIKey, Endpoint: cfg.Endpoint, Workspace: cfg.Workspace,
-		Model: cfg.Model, Voice: cfg.Voice, Format: "pcm", SampleRate: sampleRate,
-		Volume: cfg.Volume, Rate: cfg.Rate, Pitch: cfg.Pitch, EnableSSML: cfg.EnableSSML,
-		TextType: cfg.TextType, EnableDataInspection: cfg.EnableDataInspection,
+		APIKey: cfg.APIKey, Endpoint: cfg.Endpoint,
+		Model: cfg.Model, Voice: cfg.Voice, SampleRate: sampleRate,
+		Extra: config.BuildTTSExtra(cfg),
 	}})
 	if err != nil {
 		return nil, err

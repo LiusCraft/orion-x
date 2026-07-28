@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/liuscraft/orion-x/internal/language"
 	"github.com/liuscraft/orion-x/internal/logging"
 	tts "github.com/liuscraft/orion-x/internal/provider/tts"
 )
@@ -24,22 +23,9 @@ const defaultDashScopeEndpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inferen
 
 // DashScopeProvider 是有状态的 TTS Provider，基础配置在创建时注入。
 type DashScopeProvider struct {
-	cfg tts.Config // 已经 normalize 过
+	cfg tts.Config
 
-	// warming 防止并发预热（同时只允许一个 Warm 在运行）
 	warming atomic.Bool
-}
-
-func init() {
-	tts.Register(tts.TypeAliyun, func(cfg tts.Config) (tts.Provider, error) {
-		return NewDashScopeProvider(cfg)
-	}, tts.ProviderMeta{
-		Name:           "阿里云 Dashscope",
-		DefaultBaseURL: defaultDashScopeEndpoint,
-		Models: map[string]tts.ModelInfo{
-			"cosyvoice-v3-flash": {SupportedLanguages: []language.Code{language.ZH, language.EN}},
-		},
-	})
 }
 
 func NewDashScopeProvider(cfg tts.Config) (*DashScopeProvider, error) {
@@ -50,52 +36,28 @@ func NewDashScopeProvider(cfg tts.Config) (*DashScopeProvider, error) {
 	return &DashScopeProvider{cfg: normalized}, nil
 }
 
-// Warm 同步建立 WebSocket 连接并完成 task-started 握手，返回就绪的 stream。
-// ctx 取消时返回 nil。同时只允许一个 Warm 运行，重复调用直接返回 nil。
-// 实现 tts.WarmableProvider 接口，调用方应在 goroutine 里调用。
-func (p *DashScopeProvider) Warm(ctx context.Context, opts tts.SynthesisOptions) tts.SynthesisStream {
-	if !p.warming.CompareAndSwap(false, true) {
-		return nil
-	}
-	defer p.warming.Store(false)
+// ── Synthesizer 接口 ──
 
-	callCfg := p.cfg
-	if opts.Rate > 0 {
-		callCfg.Rate = opts.Rate
-	}
-	stream, err := p.newStream(ctx, callCfg, opts.Emotion)
-	if err != nil {
-		if !errors.Is(err, context.Canceled) {
-			logging.Warnf("AliyunTTS: warm failed: %v", err)
-		}
-		return nil
-	}
-	logging.Infof("AliyunTTS: warm stream ready")
-	return stream
-}
-
-// Synthesize 合成一段文本，返回 PCM 音频 reader。
-// 调用方在完整读取后需要 Close reader。
-func (p *DashScopeProvider) Synthesize(ctx context.Context, text string, opts tts.SynthesisOptions) (io.ReadCloser, error) {
-	if strings.TrimSpace(text) == "" {
-		return io.NopCloser(strings.NewReader("")), nil
+func (p *DashScopeProvider) Synthesize(ctx context.Context, req tts.SynthesizeRequest) (*tts.SynthesizeResult, error) {
+	if strings.TrimSpace(req.Input.Text) == "" {
+		return &tts.SynthesizeResult{
+			Audio:      io.NopCloser(strings.NewReader("")),
+			Format:     tts.FormatPCM,
+			SampleRate: p.cfg.SampleRate,
+		}, nil
 	}
 
 	totalStart := time.Now()
-	callCfg := p.cfg
-	if opts.Rate > 0 {
-		callCfg.Rate = opts.Rate
-	}
 	logging.Infof("AliyunTTS: synthesize start (text_len=%d, model=%s, voice=%s)",
-		len([]rune(text)), callCfg.Model, callCfg.Voice)
+		len([]rune(req.Input.Text)), p.cfg.Model, p.cfg.Voice)
 
-	stream, err := p.newStream(ctx, callCfg, opts.Emotion)
+	stream, err := p.newStream(ctx, req)
 	if err != nil {
 		logging.Errorf("AliyunTTS: create stream failed after %v: %v", time.Since(totalStart), err)
 		return nil, err
 	}
 
-	if err := stream.WriteTextChunk(ctx, text); err != nil {
+	if err := stream.WriteTextChunk(ctx, req.Input.Text); err != nil {
 		_ = stream.closeStream(ctx)
 		logging.Errorf("AliyunTTS: write text failed after %v: %v", time.Since(totalStart), err)
 		return nil, err
@@ -106,36 +68,54 @@ func (p *DashScopeProvider) Synthesize(ctx context.Context, text string, opts tt
 		return nil, err
 	}
 
-	logging.Infof("AliyunTTS: synthesize done (text_len=%d, total=%v)", len([]rune(text)), time.Since(totalStart))
-	return stream.audioBuf, nil
+	logging.Infof("AliyunTTS: synthesize done (text_len=%d, total=%v)", len([]rune(req.Input.Text)), time.Since(totalStart))
+	return &tts.SynthesizeResult{
+		Audio:      stream.audioBuf,
+		Format:     formatToSDK(req.Audio.Format),
+		SampleRate: p.cfg.SampleRate,
+	}, nil
 }
 
-// StartSynthesis 建立 WebSocket 连接并等待 task-started，返回可立即写文本的 stream。
-// 实现 tts.StreamingProvider 接口，供 TTSProcessor 走流式播放路径。
-func (p *DashScopeProvider) StartSynthesis(ctx context.Context, opts tts.SynthesisOptions) (tts.SynthesisStream, error) {
-	callCfg := p.cfg
-	if opts.Rate > 0 {
-		callCfg.Rate = opts.Rate
+// ── StreamingSynthesizer 接口 ──
+
+func (p *DashScopeProvider) StartSynthesis(ctx context.Context, req tts.SynthesizeRequest) (tts.SynthesisStream, error) {
+	return p.newStream(ctx, req)
+}
+
+// ── WarmableProvider 接口 ──
+
+func (p *DashScopeProvider) Warm(ctx context.Context, req tts.SynthesizeRequest) tts.SynthesisStream {
+	if !p.warming.CompareAndSwap(false, true) {
+		return nil
 	}
-	return p.newStream(ctx, callCfg, opts.Emotion)
+	defer p.warming.Store(false)
+
+	stream, err := p.newStream(ctx, req)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			logging.Warnf("AliyunTTS: warm failed: %v", err)
+		}
+		return nil
+	}
+	logging.Infof("AliyunTTS: warm stream ready")
+	return stream
 }
 
-func (p *DashScopeProvider) newStream(ctx context.Context, cfg tts.Config, emotion string) (*dashScopeStream, error) {
+func (p *DashScopeProvider) newStream(ctx context.Context, req tts.SynthesizeRequest) (*dashScopeStream, error) {
 	streamStart := time.Now()
-	connectStart := time.Now()
-	conn, err := connectDashScope(ctx, cfg)
+	conn, err := connectDashScope(ctx, p.cfg)
 	if err != nil {
-		logging.Errorf("AliyunTTS: websocket connect failed after %v: %v", time.Since(connectStart), err)
+		logging.Errorf("AliyunTTS: websocket connect failed after %v: %v", time.Since(streamStart), err)
 		return nil, err
 	}
-	logging.Infof("AliyunTTS: websocket connected in %v", time.Since(connectStart))
+	logging.Infof("AliyunTTS: websocket connected in %v", time.Since(streamStart))
 
 	audioBuf := newBufferedPipe(1024 * 1024)
 
 	stream := &dashScopeStream{
 		createdAt:          streamStart,
-		cfg:                cfg,
-		emotion:            emotion,
+		cfg:                p.cfg,
+		req:                req,
 		conn:               conn,
 		audioBuf:           audioBuf,
 		startedCh:          make(chan struct{}),
@@ -147,24 +127,19 @@ func (p *DashScopeProvider) newStream(ctx context.Context, cfg tts.Config, emoti
 
 	stream.startReceiver()
 
-	runTaskStart := time.Now()
 	if err := stream.sendRunTask(ctx); err != nil {
 		_ = conn.Close()
 		_ = audioBuf.Close()
-		logging.Errorf("AliyunTTS: send run-task failed after %v: %v", time.Since(runTaskStart), err)
+		logging.Errorf("AliyunTTS: send run-task failed: %v", err)
 		return nil, err
 	}
-	logging.Infof("AliyunTTS: run-task sent in %v", time.Since(runTaskStart))
 
-	waitStartedStart := time.Now()
 	if err := stream.waitStarted(ctx); err != nil {
 		_ = conn.Close()
 		_ = audioBuf.Close()
-		logging.Errorf("AliyunTTS: wait task-started failed after %v: %v", time.Since(waitStartedStart), err)
+		logging.Errorf("AliyunTTS: wait task-started failed: %v", err)
 		return nil, err
 	}
-	logging.Infof("AliyunTTS: task-started wait completed in %v (stream_ready=%v)",
-		time.Since(waitStartedStart), time.Since(streamStart))
 
 	return stream, nil
 }
@@ -173,7 +148,7 @@ type dashScopeStream struct {
 	createdAt time.Time
 
 	cfg      tts.Config
-	emotion  string
+	req      tts.SynthesizeRequest
 	conn     *websocket.Conn
 	audioBuf *bufferedPipe
 	writeMu  sync.Mutex
@@ -197,7 +172,6 @@ type dashScopeStream struct {
 	sentenceBoundaryCh chan tts.SentenceBoundary
 }
 
-// bufferedPipe is a thread-safe buffered pipe that doesn't block on write.
 type bufferedPipe struct {
 	buf    []byte
 	mu     sync.Mutex
@@ -218,11 +192,9 @@ func newBufferedPipe(maxLen int) *bufferedPipe {
 func (bp *bufferedPipe) Write(p []byte) (int, error) {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
-
 	if bp.closed {
 		return 0, io.ErrClosedPipe
 	}
-
 	bp.buf = append(bp.buf, p...)
 	bp.cond.Signal()
 	return len(p), nil
@@ -231,15 +203,12 @@ func (bp *bufferedPipe) Write(p []byte) (int, error) {
 func (bp *bufferedPipe) Read(p []byte) (int, error) {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
-
 	for len(bp.buf) == 0 && !bp.closed {
 		bp.cond.Wait()
 	}
-
 	if len(bp.buf) == 0 && bp.closed {
 		return 0, io.EOF
 	}
-
 	n := copy(p, bp.buf)
 	bp.buf = bp.buf[n:]
 	return n, nil
@@ -248,76 +217,41 @@ func (bp *bufferedPipe) Read(p []byte) (int, error) {
 func (bp *bufferedPipe) Close() error {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
-
 	bp.closed = true
 	bp.cond.Broadcast()
 	return nil
 }
 
-// closeStream 发送 finish-task 并等待所有音频接收完毕。conn 由 markDone 统一关闭。
 func (s *dashScopeStream) closeStream(ctx context.Context) error {
-	finishStart := time.Now()
 	if err := s.Finish(ctx); err != nil {
-		logging.Errorf("AliyunTTS: finish-task failed after %v: %v", time.Since(finishStart), err)
 		return err
 	}
-	logging.Infof("AliyunTTS: finish-task sent in %v", time.Since(finishStart))
 
-	waitDoneStart := time.Now()
 	select {
 	case <-s.doneCh:
 		err := s.streamErr()
-		audioBytes, audioFrames, firstAudioAt, taskStartedAt, taskFinishedAt := s.metricsSnapshot()
 		if err != nil {
-			logging.Errorf("AliyunTTS: task done with error after %v: %v", time.Since(waitDoneStart), err)
 			return err
 		}
-		logging.Infof("AliyunTTS: task done wait completed in %v (audio_bytes=%d, audio_frames=%d, first_audio_latency=%s, synthesis_window=%s, total_since_stream=%v)",
-			time.Since(waitDoneStart),
-			audioBytes,
-			audioFrames,
-			formatDuration(s.createdAt, firstAudioAt),
-			formatDuration(taskStartedAt, taskFinishedAt),
-			time.Since(s.createdAt),
-		)
 		return nil
 	case err := <-s.errCh:
-		logging.Errorf("AliyunTTS: wait task done failed after %v: %v", time.Since(waitDoneStart), err)
 		return err
 	case <-ctx.Done():
 		s.closeWithError(ctx.Err())
-		logging.Errorf("AliyunTTS: wait task done canceled after %v: %v", time.Since(waitDoneStart), ctx.Err())
 		return ctx.Err()
 	}
 }
 
-// WriteTextChunk 实现 tts.SynthesisStream，委托内部小写方法。
 func (s *dashScopeStream) WriteTextChunk(ctx context.Context, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	waitStart := time.Now()
 	if err := s.waitStarted(ctx); err != nil {
 		return err
 	}
-	waitDuration := time.Since(waitStart)
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	sendStart := time.Now()
-	if err := s.sendContinueTask(ctx, text); err != nil {
-		logging.Errorf("AliyunTTS: send continue-task failed after %v: %v", time.Since(sendStart), err)
-		return err
-	}
-	logging.Infof("AliyunTTS: continue-task sent in %v (wait_started=%v, text_len=%d)",
-		time.Since(sendStart), waitDuration, len([]rune(text)))
-	return nil
+	return s.sendContinueTask(ctx, text)
 }
 
-// Finish 发送 finish-task，立即返回，不等 task-finished。
-// receiver goroutine 在 task-finished 后通过 markDone 关闭 audioBuf 和 conn。
 func (s *dashScopeStream) Finish(ctx context.Context) error {
 	var err error
 	s.finishOnce.Do(func() {
@@ -329,21 +263,17 @@ func (s *dashScopeStream) Finish(ctx context.Context) error {
 	return err
 }
 
-// AudioReader 返回流式音频 reader，可在 Finish 前开始读；task-finished 后 EOF。
-func (s *dashScopeStream) AudioReader() io.ReadCloser {
-	return s.audioBuf
-}
+func (s *dashScopeStream) AudioReader() io.ReadCloser { return s.audioBuf }
 
-// Abort 立即中止 stream，用于打断场景。
 func (s *dashScopeStream) Abort() {
 	s.setErr(context.Canceled)
 	s.markDone()
 }
 
-// SentenceBoundaries 实现 tts.SynthesisStream。
 func (s *dashScopeStream) SentenceBoundaries() <-chan tts.SentenceBoundary {
 	return s.sentenceBoundaryCh
 }
+
 func (s *dashScopeStream) waitStarted(ctx context.Context) error {
 	select {
 	case <-s.startedCh:
@@ -356,22 +286,7 @@ func (s *dashScopeStream) waitStarted(ctx context.Context) error {
 }
 
 func (s *dashScopeStream) sendRunTask(_ context.Context) error {
-	params := map[string]any{
-		"text_type":              s.cfg.TextType,
-		"voice":                  s.cfg.Voice,
-		"format":                 s.cfg.Format,
-		"sample_rate":            s.cfg.SampleRate,
-		"volume":                 s.cfg.Volume,
-		"rate":                   s.cfg.Rate,
-		"pitch":                  s.cfg.Pitch,
-		"enable_ssml":            s.cfg.EnableSSML,
-		"word_timestamp_enabled": true,
-	}
-	// emotion 映射：系统内部 emotion → 该 voice 下可用的 emotion 参数
-	// 具体映射值由 voice 决定，后续按 voice 完善
-	if mapped := mapEmotion(s.cfg.Voice, s.emotion); mapped != "" {
-		params["instruction"] = fmt.Sprintf("你说话的情感是%s。", mapped)
-	}
+	params := buildDashScopeParams(s.cfg, s.req)
 
 	payload := runTaskMessage{
 		Header: taskHeader{
@@ -383,7 +298,7 @@ func (s *dashScopeStream) sendRunTask(_ context.Context) error {
 			TaskGroup:  "audio",
 			Task:       "tts",
 			Function:   "SpeechSynthesizer",
-			Model:      s.cfg.Model,
+			Model:      pickModel(s.cfg, s.req),
 			Parameters: params,
 			Input:      map[string]any{},
 		},
@@ -393,7 +308,6 @@ func (s *dashScopeStream) sendRunTask(_ context.Context) error {
 	if err != nil {
 		return err
 	}
-
 	s.writeMu.Lock()
 	err = s.conn.WriteMessage(websocket.TextMessage, data)
 	s.writeMu.Unlock()
@@ -408,17 +322,13 @@ func (s *dashScopeStream) sendContinueTask(_ context.Context, text string) error
 			Streaming: "duplex",
 		},
 		Payload: taskPayload{
-			Input: map[string]any{
-				"text": text,
-			},
+			Input: map[string]any{"text": text},
 		},
 	}
-
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-
 	s.writeMu.Lock()
 	err = s.conn.WriteMessage(websocket.TextMessage, data)
 	s.writeMu.Unlock()
@@ -432,16 +342,12 @@ func (s *dashScopeStream) sendFinishTask(_ context.Context) error {
 			TaskID:    s.taskID,
 			Streaming: "duplex",
 		},
-		Payload: taskPayload{
-			Input: map[string]any{},
-		},
+		Payload: taskPayload{Input: map[string]any{}},
 	}
-
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-
 	s.writeMu.Lock()
 	err = s.conn.WriteMessage(websocket.TextMessage, data)
 	s.writeMu.Unlock()
@@ -456,7 +362,6 @@ func (s *dashScopeStream) startReceiver() {
 				s.closeWithError(err)
 				return
 			}
-
 			if messageType == websocket.BinaryMessage {
 				if _, err := s.audioBuf.Write(data); err != nil {
 					s.closeWithError(err)
@@ -465,11 +370,9 @@ func (s *dashScopeStream) startReceiver() {
 				s.recordAudioFrame(len(data))
 				continue
 			}
-
 			if messageType != websocket.TextMessage {
 				continue
 			}
-
 			var event eventMessage
 			if err := json.Unmarshal(data, &event); err != nil {
 				s.closeWithError(err)
@@ -505,33 +408,22 @@ func (s *dashScopeStream) handleResultGenerated(payload taskPayload) {
 	if payload.Output == nil {
 		return
 	}
-	outputType := payload.Output.Type
 	text := payload.Output.OriginalText
 	if text == "" {
 		return
 	}
-
-	switch outputType {
+	switch payload.Output.Type {
 	case "sentence-begin":
-		// sentence-begin arrives before the first audio frame of the
-		// sentence — tell playAudio what text to attach to the next
-		// audio chunk so WSOutputStage can emit "tts sentence_start".
-		boundary := tts.SentenceBoundary{Offset: -1, Text: text, IsBegin: true}
 		select {
-		case s.sentenceBoundaryCh <- boundary:
+		case s.sentenceBoundaryCh <- tts.SentenceBoundary{Offset: -1, Text: text, IsBegin: true}:
 		default:
 		}
 	case "sentence-end":
-		// sentence-end arrives after all binary frames for this sentence
-		// have been written to audioBuf (confirmed against real traffic),
-		// so audioBytes at this point includes the full sentence audio.
 		s.metricsMu.Lock()
 		offset := s.audioBytes
 		s.metricsMu.Unlock()
-
-		boundary := tts.SentenceBoundary{Offset: offset, Text: text}
 		select {
-		case s.sentenceBoundaryCh <- boundary:
+		case s.sentenceBoundaryCh <- tts.SentenceBoundary{Offset: offset, Text: text}:
 		default:
 		}
 	}
@@ -542,60 +434,22 @@ func (s *dashScopeStream) recordTaskStarted() {
 	s.metricsMu.Lock()
 	s.taskStartedAt = now
 	s.metricsMu.Unlock()
-	logging.Infof("AliyunTTS: task-started event in %v", now.Sub(s.createdAt))
 }
 
 func (s *dashScopeStream) recordTaskFinished() {
-	now := time.Now()
 	s.metricsMu.Lock()
-	s.taskFinishedAt = now
-	audioBytes := s.audioBytes
-	audioFrames := s.audioFrames
-	firstAudioAt := s.firstAudioAt
-	taskStartedAt := s.taskStartedAt
+	s.taskFinishedAt = time.Now()
 	s.metricsMu.Unlock()
-	logging.Infof("AliyunTTS: task-finished event in %v (audio_bytes=%d, audio_frames=%d, first_audio_latency=%s, synthesis_window=%s)",
-		now.Sub(s.createdAt),
-		audioBytes,
-		audioFrames,
-		formatDuration(s.createdAt, firstAudioAt),
-		formatDuration(taskStartedAt, now),
-	)
 }
 
 func (s *dashScopeStream) recordAudioFrame(n int) {
-	now := time.Now()
-	firstFrame := false
-
 	s.metricsMu.Lock()
 	if s.firstAudioAt.IsZero() {
-		s.firstAudioAt = now
-		firstFrame = true
+		s.firstAudioAt = time.Now()
 	}
 	s.audioBytes += n
 	s.audioFrames++
-	totalBytes := s.audioBytes
-	totalFrames := s.audioFrames
 	s.metricsMu.Unlock()
-
-	if firstFrame {
-		logging.Infof("AliyunTTS: first audio frame received in %v (frame_bytes=%d)", now.Sub(s.createdAt), n)
-		return
-	}
-	logging.Debugf("AliyunTTS: audio frame received (frame_bytes=%d, total_bytes=%d, total_frames=%d)", n, totalBytes, totalFrames)
-}
-
-func (s *dashScopeStream) metricsSnapshot() (audioBytes int, audioFrames int, firstAudioAt time.Time, taskStartedAt time.Time, taskFinishedAt time.Time) {
-	s.metricsMu.Lock()
-	defer s.metricsMu.Unlock()
-	return s.audioBytes, s.audioFrames, s.firstAudioAt, s.taskStartedAt, s.taskFinishedAt
-}
-
-func formatDuration(from, to time.Time) string {
-	if from.IsZero() || to.IsZero() {
-		return "n/a"
-	}
-	return to.Sub(from).String()
 }
 
 func (s *dashScopeStream) closeWithError(err error) {
@@ -630,8 +484,92 @@ func (s *dashScopeStream) streamErr() error {
 	}
 }
 
-// mapEmotion 将系统 emotion 值（emoji 或标签名）映射到指定 voice 支持的 emotion 参数。
-// 返回空字符串表示不传 emotion 参数。
+// ── 参数映射 ──
+
+func buildDashScopeParams(cfg tts.Config, req tts.SynthesizeRequest) map[string]any {
+	voice := pickVoice(cfg, req)
+	sampleRate := cfg.SampleRate
+	if req.Audio.SampleRate > 0 {
+		sampleRate = req.Audio.SampleRate
+	}
+
+	rate := tts.SpeedToRate(req.Speech.Speed)
+	if rate == 0 {
+		rate = 1.0
+	}
+	pitch := tts.PitchToRatio(req.Speech.Pitch)
+	if pitch == 0 {
+		pitch = 1.0
+	}
+	volume := tts.VolumeToPercent(req.Speech.Volume)
+	if volume == 0 {
+		volume = 50
+	}
+
+	textType := "PlainText"
+	if req.Input.TextType == tts.TextTypeSSML {
+		textType = "SSML"
+	}
+
+	params := map[string]any{
+		"text_type":              textType,
+		"voice":                  voice,
+		"format":                 formatFromSDK(req.Audio.Format),
+		"sample_rate":            sampleRate,
+		"volume":                 volume,
+		"rate":                   rate,
+		"pitch":                  pitch,
+		"enable_ssml":            req.Input.TextType == tts.TextTypeSSML,
+		"word_timestamp_enabled": true,
+	}
+
+	if emotion := req.Speech.Emotion; emotion != "" {
+		if mapped := mapEmotion(voice, emotion); mapped != "" {
+			params["instruction"] = fmt.Sprintf("你说话的情感是%s。", mapped)
+		}
+	}
+	return params
+}
+
+func pickVoice(cfg tts.Config, req tts.SynthesizeRequest) string {
+	if req.Voice.VoiceID != "" {
+		return req.Voice.VoiceID
+	}
+	return cfg.Voice
+}
+
+func pickModel(cfg tts.Config, req tts.SynthesizeRequest) string {
+	if req.Voice.Model != "" {
+		return req.Voice.Model
+	}
+	if cfg.Model != "" {
+		return cfg.Model
+	}
+	return "cosyvoice-v3-flash"
+}
+
+func formatFromSDK(f tts.AudioFormat) string {
+	switch f {
+	case tts.FormatPCM:
+		return "pcm"
+	case tts.FormatMP3:
+		return "mp3"
+	case tts.FormatWAV:
+		return "wav"
+	case tts.FormatOpus:
+		return "opus"
+	default:
+		return "pcm"
+	}
+}
+
+func formatToSDK(f tts.AudioFormat) tts.AudioFormat {
+	if f == "" {
+		return tts.FormatPCM
+	}
+	return f
+}
+
 func mapEmotion(voice, emotion string) string {
 	_ = voice
 	emojiMap := map[string]string{
@@ -664,27 +602,8 @@ func normalizeConfig(cfg tts.Config) (tts.Config, error) {
 	if cfg.Voice == "" {
 		cfg.Voice = "longanhuan_v3"
 	}
-	if cfg.Format == "" {
-		cfg.Format = "pcm"
-	}
 	if cfg.SampleRate == 0 {
 		cfg.SampleRate = 16000
-	}
-	if cfg.Volume == 0 {
-		cfg.Volume = 50
-	}
-	if cfg.Rate == 0 {
-		cfg.Rate = 1
-	}
-	if cfg.Pitch == 0 {
-		cfg.Pitch = 1
-	}
-	if cfg.TextType == "" {
-		cfg.TextType = "PlainText"
-	}
-	if cfg.EnableDataInspection == nil {
-		enabled := true
-		cfg.EnableDataInspection = &enabled
 	}
 	return cfg, nil
 }
@@ -692,32 +611,32 @@ func normalizeConfig(cfg tts.Config) (tts.Config, error) {
 func connectDashScope(ctx context.Context, cfg tts.Config) (*websocket.Conn, error) {
 	header := http.Header{}
 	header.Set("Authorization", fmt.Sprintf("bearer %s", cfg.APIKey))
-	if cfg.EnableDataInspection != nil && *cfg.EnableDataInspection {
-		header.Set("X-DashScope-DataInspection", "enable")
+	if cfg.Extra != nil {
+		if v, ok := cfg.Extra["data_inspection"].(bool); ok && v {
+			header.Set("X-DashScope-DataInspection", "enable")
+		}
+		if v, ok := cfg.Extra["workspace"].(string); ok && strings.TrimSpace(v) != "" {
+			header.Set("X-DashScope-WorkSpace", strings.TrimSpace(v))
+		}
 	}
-	if strings.TrimSpace(cfg.Workspace) != "" {
-		header.Set("X-DashScope-WorkSpace", strings.TrimSpace(cfg.Workspace))
-	}
-	dialer := websocket.DefaultDialer
-	conn, _, err := dialer.DialContext(ctx, cfg.Endpoint, header)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, cfg.Endpoint, header)
 	return conn, err
 }
+
+// ── 协议类型 ──
 
 type runTaskMessage struct {
 	Header  taskHeader  `json:"header"`
 	Payload taskPayload `json:"payload"`
 }
-
 type continueTaskMessage struct {
 	Header  taskHeader  `json:"header"`
 	Payload taskPayload `json:"payload"`
 }
-
 type finishTaskMessage struct {
 	Header  taskHeader  `json:"header"`
 	Payload taskPayload `json:"payload"`
 }
-
 type taskHeader struct {
 	Action       string `json:"action,omitempty"`
 	TaskID       string `json:"task_id,omitempty"`
@@ -726,7 +645,6 @@ type taskHeader struct {
 	ErrorCode    string `json:"error_code,omitempty"`
 	ErrorMessage string `json:"error_message,omitempty"`
 }
-
 type taskPayload struct {
 	TaskGroup  string         `json:"task_group,omitempty"`
 	Task       string         `json:"task,omitempty"`
@@ -736,22 +654,15 @@ type taskPayload struct {
 	Input      map[string]any `json:"input"`
 	Output     *taskOutput    `json:"output,omitempty"`
 }
-
-// taskOutput is a result-generated event's payload.output. The "type" key
-// (sentence-begin / sentence-synthesis / sentence-end) is at the output
-// level, not nested under sentence.type. Confirmed against real DashScope
-// traffic with word_timestamp_enabled=true.
 type taskOutput struct {
 	Type         string        `json:"type,omitempty"`
 	OriginalText string        `json:"original_text,omitempty"`
 	Sentence     *taskSentence `json:"sentence,omitempty"`
 }
-
 type taskSentence struct {
 	Index int    `json:"index"`
 	Type  string `json:"type,omitempty"`
 }
-
 type eventMessage struct {
 	Header  taskHeader  `json:"header"`
 	Payload taskPayload `json:"payload"`

@@ -1,10 +1,8 @@
 package tts
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/liuscraft/orion-x/internal/language"
@@ -12,105 +10,64 @@ import (
 
 const TypeAliyun = "aliyun"
 
-// SynthesisOptions 是每次合成时动态传入的参数。
-// Emotion 是系统内部值（如 "happy"/"sad"），Provider 内部负责转换为
-// 当前 voice 下可用的实际 emotion 参数（每个 voice 支持的 emotion 不同）。
+// ── 兼容类型别名 ──
+
+// Provider 是旧的 Provider 接口类型别名，兼容旧代码。
+// 新代码应使用 Synthesizer。
+type Provider = Synthesizer
+
+// StreamingProvider 是旧的流式接口类型别名，兼容旧代码。
+// 新代码应使用 StreamingSynthesizer。
+type StreamingProvider = StreamingSynthesizer
+
+// ── 兼容的 SynthesisOptions ──
+
+// SynthesisOptions 是每次合成时动态传入的参数（已废弃，请使用 SynthesizeRequest）。
+// Emotion 是系统内部值（如 emoji 或 "happy"/"sad"），Provider 内部负责转换为
+// 当前 voice 下可用的实际 emotion 参数。
 type SynthesisOptions struct {
 	Emotion string  // 系统内部情感值，空 = 用 Provider 默认
 	Rate    float64 // 语速，0 = 用 Provider 默认
 }
 
+// ── Config ──
+
 // Config 是创建 Provider 时注入的基础配置（连接参数 + 默认合成参数）。
+// Provider 专属参数放入 Extra map，公共层不做校验。
 type Config struct {
-	APIKey               string
-	Endpoint             string
-	Workspace            string
-	Model                string
-	Voice                string
-	Format               string
-	SampleRate           int
-	Volume               int
-	Rate                 float64
-	Pitch                float64
-	EnableSSML           bool
-	TextType             string
-	EnableDataInspection *bool
+	APIKey     string         // API 密钥
+	Endpoint   string         // 服务端点
+	Model      string         // 默认模型
+	Voice      string         // 默认音色
+	SampleRate int            // 默认采样率（Hz）
+	Extra      map[string]any // provider 专属参数（workspace、data_inspection 等）
 }
 
-// Provider 是 TTS 服务的抽象。基础配置在创建时注入，每次合成只传动态参数。
-type Provider interface {
-	Synthesize(ctx context.Context, text string, opts SynthesisOptions) (io.ReadCloser, error)
-}
+// ── Provider 注册 ──
 
-// SentenceBoundary marks a point in a SynthesisStream's audio output.
-// For sentence-end (IsBegin=false): Offset is the cumulative byte count
-// AudioReader has produced once that sentence's audio is fully available,
-// and Text is the sentence's full original text.
-// For sentence-begin (IsBegin=true): Offset is ignored (set to -1 by
-// convention) — the boundary signals that the next audio chunk from
-// AudioReader belongs to a sentence whose text is Text.
-type SentenceBoundary struct {
-	Offset  int
-	Text    string
-	IsBegin bool
-}
-
-// SynthesisStream 是一次 TTS 会话的流式接口。
-// 调用方顺序：WriteTextChunk → Finish → 读取 AudioReader()。
-type SynthesisStream interface {
-	WriteTextChunk(ctx context.Context, text string) error
-	// Finish 发送 finish-task，立即返回，不等 task-finished。
-	// receiver goroutine 负责在 task-finished 后关闭 audioBuf 和 conn。
-	Finish(ctx context.Context) error
-	// AudioReader 返回流式音频 reader，可在 Finish 前开始读；task-finished 后 EOF。
-	AudioReader() io.ReadCloser
-	// Abort 中止 stream，关闭连接和 audioBuf（打断场景）。
-	Abort()
-	// SentenceBoundaries returns a channel that receives one SentenceBoundary
-	// per sentence once that sentence's audio has been fully written to
-	// AudioReader. Implementations that can't detect sentence boundaries may
-	// return nil — receiving from a nil channel blocks forever, so callers
-	// selecting on it alongside other cases simply never see that case fire,
-	// with no extra nil-checking needed.
-	SentenceBoundaries() <-chan SentenceBoundary
-}
-
-// StreamingProvider 是支持流式合成的 Provider 扩展接口。
-// ttsProcessor 通过类型断言检测并使用此接口；不实现则回退到 Synthesize。
-type StreamingProvider interface {
-	Provider
-	StartSynthesis(ctx context.Context, opts SynthesisOptions) (SynthesisStream, error)
-}
-
-// WarmableProvider 是支持预连接预热的 Provider 扩展接口。
-// Warm 由 TTSProcessor 在每轮第一个 token 到达时在 goroutine 里调用，
-// 阻塞直到连接就绪（或 ctx 取消），返回可立即写文本的 stream。
-// 取消预热只需取消传入的 ctx，无需额外接口。
-type WarmableProvider interface {
-	Warm(ctx context.Context, opts SynthesisOptions) SynthesisStream
-}
-
-var (
-	ErrTransient  = errors.New("tts transient error")
-	ErrAuth       = errors.New("tts auth error")
-	ErrBadRequest = errors.New("tts bad request")
-)
-
+// ProviderConfig 是带类型标签的 Provider 配置。
 type ProviderConfig struct {
 	Type   string
 	Config Config
 }
 
-type Constructor func(cfg Config) (Provider, error)
+// Constructor 是 Provider 的构造器函数。
+// 返回 Synthesizer 以适配新旧代码。
+type Constructor func(cfg Config) (Synthesizer, error)
 
+// ModelInfo 是单个模型的元信息。
 type ModelInfo struct {
 	SupportedLanguages []language.Code
+	SystemVoices       []VoiceInfo
 }
 
+// ProviderMeta 是 Provider 的静态元数据，供 Manager 展示和音色同步。
 type ProviderMeta struct {
 	Name           string
+	Description    string // 新增：Provider 描述
 	DefaultBaseURL string
 	Models         map[string]ModelInfo
+	Features       []Feature // 新增：streaming / ssml / emotion / voice_cloning / warmup
 }
 
 type registration struct {
@@ -120,6 +77,7 @@ type registration struct {
 
 var constructors = map[string]registration{}
 
+// Register 注册一个 TTS Provider 构造器。
 func Register(providerType string, constructor Constructor, meta ProviderMeta) {
 	providerType = normalizeType(providerType, "")
 	if providerType == "" || constructor == nil {
@@ -128,7 +86,7 @@ func Register(providerType string, constructor Constructor, meta ProviderMeta) {
 	constructors[providerType] = registration{constructor: constructor, meta: meta}
 }
 
-// ListRegistered returns all registered TTS provider types with their metadata.
+// ListRegistered 返回所有已注册的 TTS Provider 及其元数据。
 func ListRegistered() map[string]ProviderMeta {
 	out := make(map[string]ProviderMeta, len(constructors))
 	for k, v := range constructors {
@@ -137,7 +95,8 @@ func ListRegistered() map[string]ProviderMeta {
 	return out
 }
 
-func NewProvider(cfg ProviderConfig) (Provider, error) {
+// NewProvider 创建一个新的 TTS Provider 实例。
+func NewProvider(cfg ProviderConfig) (Synthesizer, error) {
 	providerType := normalizeType(cfg.Type, TypeAliyun)
 	reg, ok := constructors[providerType]
 	if !ok {
@@ -146,6 +105,7 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 	return reg.constructor(cfg.Config)
 }
 
+// SupportsLanguage 检查指定 provider 的 model 是否支持目标语言。
 func SupportsLanguage(providerType, model string, lang language.Code) bool {
 	reg, ok := constructors[normalizeType(providerType, "")]
 	if !ok {
@@ -172,4 +132,49 @@ func normalizeType(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// ── 错误哨兵 ──
+
+var (
+	ErrTransient  = errors.New("tts transient error")
+	ErrAuth       = errors.New("tts auth error")
+	ErrBadRequest = errors.New("tts bad request")
+)
+
+// APIError 是 Provider 返回的结构化错误。
+type APIError struct {
+	Provider   string
+	StatusCode int
+	Code       string
+	Message    string
+	RequestID  string
+	Retryable  bool
+	Cause      error
+}
+
+func (e *APIError) Error() string {
+	msg := fmt.Sprintf("[%s] %s", e.Provider, e.Message)
+	if e.Code != "" {
+		msg = fmt.Sprintf("[%s] code=%s: %s", e.Provider, e.Code, e.Message)
+	}
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id=%s)", e.RequestID)
+	}
+	return msg
+}
+
+func (e *APIError) Unwrap() error {
+	return e.Cause
+}
+
+// ── 兼容方法 ──
+
+// SynthesizeRequestFromOpts 将旧的 SynthesisOptions 转换为 SynthesizeRequest。
+// 用于向后兼容旧代码，将旧的 opts 与文本合并为基础请求。
+func SynthesizeRequestFromOpts(text string, opts SynthesisOptions) SynthesizeRequest {
+	return SynthesizeRequest{
+		Input:  TextInput{Text: text},
+		Speech: SpeechParams{Emotion: opts.Emotion, Speed: opts.Rate},
+	}
 }

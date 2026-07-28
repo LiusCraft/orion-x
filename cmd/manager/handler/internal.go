@@ -171,9 +171,6 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 			full.Provider.TTS.Aliyun.Endpoint = effectiveBaseURL2(*m)
 		}
 	}
-	full.Provider.TTS.Aliyun.Volume = ac.TTS.Volume
-	full.Provider.TTS.Aliyun.Rate = ac.TTS.Rate
-	full.Provider.TTS.Aliyun.Pitch = ac.TTS.Pitch
 
 	if ac.LLM.ModelID != "" {
 		if m, err := h.models.GetByID(ac.LLM.ModelID); err == nil {

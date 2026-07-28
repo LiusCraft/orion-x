@@ -24,8 +24,8 @@ func (poolRecognizer) OnResult(func(asr.Result))               {}
 
 type poolTTSProvider struct{ id int32 }
 
-func (poolTTSProvider) Synthesize(context.Context, string, tts.SynthesisOptions) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
+func (poolTTSProvider) Synthesize(_ context.Context, _ tts.SynthesizeRequest) (*tts.SynthesizeResult, error) {
+	return &tts.SynthesizeResult{Audio: io.NopCloser(strings.NewReader(""))}, nil
 }
 
 type poolLLMAdapter struct{}

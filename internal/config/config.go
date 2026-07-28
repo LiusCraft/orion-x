@@ -35,22 +35,17 @@ type ASRConfig struct {
 	Language string `json:"language"` // system language code, e.g. "zh"
 }
 
+// TTSConfig 是用户配置中的 TTS 段，与 tts.Config 对齐。
+// provider 专属参数（如 workspace、data_inspection）放入 Extra，
+// 语音参数（语速/音调/音量/格式）属于 per-request 参数，不在此处配置。
 type TTSConfig struct {
-	APIKey               string            `json:"api_key"`
-	Endpoint             string            `json:"endpoint"`
-	Workspace            string            `json:"workspace"`
-	Model                string            `json:"model"`
-	Voice                string            `json:"voice"`
-	Format               string            `json:"format"`
-	SampleRate           int               `json:"sample_rate"`
-	Volume               int               `json:"volume"`
-	Rate                 float64           `json:"rate"`
-	Pitch                float64           `json:"pitch"`
-	EnableSSML           bool              `json:"enable_ssml"`
-	TextType             string            `json:"text_type"`
-	EnableDataInspection *bool             `json:"enable_data_inspection"`
-	VoiceMap             map[string]string `json:"voice_map"`
-	Language             string            `json:"language"` // system language code
+	APIKey     string         `json:"api_key"`
+	Endpoint   string         `json:"endpoint"`
+	Model      string         `json:"model"`
+	Voice      string         `json:"voice"`
+	SampleRate int            `json:"sample_rate"`
+	Language   string         `json:"language"` // system language code
+	Extra      map[string]any `json:"extra"`    // provider 专属参数
 }
 
 type LLMConfig struct {
@@ -162,29 +157,17 @@ type MCPServerConfig struct {
 // ---------- Provider config ----------
 
 func DefaultConfig() *AppConfig {
-	enableDataInspection := true
 	defaultASR := ASRConfig{
 		Model:    "fun-asr-realtime",
 		Language: "zh",
 	}
 	defaultTTS := TTSConfig{
-		Model:                "cosyvoice-v3-flash",
-		Voice:                "longanyang",
-		Format:               "pcm",
-		SampleRate:           16000,
-		Volume:               50,
-		Rate:                 1.0,
-		Pitch:                1.0,
-		TextType:             "PlainText",
-		EnableDataInspection: &enableDataInspection,
-		Language:             "zh",
-		VoiceMap: map[string]string{
-			"happy":   "longanyang",
-			"sad":     "zhichu",
-			"angry":   "zhimeng",
-			"calm":    "longxiaochun",
-			"excited": "longanyang",
-			"default": "longanyang",
+		Model:      "cosyvoice-v3-flash",
+		Voice:      "longanyang",
+		SampleRate: 16000,
+		Language:   "zh",
+		Extra: map[string]any{
+			"data_inspection": true,
 		},
 	}
 	defaultLLM := LLMConfig{
@@ -431,6 +414,14 @@ func (c *AppConfig) validateTTSLanguage() error {
 		return fmt.Errorf("TTS model %q does not support language %q", model, lang)
 	}
 	return nil
+}
+
+// BuildTTSExtra 从 TTSConfig 提取 provider 专属 Extra 参数。
+func BuildTTSExtra(cfg TTSConfig) map[string]any {
+	if cfg.Extra == nil {
+		return nil
+	}
+	return cfg.Extra
 }
 
 func (c *AppConfig) ValidateKeys(requireASR, requireTTS, requireLLM bool) error {

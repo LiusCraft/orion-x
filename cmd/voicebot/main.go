@@ -161,19 +161,12 @@ func main() {
 	ttsProvider, err := tts.NewProvider(tts.ProviderConfig{
 		Type: appConfig.Provider.TTS.Type,
 		Config: tts.Config{
-			APIKey:               ttsCfgSpec.APIKey,
-			Endpoint:             ttsCfgSpec.Endpoint,
-			Workspace:            ttsCfgSpec.Workspace,
-			Model:                ttsCfgSpec.Model,
-			Voice:                ttsCfgSpec.Voice,
-			Format:               "pcm",
-			SampleRate:           ttsCfgSpec.SampleRate,
-			Volume:               ttsCfgSpec.Volume,
-			Rate:                 ttsCfgSpec.Rate,
-			Pitch:                ttsCfgSpec.Pitch,
-			EnableSSML:           ttsCfgSpec.EnableSSML,
-			TextType:             ttsCfgSpec.TextType,
-			EnableDataInspection: ttsCfgSpec.EnableDataInspection,
+			APIKey:     ttsCfgSpec.APIKey,
+			Endpoint:   ttsCfgSpec.Endpoint,
+			Model:      ttsCfgSpec.Model,
+			Voice:      ttsCfgSpec.Voice,
+			SampleRate: ttsCfgSpec.SampleRate,
+			Extra:      config.BuildTTSExtra(ttsCfgSpec),
 		},
 	})
 	if err != nil {
