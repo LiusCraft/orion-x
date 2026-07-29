@@ -49,10 +49,11 @@ type Device struct {
 type Provider struct {
 	ID        string            `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	Name      string            `gorm:"not null;type:varchar(64)" json:"name"`
-	Slug      string            `gorm:"index;not null;type:varchar(32)" json:"slug"`
+	Slug      string            `gorm:"uniqueIndex;not null;type:varchar(32)" json:"slug"`
 	BaseURL   string            `gorm:"not null;type:varchar(512)" json:"base_url"`
 	APIKeyEnc string            `gorm:"not null;type:text" json:"-"`
 	IsSystem  bool              `gorm:"not null;default:false;index" json:"is_system"`
+	MetaHash  string            `gorm:"type:varchar(64)" json:"-"`
 	Extra     datatypes.JSONMap `gorm:"type:jsonb" json:"extra,omitempty"`
 	BaseModel
 }
@@ -86,6 +87,7 @@ type AIModel struct {
 	ModelID    string            `gorm:"not null;type:varchar(128)" json:"model_id"`
 	IsSystem   bool              `gorm:"not null;default:false;index" json:"is_system"`
 	Langs      pq.StringArray    `gorm:"type:text[]" json:"langs,omitempty"`
+	MetaHash   string            `gorm:"type:varchar(64)" json:"-"`
 	Extra      datatypes.JSONMap `gorm:"type:jsonb" json:"extra,omitempty"`
 	Voices     []ModelVoice      `gorm:"foreignKey:ModelID" json:"voices,omitempty"`
 	BaseModel
@@ -116,6 +118,7 @@ type ModelVoice struct {
 	IsSystem       bool              `gorm:"not null;default:false;index" json:"is_system"`
 	IsCloned       bool              `gorm:"not null;default:false" json:"is_cloned"`
 	SourceAudioURL string            `gorm:"type:varchar(512)" json:"source_audio_url,omitempty"`
+	MetaHash       string            `gorm:"type:varchar(64)" json:"-"`
 	Extra          datatypes.JSONMap `gorm:"type:jsonb" json:"extra,omitempty"`
 	BaseModel
 }

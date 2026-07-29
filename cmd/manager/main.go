@@ -55,6 +55,12 @@ func main() {
 		logging.Fatalf("open db: %v", err)
 	}
 
+	// 同步代码中注册的 system providers/models/voices 到数据库。
+	// 使用 meta_hash 做增量对比，只更新有变化的记录。
+	if err := store.SyncSystemProviders(db); err != nil {
+		logging.Fatalf("sync system providers: %v", err)
+	}
+
 	users := store.NewUserStore(db)
 	voicebots := store.NewVoicebotStore(db)
 	devices := store.NewDeviceStore(db)

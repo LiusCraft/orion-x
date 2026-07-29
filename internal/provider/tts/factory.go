@@ -64,10 +64,11 @@ type ModelInfo struct {
 // ProviderMeta 是 Provider 的静态元数据，供 Manager 展示和音色同步。
 type ProviderMeta struct {
 	Name           string
-	Description    string // 新增：Provider 描述
+	Description    string
 	DefaultBaseURL string
 	Models         map[string]ModelInfo
-	Features       []Feature // 新增：streaming / ssml / emotion / voice_cloning / warmup
+	Features       []Feature
+	ContentHash    string // 由 Register() 自动计算：元数据的确定性哈希，用于变更检测
 }
 
 type registration struct {
@@ -83,6 +84,7 @@ func Register(providerType string, constructor Constructor, meta ProviderMeta) {
 	if providerType == "" || constructor == nil {
 		return
 	}
+	meta.ContentHash = meta.MetaHash()
 	constructors[providerType] = registration{constructor: constructor, meta: meta}
 }
 

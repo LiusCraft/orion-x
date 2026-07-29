@@ -36,10 +36,12 @@ type ModelInfo struct {
 	SupportedLanguages []language.Code
 }
 
+// ProviderMeta 是 LLM Provider 的静态元数据。
 type ProviderMeta struct {
 	Name           string
 	DefaultBaseURL string
 	Models         map[string]ModelInfo
+	ContentHash    string // 由 Register() 自动计算：元数据的确定性哈希，用于变更检测
 }
 
 type registration struct {
@@ -60,6 +62,7 @@ func (r *Registry) Register(key string, constructor AdapterConstructor, meta Pro
 	if key == "" || constructor == nil {
 		return
 	}
+	meta.ContentHash = meta.MetaHash()
 	r.adapters[key] = registration{constructor: constructor, meta: meta}
 }
 
