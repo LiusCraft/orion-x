@@ -10,11 +10,12 @@ import (
 )
 
 type ManagerConfig struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	JWT      JWTConfig      `yaml:"jwt"`
-	Admin    AdminConfig    `yaml:"admin"`
-	Logging  LoggingConfig  `yaml:"logging"`
+	Server      ServerConfig      `yaml:"server"`
+	Database    DatabaseConfig    `yaml:"database"`
+	JWT         JWTConfig         `yaml:"jwt"`
+	Admin       AdminConfig       `yaml:"admin"`
+	GithubOAuth GithubOAuthConfig `yaml:"github_oauth"`
+	Logging     LoggingConfig     `yaml:"logging"`
 }
 
 type ServerConfig struct {
@@ -32,6 +33,12 @@ type JWTConfig struct {
 type AdminConfig struct {
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+}
+
+type GithubOAuthConfig struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	RedirectURL  string `yaml:"redirect_url"` // GitHub OAuth 回调地址
 }
 
 type LoggingConfig struct {
@@ -83,5 +90,14 @@ func applyManagerEnv(cfg *ManagerConfig) {
 	}
 	if v := strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")); v != "" {
 		cfg.Admin.Password = v
+	}
+	if v := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_ID")); v != "" {
+		cfg.GithubOAuth.ClientID = v
+	}
+	if v := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET")); v != "" {
+		cfg.GithubOAuth.ClientSecret = v
+	}
+	if v := strings.TrimSpace(os.Getenv("GITHUB_REDIRECT_URL")); v != "" {
+		cfg.GithubOAuth.RedirectURL = v
 	}
 }

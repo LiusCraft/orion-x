@@ -42,11 +42,20 @@ export interface Device {
 }
 
 export const authApi = {
-	login: (username: string, password: string) =>
-		http.post<{ token: string; user_id: string; username: string; is_admin: boolean }>(
+	login: (email: string, password: string) =>
+		http.post<{ token: string; user_id: string; email: string; username: string; is_admin: boolean }>(
 			"/auth/login",
-			{ username, password },
+			{ email, password },
 		),
+	register: (email: string, password: string, username?: string) =>
+		http.post<{ token: string; user_id: string; email: string; username: string; is_admin: boolean }>(
+			"/auth/register",
+			{ email, password, username },
+		),
+	githubLoginUrl: () => {
+		const from = encodeURIComponent(window.location.origin);
+		return `/api/auth/github/login?from=${from}`;
+	},
 	changePassword: (oldPassword: string, newPassword: string) =>
 		http.post<{ message: string }>("/auth/change-password", {
 			old_password: oldPassword,
@@ -57,7 +66,7 @@ export const authApi = {
 			email,
 		}),
 	profile: () =>
-		http.get<{ user_id: string; username: string; email: string; is_admin: boolean }>(
+		http.get<{ user_id: string; email: string; username: string; is_admin: boolean }>(
 			"/auth/profile",
 		),
 };

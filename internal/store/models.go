@@ -15,11 +15,14 @@ type BaseModel struct {
 }
 
 // User 管理控制台用户
+// Email 是账号系统的主体标识，用于登录和唯一识别。
+// Username 为可选的显示名，不参与认证。
 type User struct {
 	ID           string `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	Username     string `gorm:"uniqueIndex;not null;type:varchar(64)" json:"username"`
+	Email        string `gorm:"uniqueIndex;not null;type:varchar(128)" json:"email"`
+	Username     string `gorm:"type:varchar(64)" json:"username,omitempty"`
 	PasswordHash string `gorm:"not null" json:"-"`
-	Email        string `gorm:"type:varchar(128)" json:"email,omitempty"`
+	GithubID     string `gorm:"uniqueIndex;type:varchar(64)" json:"-"`
 	IsAdmin      bool   `gorm:"not null;default:false;index" json:"is_admin"`
 	BaseModel
 }

@@ -75,6 +75,7 @@ func main() {
 	kbStore := store.NewKnowledgeBaseStore(db)
 	docStore := store.NewDocumentStore(db)
 	voicebotKBs := store.NewVoicebotKBStore(db)
+	// Try loading admin by username first (legacy), then fall through to create
 	admin, adminErr := users.GetByUsername(cfg.Admin.Username)
 	if errors.Is(adminErr, store.ErrNotFound) {
 		if pass := strings.TrimSpace(cfg.Admin.Password); pass != "" {
@@ -82,11 +83,13 @@ func main() {
 			if err != nil {
 				logging.Fatalf("hash admin password: %v", err)
 			}
-			admin, adminErr = users.Create(cfg.Admin.Username, string(hash), "system")
+			// Admin uses username@admin.local as the email placeholder
+			adminEmail := cfg.Admin.Username + "@admin.local"
+			admin, adminErr = users.Create(adminEmail, cfg.Admin.Username, string(hash), "system")
 			if adminErr != nil {
 				logging.Fatalf("create admin user: %v", adminErr)
 			}
-			logging.Infof("created admin user %q", cfg.Admin.Username)
+			logging.Infof("created admin user %q (%s)", cfg.Admin.Username, adminEmail)
 		}
 	} else if adminErr != nil {
 		logging.Fatalf("load admin user: %v", adminErr)
@@ -111,7 +114,11 @@ func main() {
 		logging.Infof("knowledge service ready")
 	}
 
-	r := newRouter(secret, users, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs)
+	r := newRouter(secret, users, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, githubOAuthConfig{
+		ClientID:     cfg.GithubOAuth.ClientID,
+		ClientSecret: cfg.GithubOAuth.ClientSecret,
+		RedirectURL:  cfg.GithubOAuth.RedirectURL,
+	})
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {

@@ -3,7 +3,7 @@ package main
 import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
-	"github.com/swaggo/gin-swagger"
+	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"github.com/liuscraft/orion-x/cmd/manager/handler"
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
@@ -11,6 +11,12 @@ import (
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/store"
 )
+
+type githubOAuthConfig struct {
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
+}
 
 func newRouter(
 	jwtSecret []byte,
@@ -30,6 +36,7 @@ func newRouter(
 	kbStore *store.KnowledgeBaseStore,
 	docStore *store.DocumentStore,
 	voicebotKBs *store.VoicebotKBStore,
+	githubCfg githubOAuthConfig,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -73,7 +80,15 @@ func newRouter(
 	api := r.Group("/api")
 	{
 		auth := api.Group("/auth")
+		auth.POST("/register", authH.Register)
 		auth.POST("/login", authH.Login)
+
+		// GitHub OAuth — only register routes when configured
+		if githubCfg.ClientID != "" && githubCfg.ClientSecret != "" {
+			githubH := handler.NewGithubAuthHandler(users, signToken, githubCfg.ClientID, githubCfg.ClientSecret, githubCfg.RedirectURL)
+			auth.GET("/github/login", githubH.Login)
+			auth.GET("/github/callback", githubH.Callback)
+		}
 
 		jwtMw := middleware.JWT(jwtSecret)
 
