@@ -54,10 +54,12 @@ type ModelInfo struct {
 	SupportedLanguages []language.Code
 }
 
+// ProviderMeta 是 ASR Provider 的静态元数据。
 type ProviderMeta struct {
 	Name           string
 	DefaultBaseURL string
 	Models         map[string]ModelInfo
+	ContentHash    string // 由 Register() 自动计算：元数据的确定性哈希，用于变更检测
 }
 
 type registration struct {
@@ -72,6 +74,7 @@ func Register(providerType string, constructor Constructor, meta ProviderMeta) {
 	if providerType == "" || constructor == nil {
 		return
 	}
+	meta.ContentHash = meta.MetaHash()
 	constructors[providerType] = registration{constructor: constructor, meta: meta}
 }
 

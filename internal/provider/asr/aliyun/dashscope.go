@@ -25,7 +25,6 @@ func init() {
 		DefaultBaseURL: defaultDashScopeEndpoint,
 		Models: map[string]asr.ModelInfo{
 			"fun-asr-realtime": {SupportedLanguages: []language.Code{language.ZH, language.EN, language.RU}},
-			"fun-asr":          {SupportedLanguages: []language.Code{language.ZH, language.EN, language.JA, language.KO}},
 		},
 	})
 }

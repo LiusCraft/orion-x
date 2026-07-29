@@ -29,11 +29,13 @@ type TTSChunk struct {
 // TTSConfig 配置 TTSProcessor。
 type TTSConfig struct {
 	// Provider 是 TTS 后端。必填。
-	Provider tts.Provider
+	Provider tts.Synthesizer
 	// QueueSize 是待合成句子队列的大小，默认 100。
 	QueueSize int
 	// MaxRunes 是单句最大字符数（超过则强制切句），默认 100。
 	MaxRunes int
+	// BaseRequest 是合成的默认参数，Write/Flush 的 opts 会覆盖其中跟文本无关的字段。
+	BaseRequest tts.SynthesizeRequest
 }
 
 // streamFlushTimeout 是 handleFlush 等待 streaming 路径音频播放完成的上限。
@@ -44,18 +46,21 @@ func DefaultTTSConfig() *TTSConfig {
 	return &TTSConfig{
 		QueueSize: 100,
 		MaxRunes:  100,
+		BaseRequest: tts.SynthesizeRequest{
+			Speech: tts.SpeechParams{Speed: 1.0, Pitch: 1.0},
+		},
 	}
 }
 
 // TTSProcessor 接收 LLM 流式文本，内部分句后合成音频，
 // 以音频帧为单位通过 OnChunk 回调。
 //
-// StreamingProvider 路径（per-turn stream）：
+// StreamingSynthesizer 路径（per-turn stream）：
 //
 //	Write → splitter → sentenceCh → [dispatcher] → WriteTextChunk → currentStream → AudioReader → onChunk
 //	Flush → currentStream.Finish()
 //
-// 非 StreamingProvider 路径（fallback，串行）：
+// 非 StreamingSynthesizer 路径（fallback，串行）：
 //
 //	Write → splitter → sentenceCh → [dispatcher] → Synthesize → onChunk
 type TTSProcessor interface {
@@ -85,6 +90,7 @@ func NewTTSProcessor(cfg *TTSConfig) (TTSProcessor, error) {
 	}
 	return &ttsProcessor{
 		cfg:          cfg,
+		baseReq:      cfg.BaseRequest,
 		splitter:     newSentenceSplitter(mr),
 		sentenceCh:   make(chan sentenceItem, qs),
 		warmResultCh: make(chan tts.SynthesisStream, 1),
@@ -158,14 +164,15 @@ func (s *sentenceSplitter) reset() {
 
 type sentenceItem struct {
 	text  string
-	opts  tts.SynthesisOptions
+	req   tts.SynthesizeRequest
 	flush bool // true 表示 Flush 信号，dispatcher 需调 currentStream.Finish()
 }
 
 // --- ttsProcessor ---
 
 type ttsProcessor struct {
-	cfg *TTSConfig
+	cfg     *TTSConfig
+	baseReq tts.SynthesizeRequest
 
 	// mu 保护：onChunk、started、splitter、turnStarted、currentEmotion
 	mu             sync.Mutex
@@ -176,7 +183,7 @@ type ttsProcessor struct {
 	currentEmotion string // 当前情绪 emoji，由文本中首 emoji 驱动，Interrupt 复位
 
 	// provider 能力，Start() 时缓存，生命周期内不变
-	streamingProv tts.StreamingProvider
+	streamingProv tts.StreamingSynthesizer
 	warmableProv  tts.WarmableProvider
 
 	// sentenceCh：Write → dispatcher 的句子队列
@@ -187,7 +194,7 @@ type ttsProcessor struct {
 	synthCtx    context.Context
 	synthCancel context.CancelFunc
 
-	// currentStream：per-turn stream（StreamingProvider 路径），turn 结束（Flush）后置 nil
+	// currentStream：per-turn stream（StreamingSynthesizer 路径），turn 结束（Flush）后置 nil
 	streamMu      sync.Mutex
 	currentStream tts.SynthesisStream
 	streamDoneCh  chan struct{} // 当前 stream 的 playAudio 读到 EOF 时关闭
@@ -217,7 +224,7 @@ func (p *ttsProcessor) Start(ctx context.Context) error {
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.synthCtx, p.synthCancel = context.WithCancel(p.ctx)
 	p.started = true
-	p.streamingProv, _ = p.cfg.Provider.(tts.StreamingProvider)
+	p.streamingProv, _ = p.cfg.Provider.(tts.StreamingSynthesizer)
 	p.warmableProv, _ = p.cfg.Provider.(tts.WarmableProvider)
 
 	p.wg.Add(1)
@@ -253,6 +260,19 @@ func (p *ttsProcessor) Stop() error {
 	return nil
 }
 
+// buildReq 将旧 SynthesisOptions 合并到 baseReq 构建 SynthesizeRequest。
+func (p *ttsProcessor) buildReq(text string, opts tts.SynthesisOptions) tts.SynthesizeRequest {
+	req := p.baseReq
+	req.Input = tts.TextInput{Text: text}
+	if opts.Rate > 0 {
+		req.Speech.Speed = opts.Rate
+	}
+	if opts.Emotion != "" {
+		req.Speech.Emotion = opts.Emotion
+	}
+	return req
+}
+
 func (p *ttsProcessor) Write(text string, opts tts.SynthesisOptions) error {
 	p.mu.Lock()
 	if !p.started {
@@ -272,10 +292,11 @@ func (p *ttsProcessor) Write(text string, opts tts.SynthesisOptions) error {
 		p.synthMu.Lock()
 		synthCtx := p.synthCtx
 		p.synthMu.Unlock()
+		warmReq := p.buildReq("", opts) // 预热不需要 text
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
-			stream := p.warmableProv.Warm(synthCtx, opts)
+			stream := p.warmableProv.Warm(synthCtx, warmReq)
 			if stream == nil {
 				return
 			}
@@ -297,10 +318,17 @@ func (p *ttsProcessor) Write(text string, opts tts.SynthesisOptions) error {
 		if !hasSpeakableText(s) {
 			continue
 		}
+		finalEmotion := p.currentEmotion
 		itemOpts := opts
-		itemOpts.Emotion = p.currentEmotion
+		if finalEmotion != "" {
+			itemOpts.Emotion = finalEmotion
+		}
+		item := sentenceItem{
+			text: s,
+			req:  p.buildReq(s, itemOpts),
+		}
 		select {
-		case p.sentenceCh <- sentenceItem{text: s, opts: itemOpts}:
+		case p.sentenceCh <- item:
 			logging.Infof("TTSProcessor: sentence enqueued (text=%q, emotion=%s)", truncate(s, 30), p.currentEmotion)
 		case <-ctx.Done():
 			return ctx.Err()
@@ -326,10 +354,17 @@ func (p *ttsProcessor) Flush(opts tts.SynthesisOptions) error {
 		}
 	}
 	if seg != "" && hasSpeakableText(seg) {
+		finalEmotion := p.currentEmotion
 		itemOpts := opts
-		itemOpts.Emotion = p.currentEmotion
+		if finalEmotion != "" {
+			itemOpts.Emotion = finalEmotion
+		}
+		item := sentenceItem{
+			text: seg,
+			req:  p.buildReq(seg, itemOpts),
+		}
 		select {
-		case p.sentenceCh <- sentenceItem{text: seg, opts: itemOpts}:
+		case p.sentenceCh <- item:
 			logging.Infof("TTSProcessor: sentence enqueued (flush, text=%q, emotion=%s)", truncate(seg, 30), p.currentEmotion)
 		case <-ctx.Done():
 			return ctx.Err()
@@ -338,7 +373,7 @@ func (p *ttsProcessor) Flush(opts tts.SynthesisOptions) error {
 
 	// flush 信号：dispatcher 收到后调 currentStream.Finish()
 	select {
-	case p.sentenceCh <- sentenceItem{flush: true, opts: opts}:
+	case p.sentenceCh <- sentenceItem{flush: true, req: p.buildReq("", opts)}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -415,9 +450,9 @@ func (p *ttsProcessor) dispatcher() {
 			}
 
 			if p.streamingProv != nil {
-				p.dispatchStreaming(item, synthCtx)
+				p.dispatchStreaming(synthCtx, item)
 			} else {
-				p.dispatchBatch(item, synthCtx)
+				p.dispatchBatch(synthCtx, item)
 			}
 		}
 	}
@@ -456,7 +491,7 @@ func (p *ttsProcessor) handleFlush(synthCtx context.Context) {
 }
 
 // dispatchStreaming 走 per-turn stream 路径：复用 currentStream，WriteTextChunk。
-func (p *ttsProcessor) dispatchStreaming(item sentenceItem, synthCtx context.Context) {
+func (p *ttsProcessor) dispatchStreaming(synthCtx context.Context, item sentenceItem) {
 	p.streamMu.Lock()
 	stream := p.currentStream
 	p.streamMu.Unlock()
@@ -475,7 +510,7 @@ func (p *ttsProcessor) dispatchStreaming(item sentenceItem, synthCtx context.Con
 
 		if stream == nil {
 			var err error
-			stream, err = p.streamingProv.StartSynthesis(synthCtx, item.opts)
+			stream, err = p.streamingProv.StartSynthesis(synthCtx, item.req)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logging.Errorf("TTSProcessor: StartSynthesis failed: %v", err)
@@ -517,9 +552,9 @@ func (p *ttsProcessor) dispatchStreaming(item sentenceItem, synthCtx context.Con
 }
 
 // dispatchBatch 走非流式 fallback 路径：串行 Synthesize，直接在 dispatcher goroutine 里播放。
-func (p *ttsProcessor) dispatchBatch(item sentenceItem, synthCtx context.Context) {
+func (p *ttsProcessor) dispatchBatch(synthCtx context.Context, item sentenceItem) {
 	start := time.Now()
-	reader, err := p.cfg.Provider.Synthesize(synthCtx, item.text, item.opts)
+	result, err := p.cfg.Provider.Synthesize(synthCtx, item.req)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			logging.Errorf("TTSProcessor: Synthesize %q failed after %v: %v", truncate(item.text, 20), time.Since(start), err)
@@ -527,7 +562,7 @@ func (p *ttsProcessor) dispatchBatch(item sentenceItem, synthCtx context.Context
 		return
 	}
 	logging.Infof("TTSProcessor: Synthesize done (elapsed=%v, text=%q)", time.Since(start), truncate(item.text, 30))
-	p.playAudio(reader, item.text, synthCtx, nil, nil)
+	p.playAudio(result.Audio, item.text, synthCtx, nil, nil)
 }
 
 // playAudio 从 reader 流式读 PCM，每帧调 onChunk。firstText 只在首帧附加。
@@ -554,8 +589,13 @@ func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCt
 			for {
 				select {
 				case b, ok := <-boundaries:
-					if !ok { break }
-					if b.IsBegin { nextText = b.Text; continue }
+					if !ok {
+						break
+					}
+					if b.IsBegin {
+						nextText = b.Text
+						continue
+					}
 					pendingBoundary = &b
 				default:
 				}
@@ -567,17 +607,11 @@ func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCt
 				first = false
 				logging.Infof("TTSProcessor: playback first frame (elapsed=%v, frame_bytes=%d)", time.Since(playStart), n)
 			}
-			// nextText 由首帧的 firstText（batch 路径）或 sentence-begin
-			// boundary（streaming 路径）设置，不能只限定在 first 内消费，
-			// 否则后续句子的 text 永远不会放到 chunk.Text 中。
 			if nextText != "" {
 				text = nextText
 				nextText = ""
 			}
 
-			// 复制音频数据：fn 可能异步持有 chunk（例如 TTSStage 通过
-			// pipeline channel 转发到另一个 goroutine），下一轮 reader.Read
-			// 会覆盖 buf，直接传 buf[:n] 会导致数据竞争。
 			audioCopy := make([]byte, n)
 			copy(audioCopy, buf[:n])
 			chunk := TTSChunk{Text: text, Audio: audioCopy}
@@ -586,7 +620,9 @@ func (p *ttsProcessor) playAudio(reader io.ReadCloser, firstText string, synthCt
 				chunk.SentenceText = pendingBoundary.Text
 				pendingBoundary = nil
 			}
-			if fn != nil { fn(chunk) }
+			if fn != nil {
+				fn(chunk)
+			}
 		}
 		if err != nil {
 			break

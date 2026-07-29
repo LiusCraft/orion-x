@@ -27,7 +27,8 @@ func newMockTTSProvider() *mockTTSProvider {
 	return &mockTTSProvider{delays: make(map[string]time.Duration)}
 }
 
-func (p *mockTTSProvider) Synthesize(ctx context.Context, text string, _ tts.SynthesisOptions) (io.ReadCloser, error) {
+func (p *mockTTSProvider) Synthesize(ctx context.Context, req tts.SynthesizeRequest) (*tts.SynthesizeResult, error) {
+	text := req.Input.Text
 	p.mu.Lock()
 	p.callCount++
 	err := p.callErr
@@ -45,7 +46,7 @@ func (p *mockTTSProvider) Synthesize(ctx context.Context, text string, _ tts.Syn
 		}
 	}
 	// 返回文本的字节作为 mock 音频
-	return io.NopCloser(strings.NewReader(text)), nil
+	return &tts.SynthesizeResult{Audio: io.NopCloser(strings.NewReader(text))}, nil
 }
 
 // --- mock streaming provider ---
@@ -104,11 +105,11 @@ type mockStreamingProvider struct {
 	finishDelay time.Duration
 }
 
-func (p *mockStreamingProvider) Synthesize(_ context.Context, text string, _ tts.SynthesisOptions) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader(text)), nil
+func (p *mockStreamingProvider) Synthesize(_ context.Context, req tts.SynthesizeRequest) (*tts.SynthesizeResult, error) {
+	return &tts.SynthesizeResult{Audio: io.NopCloser(strings.NewReader(req.Input.Text))}, nil
 }
 
-func (p *mockStreamingProvider) StartSynthesis(_ context.Context, _ tts.SynthesisOptions) (tts.SynthesisStream, error) {
+func (p *mockStreamingProvider) StartSynthesis(_ context.Context, _ tts.SynthesizeRequest) (tts.SynthesisStream, error) {
 	return newMockSynthesisStream(p.finishDelay), nil
 }
 

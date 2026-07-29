@@ -28,6 +28,6 @@ func TestNewProviderRejectsUnsupportedProvider(t *testing.T) {
 
 type fakeProvider struct{}
 
-func (fakeProvider) Synthesize(_ context.Context, _ string, _ SynthesisOptions) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
+func (fakeProvider) Synthesize(_ context.Context, _ SynthesizeRequest) (*SynthesizeResult, error) {
+	return &SynthesizeResult{Audio: io.NopCloser(strings.NewReader(""))}, nil
 }
