@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/liuscraft/orion-x/internal/language"
 	llmprovider "github.com/liuscraft/orion-x/internal/llm/provider"
 	asrprovider "github.com/liuscraft/orion-x/internal/provider/asr"
 	ttsprovider "github.com/liuscraft/orion-x/internal/provider/tts"
@@ -108,16 +109,13 @@ func (h *AvailableHandler) List(c *gin.Context) {
 		if m.Type != store.ModelTypeSpeech {
 			continue
 		}
-		// Filter by language if specified
+		// Filter by language if specified (prefix match on main language)
 		if lang != "" && len(m.Langs) > 0 {
-			hasLang := false
-			for _, l := range m.Langs {
-				if l == lang {
-					hasLang = true
-					break
-				}
+			codes := make([]language.Code, len(m.Langs))
+			for i, l := range m.Langs {
+				codes[i] = language.Code(l)
 			}
-			if !hasLang {
+			if !language.Match(lang, codes) {
 				continue
 			}
 		}
@@ -141,9 +139,19 @@ func (h *AvailableHandler) List(c *gin.Context) {
 	}
 
 	// ── System voices ──
-	systemVoices, err := h.voices.ListAllSystem(lang)
+	systemVoices, err := h.voices.ListAllSystem("")
 	if err == nil {
 		for _, v := range systemVoices {
+			// Filter by language (prefix match on main language)
+			if lang != "" && len(v.Langs) > 0 {
+				codes := make([]language.Code, len(v.Langs))
+				for i, l := range v.Langs {
+					codes[i] = language.Code(l)
+				}
+				if !language.Match(lang, codes) {
+					continue
+				}
+			}
 			r := VoiceResource{
 				ID:             v.ID,
 				Name:           v.Name,
