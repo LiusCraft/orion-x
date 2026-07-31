@@ -14,11 +14,12 @@ import (
 
 type AuthHandler struct {
 	users     *store.UserStore
+	bindings  *store.OAuthBindingStore
 	signToken func(userID string, isAdmin bool) (string, error)
 }
 
-func NewAuthHandler(users *store.UserStore, signToken func(userID string, isAdmin bool) (string, error)) *AuthHandler {
-	return &AuthHandler{users: users, signToken: signToken}
+func NewAuthHandler(users *store.UserStore, bindings *store.OAuthBindingStore, signToken func(userID string, isAdmin bool) (string, error)) *AuthHandler {
+	return &AuthHandler{users: users, bindings: bindings, signToken: signToken}
 }
 
 type registerRequest struct {
@@ -190,30 +191,6 @@ func (h *AuthHandler) BindEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "邮箱绑定成功", "email": req.Email})
 }
 
-// POST /api/auth/unbind-github (JWT)
-// 解绑 GitHub 前必须已有密码，否则账号将失去所有登录方式
-func (h *AuthHandler) UnbindGithub(c *gin.Context) {
-	userID := c.GetString("userID")
-	u, err := h.users.GetByID(userID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
-		return
-	}
-	if u.GithubID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "未绑定 GitHub 账号"})
-		return
-	}
-	if u.PasswordHash == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请先设置密码，再解绑 GitHub"})
-		return
-	}
-	if err := h.users.UpdateGithubID(u.ID, ""); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "解绑失败，请稍后重试"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "GitHub 解绑成功"})
-}
-
 // GET /api/auth/profile (JWT)
 func (h *AuthHandler) Profile(c *gin.Context) {
 	userID := c.GetString("userID")
@@ -222,12 +199,23 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
+
+	binds, err := h.bindings.ListByUser(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "内部错误"})
+		return
+	}
+	bindings := make([]gin.H, 0, len(binds))
+	for _, b := range binds {
+		bindings = append(bindings, gin.H{"provider": b.Provider, "provider_uid": b.ProviderUID})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"user_id":      u.ID,
 		"email":        u.Email,
 		"username":     u.Username,
 		"is_admin":     u.IsAdmin,
-		"github_id":    u.GithubID,
 		"has_password": u.PasswordHash != "",
+		"bindings":     bindings,
 	})
 }

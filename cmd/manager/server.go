@@ -12,15 +12,10 @@ import (
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
-type githubOAuthConfig struct {
-	ClientID     string
-	ClientSecret string
-	RedirectURL  string
-}
-
 func newRouter(
 	jwtSecret []byte,
 	users *store.UserStore,
+	bindings *store.OAuthBindingStore,
 	voicebots *store.VoicebotStore,
 	devices *store.DeviceStore,
 	providers *store.ProviderStore,
@@ -36,7 +31,6 @@ func newRouter(
 	kbStore *store.KnowledgeBaseStore,
 	docStore *store.DocumentStore,
 	voicebotKBs *store.VoicebotKBStore,
-	githubCfg githubOAuthConfig,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -61,7 +55,7 @@ func newRouter(
 		c.Next()
 	})
 
-	authH := handler.NewAuthHandler(users, signToken)
+	authH := handler.NewAuthHandler(users, bindings, signToken)
 	botH := handler.NewVoicebotHandler(voicebots)
 	devH := handler.NewDeviceHandler(voicebots, devices)
 	providerH := handler.NewProviderHandler(providers)
@@ -70,6 +64,7 @@ func newRouter(
 	langH := handler.NewLanguageHandler()
 	mcpH := handler.NewMCPHandler(mcpMarket, mcpServers, mcpBindings, voicebots)
 	internalH := handler.NewInternalHandler(voicebots, devices, models, voices, mcpBindings)
+	oauthH := handler.NewOAuthHandler(users, bindings, signToken)
 
 	availableH := handler.NewAvailableHandler(providers, models, voices)
 	memH := handler.NewMemoryHandler(memStore)
@@ -83,19 +78,18 @@ func newRouter(
 		auth.POST("/register", authH.Register)
 		auth.POST("/login", authH.Login)
 
-		// GitHub OAuth — only register routes when configured
-		if githubCfg.ClientID != "" && githubCfg.ClientSecret != "" {
-			githubH := handler.NewGithubAuthHandler(users, signToken, githubCfg.ClientID, githubCfg.ClientSecret, githubCfg.RedirectURL)
-			auth.GET("/github/login", githubH.Login)
-			auth.GET("/github/callback", githubH.Callback)
-		}
+		// 第三方 OAuth 登录 — 平台由 internal/oauth 注册表提供，
+		// 未注册的平台在 handler 内返回 404
+		auth.GET("/oauth/providers", oauthH.Providers)
+		auth.GET("/oauth/:provider/login", oauthH.Login)
+		auth.GET("/oauth/:provider/callback", oauthH.Callback)
 
 		jwtMw := middleware.JWT(jwtSecret)
 
 		authed := api.Group("/auth", jwtMw)
 		authed.POST("/change-password", authH.ChangePassword)
 		authed.POST("/bind-email", authH.BindEmail)
-		authed.POST("/unbind-github", authH.UnbindGithub)
+		authed.POST("/oauth/:provider/unbind", oauthH.Unbind)
 		authed.GET("/profile", authH.Profile)
 
 		bots := api.Group("/voicebots", jwtMw)

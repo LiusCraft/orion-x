@@ -41,6 +41,16 @@ export interface Device {
 	};
 }
 
+export interface OAuthBinding {
+	provider: string;
+	provider_uid: string;
+}
+
+export interface OAuthProvider {
+	provider: string;
+	name: string;
+}
+
 export const authApi = {
 	login: (email: string, password: string) =>
 		http.post<{ token: string; user_id: string; email: string; username: string; is_admin: boolean }>(
@@ -52,10 +62,14 @@ export const authApi = {
 			"/auth/register",
 			{ email, password, username },
 		),
-	githubLoginUrl: () => {
+	oauthProviders: () =>
+		http.get<{ providers: OAuthProvider[] }>("/auth/oauth/providers"),
+	oauthLoginUrl: (provider: string) => {
 		const from = encodeURIComponent(window.location.origin);
-		return `/api/auth/github/login?from=${from}`;
+		return `/api/auth/oauth/${provider}/login?from=${from}`;
 	},
+	unbindOAuth: (provider: string) =>
+		http.post<{ message: string }>(`/auth/oauth/${provider}/unbind`),
 	changePassword: (oldPassword: string, newPassword: string) =>
 		http.post<{ message: string }>("/auth/change-password", {
 			old_password: oldPassword,
@@ -65,15 +79,14 @@ export const authApi = {
 		http.post<{ message: string; email: string }>("/auth/bind-email", {
 			email,
 		}),
-	unbindGithub: () => http.post<{ message: string }>("/auth/unbind-github"),
 	profile: () =>
 		http.get<{
 			user_id: string;
 			email: string;
 			username: string;
 			is_admin: boolean;
-			github_id?: string;
 			has_password: boolean;
+			bindings: OAuthBinding[];
 		}>("/auth/profile"),
 };
 

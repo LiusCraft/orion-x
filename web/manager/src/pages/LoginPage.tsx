@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mic, Cpu, Zap, Globe } from "lucide-react";
-import { authApi } from "@/lib/api";
+import { authApi, type OAuthProvider } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
+  const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
+
+  // 拉取已注册的第三方登录平台（如 github），未配置的平台不展示入口
+  useEffect(() => {
+    authApi
+      .oauthProviders()
+      .then(({ data }) => setOauthProviders(data.providers))
+      .catch(() => {});
+  }, []);
 
   // Handle GitHub OAuth redirect — read token/error from URL params
   useEffect(() => {
@@ -47,8 +56,7 @@ export default function LoginPage() {
       setAuth(token, userId, usernameParam || "", false);
       // Clean URL
       window.history.replaceState({}, document.title, window.location.pathname);
-      // GitHub 登录后跳到账号页，提醒未设置密码的账号完善密码
-      navigate("/account");
+      navigate("/agents/plaza");
     } else if (errorParam) {
       setError(decodeURIComponent(errorParam));
       // Clean URL
@@ -80,10 +88,6 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleGithubLogin = () => {
-    window.location.href = authApi.githubLoginUrl();
   };
 
   return (
@@ -344,17 +348,26 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* GitHub OAuth button */}
-            <button
-              type="button"
-              onClick={handleGithubLogin}
-              className="w-full flex items-center justify-center gap-2.5 h-11 rounded-xl border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 active:scale-[0.98] text-zinc-300 hover:text-white text-sm font-medium transition-all duration-150 cursor-pointer"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-              </svg>
-              使用 GitHub 登录
-            </button>
+            {/* OAuth 登录按钮 — 按服务端注册的平台动态渲染 */}
+            {oauthProviders.map((p) => (
+              <button
+                key={p.provider}
+                type="button"
+                onClick={() => {
+                  window.location.href = authApi.oauthLoginUrl(p.provider);
+                }}
+                className="w-full flex items-center justify-center gap-2.5 h-11 rounded-xl border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 active:scale-[0.98] text-zinc-300 hover:text-white text-sm font-medium transition-all duration-150 cursor-pointer"
+              >
+                {p.provider === "github" ? (
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+                  </svg>
+                ) : (
+                  <Globe className="w-5 h-5" />
+                )}
+                使用 {p.name} 登录
+              </button>
+            ))}
 
             {/* Toggle mode */}
             <p className="text-center text-xs text-zinc-500 mt-5">

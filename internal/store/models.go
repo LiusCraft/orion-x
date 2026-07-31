@@ -22,9 +22,19 @@ type User struct {
 	Email        string `gorm:"uniqueIndex;not null;type:varchar(128)" json:"email"`
 	Username     string `gorm:"type:varchar(64)" json:"username,omitempty"`
 	PasswordHash string `gorm:"not null" json:"-"`
-	GithubID     string `gorm:"uniqueIndex;type:varchar(64)" json:"-"`
-	IsAdmin      bool   `gorm:"not null;default:false;index" json:"is_admin"`
+	// GithubID 已废弃：OAuth 绑定统一存入 OAuthBinding 表，此列仅保留历史数据。
+	GithubID string `gorm:"uniqueIndex;type:varchar(64)" json:"-"`
+	IsAdmin  bool   `gorm:"not null;default:false;index" json:"is_admin"`
 	BaseModel
+}
+
+// OAuthBinding 用户与第三方 OAuth 平台的绑定关系（多平台、每平台唯一）。
+type OAuthBinding struct {
+	UserID      string    `gorm:"primaryKey;type:varchar(36)" json:"user_id"`
+	Provider    string    `gorm:"primaryKey;type:varchar(32);index:idx_oauth_provider_uid,unique" json:"provider"`
+	ProviderUID string    `gorm:"type:varchar(64);index:idx_oauth_provider_uid,unique" json:"provider_uid"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+	Creator     string    `gorm:"type:varchar(36)" json:"creator"`
 }
 
 // Voicebot 一个 voicebot 实例，持有完整 ASR/TTS/LLM 配置

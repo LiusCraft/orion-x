@@ -32,19 +32,19 @@ func (s *UserStore) Create(email, username, passwordHash, creator string) (*User
 	return u, nil
 }
 
-// CreateWithGithub creates a user linked to a GitHub account.
+// CreateWithOAuth creates a user linked to a third-party OAuth account.
 // email is the primary identity; username is auto-derived if empty.
-func (s *UserStore) CreateWithGithub(email, githubID, creator string) (*User, error) {
+// OAuth 绑定关系写入 OAuthBinding 表，由调用方负责。
+func (s *UserStore) CreateWithOAuth(email, oauthUID, creator string) (*User, error) {
 	username := emailToUsername(email)
 	u := &User{
 		ID:        uuid.NewString(),
 		Email:     email,
 		Username:  username,
-		GithubID:  githubID,
 		BaseModel: BaseModel{Creator: creator},
 	}
 	if err := s.db.Create(u).Error; err != nil {
-		return nil, fmt.Errorf("user store: create with github: %w", err)
+		return nil, fmt.Errorf("user store: create with oauth: %w", err)
 	}
 	return u, nil
 }
@@ -66,17 +66,6 @@ func (s *UserStore) GetByEmail(email string) (*User, error) {
 func (s *UserStore) GetByUsername(username string) (*User, error) {
 	var u User
 	if err := s.db.Where("username = ?", username).First(&u).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return &u, nil
-}
-
-func (s *UserStore) GetByGithubID(githubID string) (*User, error) {
-	var u User
-	if err := s.db.Where("github_id = ?", githubID).First(&u).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -108,8 +97,13 @@ func (s *UserStore) SetAdmin(id string, isAdmin bool) error {
 	return s.db.Model(&User{}).Where("id = ?", id).Update("is_admin", isAdmin).Error
 }
 
-func (s *UserStore) UpdateGithubID(id, githubID string) error {
-	return s.db.Model(&User{}).Where("id = ?", id).Update("github_id", githubID).Error
+// ListWithGithubID 返回仍带历史 github_id 的用户（用于迁移到 oauth_bindings）。
+func (s *UserStore) ListWithGithubID() ([]User, error) {
+	var users []User
+	if err := s.db.Where("github_id <> ''").Find(&users).Error; err != nil {
+		return nil, fmt.Errorf("user store: list with github id: %w", err)
+	}
+	return users, nil
 }
 
 // emailToUsername derives a display name from an email address.
