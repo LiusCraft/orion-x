@@ -33,10 +33,21 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 	return <>{children}</>;
 }
 
+/** Handles OAuth redirect and redirects authenticated users away from /login. */
+function RootRoute() {
+	const params = new URLSearchParams(window.location.search);
+	if (params.has("token") || params.has("error")) {
+		return <LoginPage />;
+	}
+	const { token } = useAuthStore();
+	return <Navigate to={token ? "/agents" : "/login"} replace />;
+}
+
 export default function App() {
 	return (
 		<BrowserRouter>
 			<Routes>
+				<Route path="/" element={<RootRoute />} />
 				<Route path="/login" element={<LoginPage />} />
 
 				{/* Main manager routes (all inside Layout) */}

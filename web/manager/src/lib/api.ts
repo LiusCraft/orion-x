@@ -41,12 +41,35 @@ export interface Device {
 	};
 }
 
+export interface OAuthBinding {
+	provider: string;
+	provider_uid: string;
+}
+
+export interface OAuthProvider {
+	provider: string;
+	name: string;
+}
+
 export const authApi = {
-	login: (username: string, password: string) =>
-		http.post<{ token: string; user_id: string; username: string; is_admin: boolean }>(
+	login: (email: string, password: string) =>
+		http.post<{ token: string; user_id: string; email: string; username: string; is_admin: boolean }>(
 			"/auth/login",
-			{ username, password },
+			{ email, password },
 		),
+	register: (email: string, password: string, username?: string) =>
+		http.post<{ token: string; user_id: string; email: string; username: string; is_admin: boolean }>(
+			"/auth/register",
+			{ email, password, username },
+		),
+	oauthProviders: () =>
+		http.get<{ providers: OAuthProvider[] }>("/auth/oauth/providers"),
+	oauthLoginUrl: (provider: string) => {
+		const from = encodeURIComponent(window.location.origin);
+		return `/api/auth/oauth/${provider}/login?from=${from}`;
+	},
+	unbindOAuth: (provider: string) =>
+		http.post<{ message: string }>(`/auth/oauth/${provider}/unbind`),
 	changePassword: (oldPassword: string, newPassword: string) =>
 		http.post<{ message: string }>("/auth/change-password", {
 			old_password: oldPassword,
@@ -57,9 +80,14 @@ export const authApi = {
 			email,
 		}),
 	profile: () =>
-		http.get<{ user_id: string; username: string; email: string; is_admin: boolean }>(
-			"/auth/profile",
-		),
+		http.get<{
+			user_id: string;
+			email: string;
+			username: string;
+			is_admin: boolean;
+			has_password: boolean;
+			bindings: OAuthBinding[];
+		}>("/auth/profile"),
 };
 
 export const voicebotApi = {

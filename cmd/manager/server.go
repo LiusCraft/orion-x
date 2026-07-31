@@ -3,7 +3,7 @@ package main
 import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
-	"github.com/swaggo/gin-swagger"
+	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"github.com/liuscraft/orion-x/cmd/manager/handler"
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
@@ -15,6 +15,7 @@ import (
 func newRouter(
 	jwtSecret []byte,
 	users *store.UserStore,
+	bindings *store.OAuthBindingStore,
 	voicebots *store.VoicebotStore,
 	devices *store.DeviceStore,
 	providers *store.ProviderStore,
@@ -54,7 +55,7 @@ func newRouter(
 		c.Next()
 	})
 
-	authH := handler.NewAuthHandler(users, signToken)
+	authH := handler.NewAuthHandler(users, bindings, signToken)
 	botH := handler.NewVoicebotHandler(voicebots)
 	devH := handler.NewDeviceHandler(voicebots, devices)
 	providerH := handler.NewProviderHandler(providers)
@@ -63,6 +64,7 @@ func newRouter(
 	langH := handler.NewLanguageHandler()
 	mcpH := handler.NewMCPHandler(mcpMarket, mcpServers, mcpBindings, voicebots)
 	internalH := handler.NewInternalHandler(voicebots, devices, models, voices, mcpBindings)
+	oauthH := handler.NewOAuthHandler(users, bindings, signToken)
 
 	availableH := handler.NewAvailableHandler(providers, models, voices)
 	memH := handler.NewMemoryHandler(memStore)
@@ -73,13 +75,21 @@ func newRouter(
 	api := r.Group("/api")
 	{
 		auth := api.Group("/auth")
+		auth.POST("/register", authH.Register)
 		auth.POST("/login", authH.Login)
+
+		// 第三方 OAuth 登录 — 平台由 internal/oauth 注册表提供，
+		// 未注册的平台在 handler 内返回 404
+		auth.GET("/oauth/providers", oauthH.Providers)
+		auth.GET("/oauth/:provider/login", oauthH.Login)
+		auth.GET("/oauth/:provider/callback", oauthH.Callback)
 
 		jwtMw := middleware.JWT(jwtSecret)
 
 		authed := api.Group("/auth", jwtMw)
 		authed.POST("/change-password", authH.ChangePassword)
 		authed.POST("/bind-email", authH.BindEmail)
+		authed.POST("/oauth/:provider/unbind", oauthH.Unbind)
 		authed.GET("/profile", authH.Profile)
 
 		bots := api.Group("/voicebots", jwtMw)

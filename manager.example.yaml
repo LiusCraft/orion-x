@@ -11,6 +11,14 @@ admin:
   username: "admin"
   password: "admin123"   # 仅首次启动时创建用户，之后此字段可删除
 
+github_oauth:
+  client_id: ""           # GitHub OAuth App Client ID
+  client_secret: ""        # GitHub OAuth App Client Secret
+  redirect_url: ""         # GitHub OAuth 回调地址（后端接口），必须与 GitHub App 设置一致
+                            # 本地开发: http://localhost:9090/api/auth/github/callback
+                            # 生产环境: https://yourdomain.com/api/auth/github/callback
+                            # 回调后跳回前端的地址由前端通过 ?from= 参数自报，无需配置
+
 logging:
   level: "info"
   format: "console"    # console | json
