@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -113,9 +114,12 @@ func (s *UserStore) UpdateGithubID(id, githubID string) error {
 
 // emailToUsername derives a display name from an email address.
 func emailToUsername(email string) string {
-	// Take the part before @, sanitize to alphanumeric + underscore/dot/hyphen
+	// Take the part before @
+	local, _, _ := strings.Cut(email, "@")
+
+	// Sanitize to alphanumeric + underscore/dot/hyphen
 	var clean []byte
-	for _, c := range []byte(email) {
+	for _, c := range []byte(local) {
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-' {
 			clean = append(clean, c)
 		}

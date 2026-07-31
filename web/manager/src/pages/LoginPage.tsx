@@ -47,7 +47,8 @@ export default function LoginPage() {
       setAuth(token, userId, usernameParam || "", false);
       // Clean URL
       window.history.replaceState({}, document.title, window.location.pathname);
-      navigate("/agents");
+      // GitHub 登录后跳到账号页，提醒未设置密码的账号完善密码
+      navigate("/account");
     } else if (errorParam) {
       setError(decodeURIComponent(errorParam));
       // Clean URL

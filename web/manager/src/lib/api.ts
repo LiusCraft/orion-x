@@ -65,10 +65,16 @@ export const authApi = {
 		http.post<{ message: string; email: string }>("/auth/bind-email", {
 			email,
 		}),
+	unbindGithub: () => http.post<{ message: string }>("/auth/unbind-github"),
 	profile: () =>
-		http.get<{ user_id: string; email: string; username: string; is_admin: boolean }>(
-			"/auth/profile",
-		),
+		http.get<{
+			user_id: string;
+			email: string;
+			username: string;
+			is_admin: boolean;
+			github_id?: string;
+			has_password: boolean;
+		}>("/auth/profile"),
 };
 
 export const voicebotApi = {

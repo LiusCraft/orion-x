@@ -121,7 +121,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 type changePasswordRequest struct {
-	OldPassword string `json:"old_password" binding:"required"`
+	// OldPassword 可为空——GitHub OAuth 创建的账号无密码，首次设置时留空
+	OldPassword string `json:"old_password"`
 	NewPassword string `json:"new_password" binding:"required,min=6"`
 }
 
@@ -141,9 +142,16 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.OldPassword)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "旧密码不正确"})
-		return
+	// GitHub OAuth 创建的账号没有密码，跳过旧密码校验，允许首次设置密码
+	if u.PasswordHash != "" {
+		if req.OldPassword == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "旧密码不能为空"})
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.OldPassword)); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "旧密码不正确"})
+			return
+		}
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
@@ -182,6 +190,30 @@ func (h *AuthHandler) BindEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "邮箱绑定成功", "email": req.Email})
 }
 
+// POST /api/auth/unbind-github (JWT)
+// 解绑 GitHub 前必须已有密码，否则账号将失去所有登录方式
+func (h *AuthHandler) UnbindGithub(c *gin.Context) {
+	userID := c.GetString("userID")
+	u, err := h.users.GetByID(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if u.GithubID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未绑定 GitHub 账号"})
+		return
+	}
+	if u.PasswordHash == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先设置密码，再解绑 GitHub"})
+		return
+	}
+	if err := h.users.UpdateGithubID(u.ID, ""); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "解绑失败，请稍后重试"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "GitHub 解绑成功"})
+}
+
 // GET /api/auth/profile (JWT)
 func (h *AuthHandler) Profile(c *gin.Context) {
 	userID := c.GetString("userID")
@@ -191,9 +223,11 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"user_id":  u.ID,
-		"email":    u.Email,
-		"username": u.Username,
-		"is_admin": u.IsAdmin,
+		"user_id":      u.ID,
+		"email":        u.Email,
+		"username":     u.Username,
+		"is_admin":     u.IsAdmin,
+		"github_id":    u.GithubID,
+		"has_password": u.PasswordHash != "",
 	})
 }

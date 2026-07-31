@@ -95,6 +95,7 @@ func newRouter(
 		authed := api.Group("/auth", jwtMw)
 		authed.POST("/change-password", authH.ChangePassword)
 		authed.POST("/bind-email", authH.BindEmail)
+		authed.POST("/unbind-github", authH.UnbindGithub)
 		authed.GET("/profile", authH.Profile)
 
 		bots := api.Group("/voicebots", jwtMw)

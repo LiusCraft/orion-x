@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -25,9 +26,70 @@ const (
 	githubTokenURL      = "https://github.com/login/oauth/access_token"
 	githubUserURL       = "https://api.github.com/user"
 	githubUserEmailsURL = "https://api.github.com/user/emails"
-	githubStateCookie   = "github_oauth_state"
 	githubStateTTL      = 10 * time.Minute
 )
+
+// ---------------------------------------------------------------------------
+// Server-side state store — replaces cookie-based CSRF validation so that
+// OAuth callbacks work reliably regardless of hostname / IP changes between
+// login (local proxy) and callback (public redirect).
+// ---------------------------------------------------------------------------
+
+type oauthStateEntry struct {
+	redirectTo string
+	expiresAt  time.Time
+}
+
+type oauthStateStore struct {
+	mu    sync.Mutex
+	items map[string]oauthStateEntry
+}
+
+var globalStateStore = newOAuthStateStore()
+
+func newOAuthStateStore() *oauthStateStore {
+	s := &oauthStateStore{items: make(map[string]oauthStateEntry)}
+	go s.cleanupLoop()
+	return s
+}
+
+func (s *oauthStateStore) put(key, redirectTo string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items[key] = oauthStateEntry{redirectTo: redirectTo, expiresAt: time.Now().Add(githubStateTTL)}
+}
+
+// take atomically reads and deletes the entry. Returns (redirectTo, true) on success.
+func (s *oauthStateStore) take(key string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.items[key]
+	if !ok || time.Now().After(entry.expiresAt) {
+		delete(s.items, key)
+		return "", false
+	}
+	delete(s.items, key) // one-time use
+	return entry.redirectTo, true
+}
+
+func (s *oauthStateStore) cleanupLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.mu.Lock()
+		now := time.Now()
+		for k, v := range s.items {
+			if now.After(v.expiresAt) {
+				delete(s.items, k)
+			}
+		}
+		s.mu.Unlock()
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GitHub user / email response types
+// ---------------------------------------------------------------------------
 
 type githubUser struct {
 	ID        int    `json:"id"`
@@ -42,6 +104,10 @@ type githubEmail struct {
 	Primary  bool   `json:"primary"`
 	Verified bool   `json:"verified"`
 }
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
 
 type GithubAuthHandler struct {
 	users     *store.UserStore
@@ -66,104 +132,54 @@ func NewGithubAuthHandler(users *store.UserStore, signToken func(userID string, 
 	}
 }
 
-// stateData OAuth state 参数，携带 CSRF token 和回调后跳转地址
-type stateData struct {
-	CSRFToken  string `json:"t"`
-	RedirectTo string `json:"r,omitempty"` // 前端地址，GitHub 回调后跳回去
-}
-
-func marshalState(s stateData) string {
-	b, _ := json.Marshal(s)
-	return string(b)
-}
-
-func unmarshalState(raw string) (stateData, error) {
-	var d stateData
-	if err := json.Unmarshal([]byte(raw), &d); err != nil {
-		return stateData{}, err
-	}
-	return d, nil
-}
-
-// Login 跳转到 GitHub 授权页
+// ---------------------------------------------------------------------------
+// Login — redirect to GitHub authorize page
 // GET /api/auth/github/login?from=http://localhost:5173
+// ---------------------------------------------------------------------------
+
 func (h *GithubAuthHandler) Login(c *gin.Context) {
 	if h.oauthCfg.ClientID == "" {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "GitHub OAuth 未配置"})
 		return
 	}
 
-	csrfToken := newCSRFToken()
-
 	frontend := c.Query("from")
 	if frontend == "" {
 		frontend = "/"
 	}
 
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     githubStateCookie,
-		Value:    csrfToken,
-		Path:     "/",
-		MaxAge:   int(githubStateTTL.Seconds()),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	stateKey := newCSRFToken()
+	globalStateStore.put(stateKey, frontend)
 
-	// state 里同时编码 CSRF token 和前端地址
-	state := marshalState(stateData{
-		CSRFToken:  csrfToken,
-		RedirectTo: frontend,
-	})
-
-	authURL := h.oauthCfg.AuthCodeURL(state, oauth2.AccessTypeOnline)
+	authURL := h.oauthCfg.AuthCodeURL(stateKey, oauth2.AccessTypeOnline)
 	c.Redirect(http.StatusFound, authURL)
 }
 
-// Callback 处理 GitHub OAuth 回调
+// ---------------------------------------------------------------------------
+// Callback — handle GitHub OAuth callback
 // GET /api/auth/github/callback?code=xxx&state=yyy
+// ---------------------------------------------------------------------------
+
 func (h *GithubAuthHandler) Callback(c *gin.Context) {
 	if h.oauthCfg.ClientID == "" || h.oauthCfg.ClientSecret == "" {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "GitHub OAuth 未配置"})
 		return
 	}
 
-	// 解析 state
-	stateRaw := c.Query("state")
-	if stateRaw == "" {
+	stateKey := c.Query("state")
+	if stateKey == "" {
 		h.redirectError("/", c, "缺少 state 参数")
 		return
 	}
 
-	// state 可能是 JSON 编码的 stateData，也可能是纯字符串的 CSRF token（兼容旧版）
-	sd, err := unmarshalState(stateRaw)
-	var csrfToken string
-	var redirectTo string
-	if err == nil {
-		csrfToken = sd.CSRFToken
-		redirectTo = sd.RedirectTo
-	} else {
-		// 回退：state 就是 CSRF token 本身
-		csrfToken = stateRaw
-		redirectTo = "/"
+	redirectTo, ok := globalStateStore.take(stateKey)
+	if !ok {
+		h.redirectError("/", c, "安全验证失败，请重新授权")
+		return
 	}
-
 	if redirectTo == "" {
 		redirectTo = "/"
 	}
-
-	// 验证 CSRF token
-	csrfCookie, err := c.Cookie(githubStateCookie)
-	if err != nil || csrfCookie == "" || csrfCookie != csrfToken {
-		h.redirectError(redirectTo, c, "安全验证失败，请重新授权")
-		return
-	}
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     githubStateCookie,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-	})
 
 	code := c.Query("code")
 	if code == "" {
@@ -171,7 +187,7 @@ func (h *GithubAuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	// 交换 token
+	// Exchange code for access token
 	ctx := c.Request.Context()
 	oauthToken, err := h.oauthCfg.Exchange(ctx, code)
 	if err != nil {
@@ -180,7 +196,7 @@ func (h *GithubAuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	// 获取用户信息
+	// Fetch user info from GitHub
 	ghUser, err := h.fetchUser(ctx, oauthToken.AccessToken)
 	if err != nil {
 		logging.Errorf("github oauth: fetch user: %v", err)
@@ -231,7 +247,7 @@ func (h *GithubAuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	// 跳回前端
+	// Redirect back to frontend with token
 	sep := "?"
 	if strings.Contains(redirectTo, "?") {
 		sep = "&"
@@ -243,6 +259,10 @@ func (h *GithubAuthHandler) Callback(c *gin.Context) {
 		url.QueryEscape(u.Username),
 	))
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 func (h *GithubAuthHandler) redirectError(redirectTo string, c *gin.Context, msg string) {
 	sep := "?"
