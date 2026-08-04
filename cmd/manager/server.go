@@ -31,6 +31,7 @@ func newRouter(
 	kbStore *store.KnowledgeBaseStore,
 	docStore *store.DocumentStore,
 	voicebotKBs *store.VoicebotKBStore,
+	agentTemplates *store.AgentTemplateStore,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -67,6 +68,7 @@ func newRouter(
 	oauthH := handler.NewOAuthHandler(users, bindings, signToken)
 
 	availableH := handler.NewAvailableHandler(providers, models, voices)
+	tplH := handler.NewAgentTemplateHandler(agentTemplates)
 	memH := handler.NewMemoryHandler(memStore)
 	dataMemH := handler.NewDataMemoryHandler(memStore, devices, voicebots)
 	dataKnowH := handler.NewDataKnowledgeHandler(kbSvc, kbStore, docStore, devices, voicebots, voicebotKBs)
@@ -157,6 +159,11 @@ func newRouter(
 		knowledgeData.GET("/bots/:bot_id/knowledge_bases", dataKnowH.ListKBs)
 		knowledgeData.POST("/bots/:bot_id/knowledge_bases", dataKnowH.CreateKB)
 
+		// 智能体广场
+		api.GET("/agent-templates/system", jwtMw, tplH.ListSystem)
+		api.GET("/agent-templates/:id", jwtMw, tplH.Get)
+		api.POST("/agent-templates/:id/use", jwtMw, tplH.Use)
+
 		// 预留：活跃会话列表
 		api.GET("/sessions", jwtMw, func(c *gin.Context) {
 			c.JSON(200, []any{})
@@ -202,6 +209,10 @@ func newRouter(
 
 		internal.GET("/knowledge/search", dataKnowH.Search)
 		internal.GET("/devices/tg-bots", internalH.DeviceTGBots)
+
+		internal.POST("/agent-templates", tplH.AdminCreate)
+		internal.PUT("/agent-templates/:id", tplH.AdminUpdate)
+		internal.DELETE("/agent-templates/:id", tplH.AdminDelete)
 	}
 	return r
 }

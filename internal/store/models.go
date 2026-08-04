@@ -181,6 +181,21 @@ type MCPServer struct {
 	BaseModel
 }
 
+// AgentTemplate 智能体广场模板（系统预置/用户自定义的智能体模板）
+type AgentTemplate struct {
+	ID          string         `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	Name        string         `gorm:"not null;type:varchar(128)" json:"name"`
+	Description string         `gorm:"type:text" json:"description,omitempty"`
+	Icon        string         `gorm:"type:varchar(16)" json:"icon,omitempty"`
+	Color       string         `gorm:"type:varchar(64)" json:"color,omitempty"`
+	Category    string         `gorm:"type:varchar(64);index" json:"category"`
+	Tags        pq.StringArray `gorm:"type:text[]" json:"tags,omitempty"`
+	ConfigJSON  string         `gorm:"type:text;not null" json:"config_json"`
+	IsSystem    bool           `gorm:"not null;default:false;index" json:"is_system"`
+	UseCount    int            `gorm:"not null;default:0" json:"use_count"`
+	BaseModel
+}
+
 // VoicebotMCPBinding voicebot 与 MCP 服务器的多对多绑定关系
 type VoicebotMCPBinding struct {
 	VoicebotID  string    `gorm:"primaryKey;type:varchar(36)" json:"voicebot_id"`

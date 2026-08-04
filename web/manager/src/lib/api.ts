@@ -255,6 +255,35 @@ export const voiceApi = {
 		}),
 };
 
+export interface AgentTemplate {
+	id: string;
+	name: string;
+	description?: string;
+	icon?: string;
+	color?: string;
+	category: string;
+	tags?: string[];
+	config_json: string;
+	is_system: boolean;
+	use_count: number;
+	created_at: string;
+	updated_at: string;
+	creator: string;
+}
+
+export const agentTemplateApi = {
+	listSystem: (category?: string, q?: string) =>
+		http.get<AgentTemplate[]>("/agent-templates/system", {
+			params: { category, q },
+		}),
+	get: (id: string) =>
+		http.get<AgentTemplate>(`/agent-templates/${id}`),
+	use: (id: string) =>
+		http.post<{ template_id: string; name: string; config: Record<string, unknown> }>(
+			`/agent-templates/${id}/use`,
+		),
+};
+
 export interface ResourceOption {
 	id: string;
 	name: string;

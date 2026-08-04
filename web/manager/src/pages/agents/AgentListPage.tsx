@@ -10,7 +10,6 @@ import {
 import {
   Bot,
   Plus,
-  Settings,
   Cpu,
   Mic,
   Volume2,
@@ -18,6 +17,8 @@ import {
   Brain,
   LayoutGrid,
   List,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -99,6 +100,8 @@ export default function AgentListPage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">(() => {
     return (localStorage.getItem("agentViewMode") as "grid" | "list") || "grid";
   });
+  const [deleteTarget, setDeleteTarget] = useState<Voicebot | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
 
   const toggleView = (mode: "grid" | "list") => {
@@ -156,6 +159,18 @@ export default function AgentListPage() {
       navigate(`/agents/${data.id}`);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await voicebotApi.remove(deleteTarget.id);
+      setBots((prev) => prev.filter((b) => b.id !== deleteTarget.id));
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -259,9 +274,16 @@ export default function AgentListPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="text-zinc-600 group-hover:text-zinc-400 transition-colors mt-0.5">
-                      <Settings className="w-4 h-4" strokeWidth={1.5} />
-                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(bot);
+                      }}
+                      className="text-zinc-600 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-400/10 opacity-0 group-hover:opacity-100"
+                      title="删除"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
+                    </button>
                   </div>
 
                   {/* Config summary */}
@@ -366,6 +388,7 @@ export default function AgentListPage() {
                   <th className="px-4 py-3 font-medium">语言</th>
                   <th className="px-4 py-3 font-medium">记忆</th>
                   <th className="px-4 py-3 font-medium">更新时间</th>
+                  <th className="px-4 py-3 font-medium w-10" />
                 </tr>
               </thead>
               <tbody>
@@ -417,6 +440,18 @@ export default function AgentListPage() {
                           hour12: false,
                         })}
                       </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteTarget(bot);
+                          }}
+                          className="text-zinc-600 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-400/10"
+                          title="删除"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -465,6 +500,38 @@ export default function AgentListPage() {
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
               {creating ? "创建中..." : "创建"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-white">确认删除</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-zinc-400 py-2">
+            确定要删除「{deleteTarget?.name}」吗？此操作无法撤销，该智能体关联的设备也将失去配置。
+          </p>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+            >
+              取消
+            </Button>
+            <Button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-500 text-white"
+            >
+              {deleting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                "删除"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
