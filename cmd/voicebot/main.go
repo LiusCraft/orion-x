@@ -1,3 +1,5 @@
+//go:build cgo
+
 package main
 
 import (
@@ -327,9 +329,9 @@ func main() {
 	logging.Infof("VoiceBot stopped.")
 
 	logging.Sync()
-	// Raw _exit syscall bypasses C/C++ library cleanup to avoid
-	// PortAudio CoreAudio thread destructor crash on macOS.
-	_, _, _ = syscall.Syscall(syscall.SYS_EXIT, 0, 0, 0)
+	// os.Exit bypasses deferred cleanup to avoid PortAudio CoreAudio thread
+	// destructor crashes on macOS. It is also available on Windows.
+	os.Exit(0)
 }
 
 func toToolsMCPServers(cfgs []config.MCPServerConfig) []tools.MCPServerConfig {
