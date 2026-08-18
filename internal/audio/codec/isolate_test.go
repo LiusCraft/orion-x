@@ -1,3 +1,5 @@
+//go:build cgo
+
 package codec
 
 import (
@@ -7,14 +9,18 @@ import (
 
 func TestIsolateBug(t *testing.T) {
 	raw, err := os.ReadFile("/tmp/ws_debug_sess_831a4c31811a.pcm")
-	if err != nil { t.Skip(err) }
+	if err != nil {
+		t.Skip(err)
+	}
 	samples := make([]int16, len(raw)/2)
-	for i := range samples { samples[i] = int16(raw[i*2]) | int16(raw[i*2+1])<<8 }
+	for i := range samples {
+		samples[i] = int16(raw[i*2]) | int16(raw[i*2+1])<<8
+	}
 
 	frameSize := 960
 
 	// Test A: 用全新 codec，只编码→解码 frame 4（第一个语音帧）
-	frame4Start := 4 * frameSize  // 3840
+	frame4Start := 4 * frameSize // 3840
 	frame4 := samples[frame4Start : frame4Start+frameSize]
 
 	encA, _ := New(FormatOpus, 16000, 1, 60)
@@ -25,8 +31,12 @@ func TestIsolateBug(t *testing.T) {
 	maxDiffA := 0
 	for i := range pcmA {
 		diff := int(frame4[i]) - int(pcmA[i])
-		if diff < 0 { diff = -diff }
-		if diff > maxDiffA { maxDiffA = diff }
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > maxDiffA {
+			maxDiffA = diff
+		}
 	}
 	t.Logf("Test A (frame4 only, fresh codec): max_diff=%d", maxDiffA)
 
@@ -41,8 +51,12 @@ func TestIsolateBug(t *testing.T) {
 	maxDiffB := 0
 	for i := range pcmB {
 		diff := int(frame4[i]) - int(pcmB[i])
-		if diff < 0 { diff = -diff }
-		if diff > maxDiffB { maxDiffB = diff }
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > maxDiffB {
+			maxDiffB = diff
+		}
 	}
 	t.Logf("Test B (frame0-4 encoded, fresh decoder): max_diff=%d", maxDiffB)
 
@@ -61,8 +75,12 @@ func TestIsolateBug(t *testing.T) {
 	maxDiffC := 0
 	for i := range pcmCFrame4 {
 		diff := int(frame4[i]) - int(pcmCFrame4[i])
-		if diff < 0 { diff = -diff }
-		if diff > maxDiffC { maxDiffC = diff }
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > maxDiffC {
+			maxDiffC = diff
+		}
 	}
 	t.Logf("Test C (continuous encoder+decoder): max_diff=%d", maxDiffC)
 
@@ -78,8 +96,12 @@ func TestIsolateBug(t *testing.T) {
 			maxDiffD := 0
 			for i := range pcmD {
 				diff := int(frame4[i]) - int(pcmD[i])
-				if diff < 0 { diff = -diff }
-				if diff > maxDiffD { maxDiffD = diff }
+				if diff < 0 {
+					diff = -diff
+				}
+				if diff > maxDiffD {
+					maxDiffD = diff
+				}
 			}
 			t.Logf("Test D (shared enc+dec, continuous): max_diff=%d", maxDiffD)
 		}

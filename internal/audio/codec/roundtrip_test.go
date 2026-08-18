@@ -1,3 +1,5 @@
+//go:build cgo
+
 package codec
 
 import (
@@ -87,7 +89,7 @@ func TestRoundtripFullPCM(t *testing.T) {
 		}
 	}
 	t.Logf("bad frames (>100 diff): %d / %d", badFrames, minLen/frameSize)
-	
+
 	if badFrames > 0 {
 		// 这是大问题
 		for i := 0; i+frameSize <= minLen; i += frameSize {
@@ -95,8 +97,12 @@ func TestRoundtripFullPCM(t *testing.T) {
 			maxDiff := 0
 			for j := 0; j < frameSize && i+j < minLen; j++ {
 				diff := int(samples[i+j]) - int(decodedAll[i+j])
-				if diff < 0 { diff = -diff }
-				if diff > maxDiff { maxDiff = diff }
+				if diff < 0 {
+					diff = -diff
+				}
+				if diff > maxDiff {
+					maxDiff = diff
+				}
 			}
 			if maxDiff < 10 && frameIdx < 10 {
 				t.Logf("  GOOD frame %d @%.2fs: max_diff=%d", frameIdx, float64(i)/16000, maxDiff)
