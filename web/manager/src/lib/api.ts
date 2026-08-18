@@ -94,7 +94,10 @@ export const voicebotApi = {
 	list: () => http.get<Voicebot[]>("/voicebots"),
 	get: (id: string) => http.get<Voicebot>(`/voicebots/${id}`),
 	create: (name: string, config_json?: string) =>
-		http.post<Voicebot>("/voicebots", { name, config_json }),
+		http.post<Voicebot>("/voicebots", {
+			name,
+			config_json: config_json ? JSON.parse(config_json) : undefined,
+		}),
 	update: (id: string, name: string, config_json: string) =>
 		http.put<Voicebot>(`/voicebots/${id}`, {
 			name,
@@ -253,6 +256,35 @@ export const voiceApi = {
 		http.get<ModelVoice[]>("/voices/system", {
 			params: lang ? { lang } : undefined,
 		}),
+};
+
+export interface AgentTemplate {
+	id: string;
+	name: string;
+	description?: string;
+	icon?: string;
+	color?: string;
+	category: string;
+	tags?: string[];
+	config_json: string;
+	is_system: boolean;
+	use_count: number;
+	created_at: string;
+	updated_at: string;
+	creator: string;
+}
+
+export const agentTemplateApi = {
+	listSystem: (category?: string, q?: string) =>
+		http.get<AgentTemplate[]>("/agent-templates/system", {
+			params: { category, q },
+		}),
+	get: (id: string) =>
+		http.get<AgentTemplate>(`/agent-templates/${id}`),
+	use: (id: string) =>
+		http.post<{ template_id: string; name: string; config: Record<string, unknown> }>(
+			`/agent-templates/${id}/use`,
+		),
 };
 
 export interface ResourceOption {

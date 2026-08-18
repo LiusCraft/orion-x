@@ -47,6 +47,8 @@ import {
   AlertCircle,
   Loader2,
   Brain,
+  Save,
+  LogOut,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -63,6 +65,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { ChevronLeft, Plus, Play, Send } from "lucide-react";
 import QuickChat from "./QuickChat";
 
@@ -147,7 +156,12 @@ const VAD_MODES = [
 function parseCfg(json: string): BotConfig {
   try {
     const c = JSON.parse(json);
-    if (c.asr?.model_id || c.llm?.model_id) {
+    if (
+      c.asr?.model_id ||
+      c.llm?.model_id ||
+      c.llm?.soul_prompt ||
+      c.llm?.rules_prompt
+    ) {
       return {
         language: c.language || DC.language,
         asr: { ...DC.asr, ...c.asr },
@@ -220,6 +234,8 @@ export default function AgentDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "ok" | "err">("idle");
   const [saveErr, setSaveErr] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [languages, setLanguages] = useState<Language[]>([]);
   const [resources, setResources] = useState<AvailableResources | null>(null);
@@ -400,6 +416,33 @@ export default function AgentDetailPage() {
       setSaveStatus("err");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveAndExit = async () => {
+    if (!id) return;
+    setSaving(true);
+    try {
+      await voicebotApi.update(id, name, JSON.stringify(cfg));
+      navigate("/agents");
+    } catch (e: unknown) {
+      setSaveErr(
+        (e as { response?: { data?: { error?: string } } })?.response?.data
+          ?.error ?? "保存失败",
+      );
+      setSaveStatus("err");
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      await voicebotApi.remove(id);
+      navigate("/agents");
+    } catch {
+      setDeleting(false);
     }
   };
 
@@ -738,17 +781,59 @@ export default function AgentDetailPage() {
           {saveStatus === "err" && (
             <span className="text-xs text-red-400">{saveErr}</span>
           )}
-          <Button
-            onClick={handleSave}
-            disabled={saving}
-            className={
-              saveStatus === "ok"
-                ? "bg-emerald-600 hover:bg-emerald-600 text-white h-8 px-4 text-sm"
-                : "bg-violet-600 hover:bg-violet-500 text-white h-8 px-4 text-sm"
-            }
-          >
-            {saving ? "保存中..." : saveStatus === "ok" ? "已保存 ✓" : "保存"}
-          </Button>
+          {/* Split button: 保存 + dropdown */}
+          <div className="flex">
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className={
+                saveStatus === "ok"
+                  ? "bg-emerald-600 hover:bg-emerald-600 text-white h-8 px-3 text-xs rounded-r-none border-r border-emerald-500/30"
+                  : "bg-violet-600 hover:bg-violet-500 text-white h-8 px-3 text-xs rounded-r-none border-r border-violet-400/30"
+              }
+            >
+              {saving ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : saveStatus === "ok" ? (
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  保存
+                </>
+              )}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={saving}
+                className={
+                  saveStatus === "ok"
+                    ? "bg-emerald-600 hover:bg-emerald-500 text-white h-8 px-1.5 rounded-l-none rounded-r-md cursor-pointer"
+                    : "bg-violet-600 hover:bg-violet-500 text-white h-8 px-1.5 rounded-l-none rounded-r-md cursor-pointer"
+                }
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-36">
+                <DropdownMenuItem
+                  onClick={handleSaveAndExit}
+                  className="cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  保存并退出
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => setDeleteOpen(true)}
+                  variant="destructive"
+                  className="cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  删除
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </div>
 
@@ -2219,6 +2304,39 @@ export default function AgentDetailPage() {
           )}
         </SheetContent>
       </Sheet>
-    </div>
+
+        {/* Delete confirmation dialog */}
+        <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-white">确认删除</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-zinc-400 py-2">
+              确定要删除「{name}」吗？此操作无法撤销，该智能体关联的设备也将失去配置。
+            </p>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setDeleteOpen(false)}
+                disabled={deleting}
+                className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+              >
+                取消
+              </Button>
+              <Button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="bg-red-600 hover:bg-red-500 text-white"
+              >
+                {deleting ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  "确认删除"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
   );
 }

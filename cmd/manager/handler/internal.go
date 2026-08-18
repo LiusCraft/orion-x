@@ -14,6 +14,17 @@ import (
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
+// hasTopLevelProvider 判断 config_json 是否为旧式完整 AppConfig（含顶层 provider 段）。
+// 含 provider 段 → 旧式路径原样返回；否则视为 AgentConfig 走运行时组装。
+func hasTopLevelProvider(configJSON string) bool {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(configJSON), &m); err != nil {
+		return false
+	}
+	_, ok := m["provider"]
+	return ok
+}
+
 type InternalHandler struct {
 	voicebots *store.VoicebotStore
 	devices   *store.DeviceStore
@@ -51,7 +62,7 @@ func (h *InternalHandler) DeviceConfig(c *gin.Context) {
 	}
 
 	var agentCfg AgentConfig
-	if err := json.Unmarshal([]byte(v.ConfigJSON), &agentCfg); err == nil && agentCfg.ASR.ModelID != "" {
+	if err := json.Unmarshal([]byte(v.ConfigJSON), &agentCfg); err == nil && !hasTopLevelProvider(v.ConfigJSON) {
 		full, err := h.assembleConfig(agentCfg, v.ID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -63,6 +63,11 @@ func main() {
 		logging.Fatalf("sync system providers: %v", err)
 	}
 
+	// 同步系统智能体模板种子数据
+	if err := store.SyncSystemTemplates(db); err != nil {
+		logging.Warnf("sync system agent templates: %v", err)
+	}
+
 	users := store.NewUserStore(db)
 	bindings := store.NewOAuthBindingStore(db)
 	voicebots := store.NewVoicebotStore(db)
@@ -78,6 +83,7 @@ func main() {
 	kbStore := store.NewKnowledgeBaseStore(db)
 	docStore := store.NewDocumentStore(db)
 	voicebotKBs := store.NewVoicebotKBStore(db)
+	agentTemplates := store.NewAgentTemplateStore(db)
 	// Try loading admin by username first (legacy), then fall through to create
 	admin, adminErr := users.GetByUsername(cfg.Admin.Username)
 	if errors.Is(adminErr, store.ErrNotFound) {
@@ -128,7 +134,7 @@ func main() {
 		logging.Infof("oauth: registered github provider")
 	}
 
-	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs)
+	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {
