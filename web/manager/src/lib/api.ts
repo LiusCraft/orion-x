@@ -94,7 +94,10 @@ export const voicebotApi = {
 	list: () => http.get<Voicebot[]>("/voicebots"),
 	get: (id: string) => http.get<Voicebot>(`/voicebots/${id}`),
 	create: (name: string, config_json?: string) =>
-		http.post<Voicebot>("/voicebots", { name, config_json }),
+		http.post<Voicebot>("/voicebots", {
+			name,
+			config_json: config_json ? JSON.parse(config_json) : undefined,
+		}),
 	update: (id: string, name: string, config_json: string) =>
 		http.put<Voicebot>(`/voicebots/${id}`, {
 			name,

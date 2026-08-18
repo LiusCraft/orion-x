@@ -39,6 +39,8 @@ type createVoicebotRequest struct {
 
 // normalizeCreateConfig 校验并归一化创建 voicebot 时的 config_json。
 // 空/空对象配置归一化为 DefaultConfig，非法 JSON 返回错误；其余原样保留。
+// 兼容两种发送形态：JSON 对象（详情页保存）与 JSON 字符串（前端 create 历史行为），
+// 字符串形态会被解包后按对象校验，返回的始终是对象形态 JSON。
 func normalizeCreateConfig(raw json.RawMessage) (string, error) {
 	cfgJSON := strings.TrimSpace(string(raw))
 	if cfgJSON == "" || cfgJSON == "null" {
@@ -46,7 +48,17 @@ func normalizeCreateConfig(raw json.RawMessage) (string, error) {
 	}
 	var m map[string]any
 	if err := json.Unmarshal([]byte(cfgJSON), &m); err != nil {
-		return "", err
+		var s string
+		if err2 := json.Unmarshal([]byte(cfgJSON), &s); err2 != nil {
+			return "", err
+		}
+		cfgJSON = strings.TrimSpace(s)
+		if cfgJSON == "" || cfgJSON == "null" {
+			return defaultConfigJSON()
+		}
+		if err2 := json.Unmarshal([]byte(cfgJSON), &m); err2 != nil {
+			return "", err2
+		}
 	}
 	if len(m) == 0 {
 		return defaultConfigJSON()
