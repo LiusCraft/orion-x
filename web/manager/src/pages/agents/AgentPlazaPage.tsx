@@ -15,6 +15,7 @@ export default function AgentPlazaPage() {
 	const [query, setQuery] = useState("");
 	const [activeCategory, setActiveCategory] = useState("全部");
 	const [using, setUsing] = useState<string | null>(null);
+	const [error, setError] = useState("");
 	const navigate = useNavigate();
 
 	useEffect(() => {
@@ -44,19 +45,18 @@ export default function AgentPlazaPage() {
 
 	const handleUseTemplate = async (tpl: AgentTemplate) => {
 		setUsing(tpl.id);
+		setError("");
 		try {
 			const { data } = await agentTemplateApi.use(tpl.id);
 			// 用模板的名称和配置创建 voicebot
 			const configJSON = JSON.stringify(data.config);
 			const res = await voicebotApi.create(data.name, configJSON);
 			navigate(`/agents/${res.data.id}`);
-		} catch {
+		} catch (err) {
 			setUsing(null);
+			setError(err instanceof Error ? err.message : "创建失败，请重试");
 		}
 	};
-
-	// 将现有硬编码模板转换为 API 格式，作为 fallback
-	const hasData = templates.length > 0;
 
 	return (
 		<div className="min-h-full">
@@ -71,7 +71,6 @@ export default function AgentPlazaPage() {
 					</div>
 					<Button
 						onClick={() => {
-							setUsing("_new");
 							navigate("/agents");
 						}}
 						className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
@@ -93,7 +92,7 @@ export default function AgentPlazaPage() {
 				</div>
 
 				{/* Category filter */}
-				{hasData && (
+				{categories.length > 1 && (
 					<div className="flex gap-1.5 mt-3 flex-wrap">
 						{categories.map((cat) => (
 							<button
@@ -114,6 +113,7 @@ export default function AgentPlazaPage() {
 
 			{/* Grid */}
 			<div className="px-8 py-6">
+				{error && <p className="text-xs text-red-400 mb-3">{error}</p>}
 				{loading ? (
 					<div className="flex items-center justify-center py-20 text-center">
 						<Loader2 className="w-6 h-6 text-zinc-500 animate-spin" />
