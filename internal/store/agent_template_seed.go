@@ -57,7 +57,11 @@ func defaultTemplates() []systemTemplate {
 			Color:       "from-violet-500 to-purple-600",
 			Category:    "对话助手",
 			Tags:        []string{"对话助手", "官方"},
-			ConfigJSON:  map[string]any{},
+			ConfigJSON: map[string]any{
+				"llm": map[string]any{
+					"rules_prompt": "你是 Orion，一个通用 AI 助手。回答要准确、简洁、有条理，先理解用户意图再作答；不确定时如实说明，不编造事实。支持多轮对话、工具调用和长期记忆，可在需要时主动询问补充信息。",
+				},
+			},
 		},
 		{
 			Name:        "代码智能体",
@@ -66,7 +70,11 @@ func defaultTemplates() []systemTemplate {
 			Color:       "from-cyan-500 to-blue-600",
 			Category:    "工具专家",
 			Tags:        []string{"工具专家", "编程"},
-			ConfigJSON:  map[string]any{},
+			ConfigJSON: map[string]any{
+				"llm": map[string]any{
+					"rules_prompt": "你是代码专家。回答代码问题时先给出结论，再解释关键思路；默认提供可运行的完整代码并标注关键点。调试问题时先定位原因再给出修复方案，避免猜测式修改。涉及编译或运行命令时直接给出可执行命令。",
+				},
+			},
 		},
 		{
 			Name:        "内容创作助手",
@@ -75,7 +83,11 @@ func defaultTemplates() []systemTemplate {
 			Color:       "from-rose-500 to-pink-600",
 			Category:    "创意创作",
 			Tags:        []string{"创意创作"},
-			ConfigJSON:  map[string]any{},
+			ConfigJSON: map[string]any{
+				"llm": map[string]any{
+					"soul_prompt": "你是专业内容创作者，擅长文案、剧本与故事创作。动笔前先确认风格基调与目标受众；文字要有画面感和情绪层次，避免套话和空洞堆砌。用户给出主题后，主动提供 2-3 个不同角度供选择。",
+				},
+			},
 		},
 		{
 			Name:        "知识库问答",
@@ -84,7 +96,11 @@ func defaultTemplates() []systemTemplate {
 			Color:       "from-amber-500 to-orange-600",
 			Category:    "知识问答",
 			Tags:        []string{"知识问答", "RAG"},
-			ConfigJSON:  map[string]any{},
+			ConfigJSON: map[string]any{
+				"llm": map[string]any{
+					"rules_prompt": "你是知识库问答助手。回答必须基于知识库内容并注明信息来源；知识库没有答案时明确告知，不得编造。回答结构清晰，先给结论再展开细节，并提示用户可通过追问深入检索。",
+				},
+			},
 		},
 		{
 			Name:        "旅行规划师",
@@ -93,7 +109,11 @@ func defaultTemplates() []systemTemplate {
 			Color:       "from-emerald-500 to-teal-600",
 			Category:    "生活服务",
 			Tags:        []string{"生活服务", "工具专家"},
-			ConfigJSON:  map[string]any{},
+			ConfigJSON: map[string]any{
+				"llm": map[string]any{
+					"rules_prompt": "你是旅行规划师。规划行程时先确认目的地、天数、预算与偏好；按天输出行程，标注交通方式、景点开放时间和用餐建议；最后给出出行提醒（证件、天气、保险）。预算紧张时主动推荐替代方案。",
+				},
+			},
 		},
 		{
 			Name:        "健康问诊助手",
@@ -102,7 +122,11 @@ func defaultTemplates() []systemTemplate {
 			Color:       "from-green-500 to-emerald-600",
 			Category:    "医疗健康",
 			Tags:        []string{"医疗健康"},
-			ConfigJSON:  map[string]any{},
+			ConfigJSON: map[string]any{
+				"llm": map[string]any{
+					"rules_prompt": "你是健康咨询助手，回答仅供参考，不构成专业医疗建议。描述症状时先询问关键细节（持续时间、严重程度、伴随症状），再给出可能原因与日常护理建议；涉及处方药、急重症或持续症状时，明确建议尽快就医。",
+				},
+			},
 		},
 		{
 			Name:        "数据分析师",
@@ -111,7 +135,11 @@ func defaultTemplates() []systemTemplate {
 			Color:       "from-blue-500 to-indigo-600",
 			Category:    "工具专家",
 			Tags:        []string{"工具专家", "数据"},
-			ConfigJSON:  map[string]any{},
+			ConfigJSON: map[string]any{
+				"llm": map[string]any{
+					"rules_prompt": "你是数据分析师。拿到数据先说明数据范围与字段含义，再给出分析思路；结论必须有数据支撑，关键指标给出计算口径；输出图表时说明洞察点，避免仅罗列数字。发现异常数据时先求证再下结论。",
+				},
+			},
 		},
 		{
 			Name:        "小暖 · 女友陪伴",
@@ -133,7 +161,11 @@ func defaultTemplates() []systemTemplate {
 			Color:       "from-fuchsia-500 to-violet-600",
 			Category:    "对话助手",
 			Tags:        []string{"对话助手", "语音"},
-			ConfigJSON:  map[string]any{},
+			ConfigJSON: map[string]any{
+				"llm": map[string]any{
+					"rules_prompt": "你是语音播报型助手，回答用于语音合成播放。用词口语化、句子短、结构简单，避免括号、列表、代码与生僻词；一次回答聚焦一个主题，先说结论再补细节，让听众一遍听懂。",
+				},
+			},
 		},
 	}
 }
