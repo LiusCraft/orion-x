@@ -54,7 +54,10 @@ export default function AgentPlazaPage() {
 			navigate(`/agents/${res.data.id}`);
 		} catch (err) {
 			setUsing(null);
-			setError(err instanceof Error ? err.message : "创建失败，请重试");
+			const detail = (err as {
+				response?: { data?: { error?: string } };
+			})?.response?.data?.error;
+			setError(detail ?? (err instanceof Error ? err.message : "创建失败，请重试"));
 		}
 	};
 

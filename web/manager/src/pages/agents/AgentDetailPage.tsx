@@ -156,7 +156,12 @@ const VAD_MODES = [
 function parseCfg(json: string): BotConfig {
   try {
     const c = JSON.parse(json);
-    if (c.asr?.model_id || c.llm?.model_id) {
+    if (
+      c.asr?.model_id ||
+      c.llm?.model_id ||
+      c.llm?.soul_prompt ||
+      c.llm?.rules_prompt
+    ) {
       return {
         language: c.language || DC.language,
         asr: { ...DC.asr, ...c.asr },
