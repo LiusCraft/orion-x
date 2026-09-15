@@ -399,8 +399,8 @@ export default function AgentDetailPage() {
     return true;
   });
 
-  const handleSave = async () => {
-    if (!id) return;
+  const saveAgent = useCallback(async (): Promise<boolean> => {
+    if (!id) return false;
     setSaving(true);
     setSaveStatus("idle");
     setSaveErr("");
@@ -408,30 +408,26 @@ export default function AgentDetailPage() {
       await voicebotApi.update(id, name, JSON.stringify(cfg));
       setSaveStatus("ok");
       setTimeout(() => setSaveStatus("idle"), 2000);
+      return true;
     } catch (e: unknown) {
       setSaveErr(
         (e as { response?: { data?: { error?: string } } })?.response?.data
           ?.error ?? "保存失败",
       );
       setSaveStatus("err");
+      return false;
     } finally {
       setSaving(false);
     }
+  }, [cfg, id, name]);
+
+  const handleSave = async () => {
+    await saveAgent();
   };
 
   const handleSaveAndExit = async () => {
-    if (!id) return;
-    setSaving(true);
-    try {
-      await voicebotApi.update(id, name, JSON.stringify(cfg));
+    if (await saveAgent()) {
       navigate("/agents");
-    } catch (e: unknown) {
-      setSaveErr(
-        (e as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? "保存失败",
-      );
-      setSaveStatus("err");
-      setSaving(false);
     }
   };
 
@@ -758,7 +754,7 @@ export default function AgentDetailPage() {
     );
 
   return (
-    <div className="min-h-full">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
       <div className="border-b border-zinc-800/80 px-8 py-4 flex items-center gap-3">
         <button
@@ -837,9 +833,9 @@ export default function AgentDetailPage() {
         </div>
       </div>
 
-      <div ref={containerRef} className="flex h-[calc(100vh-61px)]">
+      <div ref={containerRef} className="flex flex-1 min-h-0">
         <div
-          className="overflow-y-auto px-8 py-6 min-w-0"
+          className="overflow-y-auto px-8 py-6 min-w-0 min-h-0"
           style={{ width: `${splitPct}%` }}
         >
           <Tabs
@@ -2037,10 +2033,14 @@ export default function AgentDetailPage() {
           onMouseDown={onResizeStart}
         />
         <div
-          className="flex flex-col min-w-0"
+          className="flex h-full min-h-0 flex-col min-w-0 overflow-hidden"
           style={{ width: `${100 - splitPct}%` }}
         >
-          <QuickChat agentId={id!} vadMode={cfg.asr.vad_mode} />
+          <QuickChat
+            agentId={id!}
+            vadMode={cfg.asr.vad_mode}
+            onBeforeConnect={saveAgent}
+          />
         </div>
       </div>
 

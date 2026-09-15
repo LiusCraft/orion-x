@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Send, Square } from "lucide-react";
+import { Loader2, Send, Square } from "lucide-react";
 import { deviceApi } from "@/lib/api";
 
 interface ChatMsg {
@@ -16,15 +16,18 @@ const WS_URL = "ws://localhost:8080/ws";
 export default function QuickChat({
   agentId,
   vadMode,
+  onBeforeConnect,
 }: {
   agentId: string;
   vadMode: string;
+  onBeforeConnect?: () => Promise<boolean>;
 }) {
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [text, setText] = useState("");
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [sessionId, setSessionId] = useState("");
+  const [connectionError, setConnectionError] = useState("");
 
   const wsRef = useRef<WebSocket | null>(null);
   const msgIdRef = useRef(0);
@@ -106,6 +109,21 @@ export default function QuickChat({
     if (wsRef.current) wsRef.current.close();
     stopMic();
     setConnecting(true);
+    setConnectionError("");
+
+    if (onBeforeConnect) {
+      let saved = false;
+      try {
+        saved = await onBeforeConnect();
+      } catch {
+        saved = false;
+      }
+      if (!saved) {
+        setConnecting(false);
+        setConnectionError("保存失败，未建立连接");
+        return;
+      }
+    }
 
     try {
       await deviceApi.list(agentId).then((res) => {
@@ -181,6 +199,7 @@ export default function QuickChat({
         setSessionId((msg.session_id as string) || "");
         setConnected(true);
         setConnecting(false);
+        setConnectionError("");
         addMsg(
           "assistant",
           isAutoMode ? "已连接，开始对话吧" : "已连接，按住麦克风按钮说话",
@@ -199,6 +218,7 @@ export default function QuickChat({
 
     ws.onerror = () => {
       setConnecting(false);
+      setConnectionError("连接失败，请重试");
       addMsg("assistant", "连接失败", "error");
     };
     ws.onclose = () => {
@@ -208,7 +228,7 @@ export default function QuickChat({
       audioCtxRef.current?.close();
       audioCtxRef.current = null;
     };
-  }, [agentId, addMsg, stopMic, startMic, isAutoMode]);
+  }, [agentId, addMsg, onBeforeConnect, stopMic, startMic, isAutoMode]);
 
   const disconnect = useCallback(() => {
     send({ type: "abort" });
@@ -251,7 +271,7 @@ export default function QuickChat({
   }, [stopMic]);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
         <div className="flex items-center gap-2">
@@ -280,50 +300,58 @@ export default function QuickChat({
       </div>
 
       {/* Chat area */}
-      <div ref={chatRef} className="flex-1 overflow-y-auto p-3 space-y-2">
-        {!connected && !connecting ? (
-          <div className="h-full flex flex-col items-center justify-center gap-4">
-            <p className="text-zinc-500 text-sm">连接 WebSocket 开始体验</p>
-            <Button
-              onClick={connect}
-              className="bg-violet-600 hover:bg-violet-500 text-white h-10 px-6 text-sm"
-            >
-              立即体验
-            </Button>
-          </div>
-        ) : null}
-        {msgs.map((m) => (
-          <div
-            key={m.id}
-            className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-          >
+      <div className="relative min-h-0 flex-1">
+        <div ref={chatRef} className="h-full overflow-y-auto p-3 space-y-2">
+          {msgs.map((m) => (
             <div
-              className={`max-w-[80%] px-3 py-2 rounded-xl text-sm leading-relaxed
-              ${
-                m.role === "user"
-                  ? "bg-violet-600/20 border border-violet-500/30 text-white"
-                  : m.sub === "error"
-                    ? "bg-red-900/30 border border-red-800/40 text-red-300"
-                    : m.sub === "system"
-                      ? "bg-zinc-800/50 text-zinc-400 text-xs text-center w-full max-w-full"
-                      : "bg-zinc-800 border border-zinc-700 text-zinc-200"
-              }`}
+              key={m.id}
+              className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
             >
-              <p>{m.text}</p>
-              {m.sub && m.sub !== "system" && (
-                <p
-                  className={`text-[10px] mt-1 ${m.role === "user" ? "text-violet-300/60" : "text-zinc-500"}`}
-                >
-                  {m.sub}
-                </p>
-              )}
+              <div
+                className={`max-w-[80%] px-3 py-2 rounded-xl text-sm leading-relaxed
+                ${
+                  m.role === "user"
+                    ? "bg-violet-600/20 border border-violet-500/30 text-white"
+                    : m.sub === "error"
+                      ? "bg-red-900/30 border border-red-800/40 text-red-300"
+                      : m.sub === "system"
+                        ? "bg-zinc-800/50 text-zinc-400 text-xs text-center w-full max-w-full"
+                        : "bg-zinc-800 border border-zinc-700 text-zinc-200"
+                }`}
+              >
+                <p>{m.text}</p>
+                {m.sub && m.sub !== "system" && (
+                  <p
+                    className={`text-[10px] mt-1 ${m.role === "user" ? "text-violet-300/60" : "text-zinc-500"}`}
+                  >
+                    {m.sub}
+                  </p>
+                )}
+              </div>
             </div>
+          ))}
+        </div>
+
+        {!connected && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-zinc-950/90 px-6 text-center backdrop-blur-[2px]">
+            <p className="text-zinc-400 text-sm">
+              {connecting ? "正在保存并连接..." : connectionError || "连接后开始体验"}
+            </p>
+            {!connecting && (
+              <Button
+                onClick={connect}
+                className="bg-violet-600 hover:bg-violet-500 text-white h-10 px-6 text-sm"
+              >
+                立即体验
+              </Button>
+            )}
+            {connecting && <Loader2 className="w-5 h-5 text-violet-400 animate-spin" />}
           </div>
-        ))}
+        )}
       </div>
 
       {/* Controls */}
-      <div className="border-t border-zinc-800 px-3 py-2.5 flex items-center gap-2">
+      <div className="shrink-0 border-t border-zinc-800 px-3 py-2.5 flex items-center gap-2">
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
