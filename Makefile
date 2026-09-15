@@ -7,11 +7,23 @@ endif
 
 GO := GOTOOLCHAIN=$(GO_TOOLCHAIN) $(CGO_FLAGS) go
 
-.PHONY: all build build-voicebot run-voicebot build-wsserver run-wsserver build-manager run-manager install-frontend dev-frontend build-frontend swagger test test-audio lint clean
+.DEFAULT_GOAL := help
+
+.PHONY: help all build build-voicebot run-voicebot build-wsserver run-wsserver build-manager build-tools run-manager install-frontend dev-frontend build-frontend swagger test test-audio lint clean
+
+help:
+	@echo "Usage: make <target>"
+	@echo ""
+	@echo "  build             Build voicebot, wsserver, manager, and tools"
+	@echo "  run-voicebot      Run the local voicebot CLI"
+	@echo "  run-wsserver      Run the WebSocket voice server"
+	@echo "  run-manager       Run the web management server"
+	@echo "  frontend          Install/develop/build: install-frontend, dev-frontend, build-frontend"
+	@echo "  quality           Run tests, audio tests, or lint: test, test-audio, lint"
 
 all: build
 
-build: build-voicebot build-wsserver build-manager
+build: build-voicebot build-wsserver build-manager build-tools
 
 build-voicebot:
 	mkdir -p bin
@@ -32,6 +44,10 @@ run-wsserver: build-wsserver
 build-manager:
 	mkdir -p bin
 	go build -o bin/manager ./cmd/manager
+
+build-tools:
+	mkdir -p bin
+	go build -o bin/tools ./cmd/tools
 
 # Regenerate Swagger/OpenAPI files after changing cmd/manager/swagger.go.
 swagger:
