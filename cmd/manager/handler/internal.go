@@ -256,7 +256,7 @@ func llmAdapterFromSlug(slug string) string {
 		return "openai-responses"
 	case "llm/anthropic-messages", "anthropic-messages":
 		return "anthropic-messages"
-	case "llm/openai", "openai", "llm/openai-completions", "openai-completions":
+	case "llm/openai-completions", "openai-completions":
 		return "openai-completions"
 	default:
 		return "openai-completions"

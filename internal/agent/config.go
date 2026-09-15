@@ -31,7 +31,7 @@ func normalizeConfig(cfg Config) (Config, error) {
 		return Config{}, errLLMAPIKeyRequired
 	}
 	if strings.TrimSpace(cfg.Provider) == "" {
-		cfg.Provider = "openai"
+		cfg.Provider = "openai-completions"
 	}
 	if strings.TrimSpace(cfg.BaseURL) == "" {
 		return Config{}, errLLMBaseURLRequired

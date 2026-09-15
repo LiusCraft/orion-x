@@ -54,7 +54,6 @@ func init() {
 		DefaultBaseURL: "https://api.openai.com/v1",
 	}
 	provider.Register("openai-completions", constructor, meta)
-	provider.Register("openai", constructor, meta)
 }
 
 func New(_ context.Context, cfg Config) (provider.Adapter, error) {

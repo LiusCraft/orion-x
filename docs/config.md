@@ -70,7 +70,7 @@
       }
     },
     "llm": {
-      "type": "openai",
+      "type": "openai-completions",
       "openai": {
         "api_key": "",
         "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",

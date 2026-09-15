@@ -135,6 +135,4 @@ func main() {
 
 	logging.Infof("Orion-X Server stopped.")
 	logging.Sync()
-
-	_, _, _ = syscall.Syscall(syscall.SYS_EXIT, 0, 0, 0)
 }

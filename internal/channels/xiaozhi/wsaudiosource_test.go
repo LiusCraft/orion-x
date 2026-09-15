@@ -140,7 +140,7 @@ func TestWSAudioSource_ContextCancelUnblocksRead(t *testing.T) {
 func TestWSAudioSource_DecodeErrorDoesNotPanic(t *testing.T) {
 	opusCodec, err := codec.New(codec.FormatOpus, audio.InternalSampleRate, audio.InternalChannels, 60)
 	if err != nil {
-		t.Fatalf("codec.New(opus) failed: %v", err)
+		t.Skipf("Opus codec unavailable: %v", err)
 	}
 	src := xiaozhi.NewWSAudioSource(opusCodec, audio.InternalSampleRate)
 
