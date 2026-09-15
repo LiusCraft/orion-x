@@ -114,9 +114,6 @@ func NewClient(ctx context.Context, registry *Registry, cfg Config) (llm.Client,
 	if providerType == "" {
 		providerType = "openai-completions"
 	}
-	if providerType == "openai" {
-		providerType = "openai-completions"
-	}
 
 	constructor, ok := registry.Get(providerType)
 	if !ok {

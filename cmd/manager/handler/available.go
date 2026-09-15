@@ -51,7 +51,7 @@ type AvailableResourcesResponse struct {
 }
 
 // extractCategory extracts the explicit category from a provider slug.
-// "asr/aliyun" → ("asr", "aliyun"),  "llm/openai" → ("llm", "openai"),
+// "asr/aliyun" → ("asr", "aliyun"),  "llm/openai-completions" → ("llm", "openai-completions"),
 // "aliyun" → ("", "aliyun").
 func extractCategory(slug string) (category, key string) {
 	parts := strings.SplitN(slug, "/", 2)

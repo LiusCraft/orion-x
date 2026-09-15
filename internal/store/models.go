@@ -59,10 +59,13 @@ type Device struct {
 }
 
 // Provider AI 模型厂商
+//
+// Slug 只标识 provider 实现（协议适配器，如 llm/openai-responses），不是账号，不做唯一约束；
+// 每个“账号”（一套 api_key + base_url）都是一行记录，同一 slug 可有多个账号。
 type Provider struct {
 	ID        string            `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	Name      string            `gorm:"not null;type:varchar(64)" json:"name"`
-	Slug      string            `gorm:"uniqueIndex;not null;type:varchar(32)" json:"slug"`
+	Slug      string            `gorm:"not null;type:varchar(32)" json:"slug"`
 	BaseURL   string            `gorm:"not null;type:varchar(512)" json:"base_url"`
 	APIKeyEnc string            `gorm:"not null;type:text" json:"-"`
 	IsSystem  bool              `gorm:"not null;default:false;index" json:"is_system"`

@@ -188,7 +188,7 @@ func DefaultConfig() *AppConfig {
 				Aliyun: defaultTTS,
 			},
 			LLM: LLMProviderConfig{
-				Type:   "openai",
+				Type:   "openai-completions",
 				OpenAI: defaultLLM,
 			},
 		},
@@ -272,7 +272,7 @@ func (c *AppConfig) NormalizeProviders() {
 		c.Provider.TTS.Type = "aliyun"
 	}
 	if strings.TrimSpace(c.Provider.LLM.Type) == "" {
-		c.Provider.LLM.Type = "openai"
+		c.Provider.LLM.Type = "openai-completions"
 	}
 }
 
@@ -315,7 +315,7 @@ func (c *AppConfig) Validate() error {
 		return fmt.Errorf("provider.tts.type must be aliyun")
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Provider.LLM.Type)) {
-	case "openai", "openai-completions", "openai-responses", "anthropic-messages":
+	case "openai-completions", "openai-responses", "anthropic-messages":
 	default:
 		return fmt.Errorf("unsupported provider.llm.type: %s", c.Provider.LLM.Type)
 	}

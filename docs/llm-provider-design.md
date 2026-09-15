@@ -327,7 +327,7 @@ type Config struct {
 | `openai-responses` | `https://api.openai.com/v1` | 只有明确兼容 Responses 的服务才能使用 |
 | `anthropic-messages` | `https://api.anthropic.com` | Anthropic Messages wire protocol |
 
-兼容迁移期可以保留 `openai` alias，解析为 `openai-completions` 并记录一次 deprecation warning。不要根据 base URL 或 model 名自动猜协议。
+兼容迁移期的 `openai` alias 已移除：现在只接受 `openai-completions`，配置里写 `openai` 会直接报 unsupported llm provider。不要根据 base URL 或 model 名自动猜协议。
 
 建议包布局：
 

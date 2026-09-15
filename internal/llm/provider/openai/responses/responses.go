@@ -11,6 +11,7 @@ import (
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	openairesponses "github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
 )
 
 type Config struct {
@@ -119,40 +120,68 @@ func (a *adapter) Stream(ctx context.Context, req llm.Request) (llm.Stream, erro
 }
 
 func (a *adapter) params(req llm.Request) (openairesponses.ResponseNewParams, error) {
-	input := make([]map[string]any, 0, len(req.Messages))
+	params := openairesponses.ResponseNewParams{
+		Model: shared.ResponsesModel(a.cfg.Model),
+		Store: openai.Bool(false),
+	}
+
+	// ── input items ──
+	// 直接构建 SDK 类型化的 ResponseInputItemUnionParam，避免 map→JSON→unmarshal 往返
+	// （那会导致 Input 这个 union 字段在 SDK 重新序列化时被丢弃）。
+	input := make([]openairesponses.ResponseInputItemUnionParam, 0, len(req.Messages))
 	for _, raw := range req.Messages {
 		msg := raw.Normalize()
 		if msg.ProviderContext != nil && msg.Role == string(llm.RoleAssistant) && len(msg.ProviderContext.Data) > 0 {
 			var data contextData
 			if json.Unmarshal(msg.ProviderContext.Data, &data) == nil && len(data.Items) > 0 {
+				restored := 0
 				for _, item := range data.Items {
-					var value map[string]any
-					if json.Unmarshal(item, &value) == nil {
-						input = append(input, value)
+					if itemParam, ok := restoreProviderItem(item); ok {
+						input = append(input, itemParam)
+						restored++
 					}
 				}
-				continue
+				if restored > 0 {
+					continue
+				}
 			}
+		}
+		// tool 角色的消息是工具执行结果：Responses API 里必须编码为 function_call_output item，
+		// 不能作为 role:"tool" 的消息（DeepSeek 只认 user/assistant/system/developer）。
+		// Normalize() 会把其 Content 补成 Text block，这里要跳过 Text，只发 function_call_output。
+		if msg.Role == string(llm.RoleTool) {
+			emitted := false
+			for _, block := range msg.Blocks {
+				if block.Type == llm.BlockTypeToolResult && block.ToolResult != nil {
+					input = append(input, openairesponses.ResponseInputItemParamOfFunctionCallOutput(block.ToolResult.ToolCallID, block.ToolResult.Content))
+					emitted = true
+				}
+			}
+			if !emitted && msg.ToolCallID != "" {
+				input = append(input, openairesponses.ResponseInputItemParamOfFunctionCallOutput(msg.ToolCallID, msg.Content))
+			}
+			continue
 		}
 		for _, block := range msg.Blocks {
 			switch block.Type {
 			case llm.BlockTypeText:
-				input = append(input, map[string]any{"role": msg.Role, "content": block.Text})
+				input = append(input, openairesponses.ResponseInputItemParamOfMessage(block.Text, openairesponses.EasyInputMessageRole(msg.Role)))
 			case llm.BlockTypeToolCall:
 				if block.ToolCall != nil {
-					input = append(input, map[string]any{"type": "function_call", "call_id": block.ToolCall.ID, "name": block.ToolCall.Name, "arguments": block.ToolCall.Arguments})
+					input = append(input, openairesponses.ResponseInputItemParamOfFunctionCall(block.ToolCall.Arguments, block.ToolCall.ID, block.ToolCall.Name))
 				}
 			case llm.BlockTypeToolResult:
 				if block.ToolResult != nil {
-					input = append(input, map[string]any{"type": "function_call_output", "call_id": block.ToolResult.ToolCallID, "output": block.ToolResult.Content})
+					input = append(input, openairesponses.ResponseInputItemParamOfFunctionCallOutput(block.ToolResult.ToolCallID, block.ToolResult.Content))
 				}
 			}
 		}
-		if msg.Role == string(llm.RoleTool) {
-			input = append(input, map[string]any{"type": "function_call_output", "call_id": msg.ToolCallID, "output": msg.Content})
-		}
 	}
-	body := map[string]any{"model": a.cfg.Model, "input": input, "store": false}
+	if len(input) > 0 {
+		params.Input = openairesponses.ResponseNewParamsInputUnion{OfInputItemList: input}
+	}
+
+	// ── instructions ──
 	if len(req.Instructions) > 0 {
 		var b strings.Builder
 		for i, instruction := range req.Instructions {
@@ -161,50 +190,52 @@ func (a *adapter) params(req llm.Request) (openairesponses.ResponseNewParams, er
 			}
 			b.WriteString(instruction.Text)
 		}
-		body["instructions"] = b.String()
+		params.Instructions = openai.String(b.String())
 	}
+
+	// ── tools ──
 	if len(req.Tools) > 0 {
-		tools := make([]map[string]any, 0, len(req.Tools))
+		tools := make([]openairesponses.ToolUnionParam, 0, len(req.Tools))
 		for _, def := range req.Tools {
 			schema, err := def.Schema()
 			if err != nil {
 				return openairesponses.ResponseNewParams{}, err
 			}
-			var parameters any
+			var parameters map[string]any
 			_ = json.Unmarshal(schema, &parameters)
-			tools = append(tools, map[string]any{"type": "function", "name": def.Name, "description": def.Description, "parameters": parameters, "strict": def.SchemaMode == llm.SchemaModeStrict})
+			tools = append(tools, openairesponses.ToolUnionParam{OfFunction: &openairesponses.FunctionToolParam{
+				Name:        def.Name,
+				Description: openai.String(def.Description),
+				Parameters:  parameters,
+				Strict:      openai.Bool(def.SchemaMode == llm.SchemaModeStrict),
+			}})
 		}
-		body["tools"] = tools
+		params.Tools = tools
 	}
+
 	if req.MaxOutputTokens != nil {
-		body["max_output_tokens"] = *req.MaxOutputTokens
+		params.MaxOutputTokens = openai.Int(int64(*req.MaxOutputTokens))
 	} else if a.cfg.MaxOutputTokens > 0 {
-		body["max_output_tokens"] = a.cfg.MaxOutputTokens
+		params.MaxOutputTokens = openai.Int(int64(a.cfg.MaxOutputTokens))
 	}
 	if req.ParallelTools != nil {
-		body["parallel_tool_calls"] = *req.ParallelTools
+		params.ParallelToolCalls = openai.Bool(*req.ParallelTools)
 	}
 	if req.Temperature != nil {
-		body["temperature"] = *req.Temperature
+		params.Temperature = openai.Float(*req.Temperature)
 	}
+
 	thinking := req.Thinking
 	if thinking.IsDefault() {
 		thinking = a.cfg.Thinking
 	}
 	if thinking.HasEffort() {
-		body["reasoning"] = map[string]any{"effort": string(thinking.Effort)}
+		params.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(string(thinking.Effort))}
 	}
 	if provider.InferDialect(a.cfg.Model) == provider.DialectQwen && !thinking.HasEffort() && thinking.Mode == llm.ThinkingModeDisabled {
-		body["reasoning"] = map[string]any{"effort": "none"}
+		params.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffortNone}
 	}
-	data, err := json.Marshal(body)
-	if err != nil {
-		return openairesponses.ResponseNewParams{}, err
-	}
-	var params openairesponses.ResponseNewParams
-	if err := json.Unmarshal(data, &params); err != nil {
-		return params, fmt.Errorf("build responses params: %w", err)
-	}
+
 	if len(a.cfg.Options) > 0 {
 		var fields map[string]any
 		if err := json.Unmarshal(a.cfg.Options, &fields); err != nil {
@@ -213,6 +244,59 @@ func (a *adapter) params(req llm.Request) (openairesponses.ResponseNewParams, er
 		params.SetExtraFields(fields)
 	}
 	return params, nil
+}
+
+// restoreProviderItem 把上一轮响应中缓存的 output item（原始 JSON）还原为本次请求的 input item，
+// 以保住 stateless 多轮对话中的 assistant 消息与工具调用上下文。
+// 只还原 message / function_call / function_call_output，其余类型（reasoning 等）跳过。
+func restoreProviderItem(raw json.RawMessage) (openairesponses.ResponseInputItemUnionParam, bool) {
+	var item struct {
+		Type      string          `json:"type"`
+		Role      string          `json:"role"`
+		Content   json.RawMessage `json:"content"`
+		CallID    string          `json:"call_id"`
+		Name      string          `json:"name"`
+		Arguments string          `json:"arguments"`
+		Output    string          `json:"output"`
+	}
+	if json.Unmarshal(raw, &item) != nil {
+		return openairesponses.ResponseInputItemUnionParam{}, false
+	}
+	switch item.Type {
+	case "message":
+		var parts []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		var text string
+		if json.Unmarshal(item.Content, &parts) == nil {
+			for _, p := range parts {
+				if p.Type == "output_text" {
+					text += p.Text
+				}
+			}
+		}
+		if text == "" {
+			return openairesponses.ResponseInputItemUnionParam{}, false
+		}
+		role := openairesponses.EasyInputMessageRole(item.Role)
+		if role == "" {
+			role = openairesponses.EasyInputMessageRoleAssistant
+		}
+		return openairesponses.ResponseInputItemParamOfMessage(text, role), true
+	case "function_call":
+		if item.CallID == "" || item.Name == "" {
+			return openairesponses.ResponseInputItemUnionParam{}, false
+		}
+		return openairesponses.ResponseInputItemParamOfFunctionCall(item.Arguments, item.CallID, item.Name), true
+	case "function_call_output":
+		if item.CallID == "" {
+			return openairesponses.ResponseInputItemUnionParam{}, false
+		}
+		return openairesponses.ResponseInputItemParamOfFunctionCallOutput(item.CallID, item.Output), true
+	default:
+		return openairesponses.ResponseInputItemUnionParam{}, false
+	}
 }
 
 func (a *adapter) convertResponse(resp *openairesponses.Response) llm.Response {
