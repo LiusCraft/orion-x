@@ -66,7 +66,7 @@ MiniMax 支持 9 种情绪枚举 + 独立音量控制；Azure 有 30+ 种 SSML s
 ### 2.4 参数尺度不统一
 
 | 参数 | 阿里云 | 火山 | MiniMax | Google | Azure |
-|------|:---:|:---:|:---:|:---:|:---:|
+| ------ | :---: | :---: | :---: | :---: | :---: |
 | 语速 | 0.5~2.0 | ~1.0 倍率 | 0.5~2.0 | 0.25~4.0 | 0.5~2.0 |
 | 音调 | 0.5~2.0 | ~1.0 倍率 | -12~+12 semitones | -20~+20 semitones | SSML -50%~+150% |
 | 音量 | 0~100 | ~1.0 倍率 | 0.1~10.0 | -96~+16 dB | 0~100 |
@@ -83,7 +83,7 @@ MiniMax 支持 9 种情绪枚举 + 独立音量控制；Azure 有 30+ 种 SSML s
 ### 3.1 协议与认证
 
 | 维度 | 阿里云 DashScope | 火山引擎 | Azure | Google Cloud | MiniMax |
-|------|:---:|:---:|:---:|:---:|:---:|
+| ------ | :---: | :---: | :---: | :---: | :---: |
 | 同步协议 | WebSocket（仅 WS） | REST POST | REST POST + SDK | REST POST + gRPC | REST POST + SSE |
 | 流式协议 | WebSocket duplex | WebSocket | SDK WS | gRPC streaming | WS events |
 | 认证 | Header `Authorization: Bearer <key>` | Bearer token + AppID | `Ocp-Apim-Subscription-Key` 或 Bearer | OAuth2 / API Key | Header `Authorization: Bearer <key>` |
@@ -100,7 +100,7 @@ MiniMax 支持 9 种情绪枚举 + 独立音量控制；Azure 有 30+ 种 SSML s
 ### 3.2 音色选择
 
 | 维度 | 阿里云 | 火山 | Azure | Google | MiniMax |
-|------|:---:|:---:|:---:|:---:|:---:|
+| ------ | :---: | :---: | :---: | :---: | :---: |
 | 选择方式 | `voice` 字符串 | `voice_type` 字符串 | `ShortName` 如 `zh-CN-YunxiNeural` | `name` 或 `languageCode + gender` | `voice_id` 字符串 |
 | 多语言音色 | 部分音色支持 `language_hints` | 不同 voice_type 对应不同语言 | `SecondaryLocaleList` 标记 | `languageCode` 即语言 | `language_boost` 参数 |
 | 动态列出声线 | ✅ `ListVoices` | ✅ | ✅ `GET /voices/list` | ✅ `ListVoices` | ✅ |
@@ -108,7 +108,7 @@ MiniMax 支持 9 种情绪枚举 + 独立音量控制；Azure 有 30+ 种 SSML s
 ### 3.3 语音参数
 
 | 参数 | 阿里云 | 火山 | Azure | Google | MiniMax |
-|------|:---:|:---:|:---:|:---:|:---:|
+| ------ | :---: | :---: | :---: | :---: | :---: |
 | 语速 | `rate` 0.5~2.0 | `speed_ratio` | SSML `rate` 0.5~2.0 | `speakingRate` 0.25~4.0 | `speed` 0.5~2.0 |
 | 音调 | `pitch` 0.5~2.0 | `pitch_ratio` | SSML `pitch` | `pitch` -20~+20 semitones | `pitch` -12~+12 |
 | 音量 | `volume` 0~100 | `volume_ratio` | SSML `volume` 0~100 | `volumeGainDb` -96~+16 | `vol` 0.1~10.0 |
@@ -118,7 +118,7 @@ MiniMax 支持 9 种情绪枚举 + 独立音量控制；Azure 有 30+ 种 SSML s
 ### 3.4 音频输出
 
 | 维度 | 阿里云 | 火山 | Azure | Google | MiniMax |
-|------|:---:|:---:|:---:|:---:|:---:|
+| ------ | :---: | :---: | :---: | :---: | :---: |
 | 格式 | pcm/wav/mp3/opus | mp3/wav/pcm | SSML output format | MP3/OGG/LINEAR16/... | mp3/pcm/flac/wav |
 | 采样率 | 8k~48k，默认 22050 | 依赖 voice_type | 8k~48k | 任意（服务端转换） | 16000~48000，默认 32000 |
 | 位深 | 16bit | — | 16bit | 16bit | — |
@@ -127,7 +127,7 @@ MiniMax 支持 9 种情绪枚举 + 独立音量控制；Azure 有 30+ 种 SSML s
 ### 3.5 服务端分句
 
 | 能力 | 阿里云 | 火山 | Azure | Google | MiniMax |
-|------|:---:|:---:|:---:|:---:|:---:|
+| ------ | :---: | :---: | :---: | :---: | :---: |
 | 自动分句 | ✅ `sentence-begin/end` 事件 | ❌ | ❌ | ❌ | ❌（仅有 `is_final`） |
 | 句边界标记 | ✅ | ❌ | ⚠️ SSML mark 可见但非自动 | ⚠️ `TimepointType.SSML_MARK` | ❌ |
 
@@ -243,7 +243,7 @@ type SynthesizeRequest struct {
 `Extra` 的典型 key：
 
 | Provider | Extra Key | 类型 | 说明 |
-|----------|-----------|------|------|
+| ---------- | ----------- | ------ | ------ |
 | aliyun | `workspace` | string | DashScope 工作空间 ID |
 | aliyun | `data_inspection` | bool | 数据检查开关 |
 | aliyun | `instruction` | string | 指令控制（方言、情绪） |
@@ -428,7 +428,7 @@ type VoiceInfo struct {
 协议层：WebSocket `run-task → continue-task → finish-task`。
 
 | 公共字段 | 适配器映射 |
-|----------|-----------|
+| ---------- | ----------- |
 | `TextInput.Text` | `continue-task` payload 中的 `input` text |
 | `TextInput.TextType` | `run-task` 的 `parameters.text_type`（PlainText 或 SSML） |
 | `VoiceSelection.VoiceID` | `run-task` 的 `parameters.voice` |
@@ -453,7 +453,7 @@ type VoiceInfo struct {
 协议层：REST（同步）+ WebSocket（流式）。
 
 | 公共字段 | 适配器映射 |
-|----------|-----------|
+| ---------- | ----------- |
 | `TextInput.Text` | `request.text` |
 | `TextInput.TextType` | `request.text_type`（plain 或 ssml） |
 | `VoiceSelection.VoiceID` | `audio.voice_type` 或 `speaker` |
@@ -472,7 +472,7 @@ type VoiceInfo struct {
 协议层：REST（SSML body）+ SDK WebSocket。
 
 | 公共字段 | 适配器映射 |
-|----------|-----------|
+| ---------- | ----------- |
 | `TextInput.Text` + `TextType` | SSML `<speak>` body；TextType=ssml 时原样放入 |
 | `VoiceSelection.VoiceID` | SSML `<voice name="...">` |
 | `VoiceSelection.Language` | SSML `xml:lang` |
@@ -490,7 +490,7 @@ type VoiceInfo struct {
 协议层：REST + gRPC streaming。
 
 | 公共字段 | 适配器映射 |
-|----------|-----------|
+| ---------- | ----------- |
 | `TextInput.Text` | `SynthesisInput.text` 或 `SynthesisInput.ssml` |
 | `VoiceSelection.VoiceID` | `VoiceSelectionParams.name` |
 | `VoiceSelection.Language` | `VoiceSelectionParams.language_code` |
@@ -507,7 +507,7 @@ type VoiceInfo struct {
 协议层：REST（同步 + SSE 流式）+ WebSocket。
 
 | 公共字段 | 适配器映射 |
-|----------|-----------|
+| ---------- | ----------- |
 | `TextInput.Text` | `text` |
 | `VoiceSelection.VoiceID` | `voice_setting.voice_id` |
 | `VoiceSelection.Model` | `model` |
@@ -530,7 +530,7 @@ type VoiceInfo struct {
 各 provider 的 pitch 参数统一映射到倍率 `0.5~2.0`：
 
 | Provider | 原始范围 | → 倍率公式 |
-|----------|---------|-----------|
+| ---------- | --------- | ----------- |
 | Google | semitone -20~+20 | `pitch_ratio = 2^(semitones/12)` |
 | MiniMax | -12~+12 | `pitch_ratio = 2^(semitones/12)` |
 | 阿里云 | 0.5~2.0 | 直接使用 |
@@ -542,7 +542,7 @@ type VoiceInfo struct {
 统一映射到 `0.0~1.0`：
 
 | Provider | 原始范围 | → 0.0~1.0 公式 |
-|----------|---------|----------------|
+| ---------- | --------- | ---------------- |
 | 阿里云 | 0~100 | `vol_norm = volume / 100` |
 | MiniMax | 0.1~10.0 | `vol_norm = (vol - 0.1) / 9.9` |
 | Google | -96~+16 dB | `vol_norm = (gainDb + 96) / 112` |
@@ -552,7 +552,7 @@ type VoiceInfo struct {
 公共情绪 → 各 provider 的情绪值映射表：
 
 | 公共情绪 | 阿里云 | 火山 | MiniMax | Azure | Google |
-|----------|:---:|:---:|:---:|:---:|:---:|
+| ---------- | :---: | :---: | :---: | :---: | :---: |
 | `happy` | `[happy]` | `happy` | `happy` | SSML `cheerful` | SSML |
 | `sad` | `[sad]` | `sad` | `sad` | SSML `sad` | SSML |
 | `angry` | `[angry]` | `angry` | `angry` | SSML `angry` | SSML |

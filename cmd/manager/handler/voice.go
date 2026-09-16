@@ -10,15 +10,20 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
+	ttsprovider "github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
 type VoiceHandler struct {
-	voices *store.ModelVoiceStore
+	voices       *store.ModelVoiceStore
+	cloneService voiceCloneService
 }
 
-func NewVoiceHandler(voices *store.ModelVoiceStore) *VoiceHandler {
-	return &VoiceHandler{voices: voices}
+func NewVoiceHandler(voices *store.ModelVoiceStore, models *store.AIModelStore) *VoiceHandler {
+	return &VoiceHandler{
+		voices:       voices,
+		cloneService: newProviderVoiceCloneService(models, voices, ttsprovider.NewProvider),
+	}
 }
 
 // GET /api/models/:id/voices?lang=zh
@@ -183,7 +188,7 @@ func (h *VoiceHandler) Delete(c *gin.Context) {
 
 // PATCH /internal/voices/:id — 更新系统音色字段
 func (h *VoiceHandler) AdminUpdate(c *gin.Context) {
-	var updates map[string]any
+	updates := make(map[string]any)
 	if err := c.ShouldBindJSON(&updates); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -230,35 +235,6 @@ func (h *VoiceHandler) AdminCreate(c *gin.Context) {
 		Emotions:    req.Emotions,
 		Extra:       req.Extra,
 		Creator:     "system",
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusCreated, v)
-}
-
-type cloneVoiceRequest struct {
-	VoiceID        string         `json:"voice_id" binding:"required"` // 厂商返回的复刻音色 ID
-	Name           string         `json:"name" binding:"required"`
-	SourceAudioURL string         `json:"source_audio_url" binding:"required"`
-	Langs          pq.StringArray `json:"langs"`
-}
-
-// POST /api/models/:id/voices/clone
-func (h *VoiceHandler) Clone(c *gin.Context) {
-	var req cloneVoiceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	v, err := h.voices.CreateCloned(store.CloneVoiceParams{
-		ModelID:        c.Param("id"),
-		VoiceID:        req.VoiceID,
-		Name:           req.Name,
-		SourceAudioURL: req.SourceAudioURL,
-		Langs:          req.Langs,
-		Creator:        middleware.UserID(c),
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
