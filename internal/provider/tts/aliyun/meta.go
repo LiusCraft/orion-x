@@ -22,6 +22,7 @@ func init() {
 			tts.FeatureStreaming,
 			tts.FeatureSSML,
 			tts.FeatureEmotion,
+			tts.FeatureVoiceCloning,
 			tts.FeatureWarmup,
 		},
 	})
