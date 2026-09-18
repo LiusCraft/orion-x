@@ -5,6 +5,7 @@ package parser
 import (
 	"context"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -40,6 +41,17 @@ func (r *Registry) Find(filename string) (Parser, bool) {
 	ext := strings.ToLower(filename[idx:])
 	p, ok := r.byExt[ext]
 	return p, ok
+}
+
+// SupportedExtensions returns every registered extension, sorted.
+// Callers use it to align upload validation with what can actually be parsed.
+func (r *Registry) SupportedExtensions() []string {
+	exts := make([]string, 0, len(r.byExt))
+	for ext := range r.byExt {
+		exts = append(exts, ext)
+	}
+	sort.Strings(exts)
+	return exts
 }
 
 // DefaultRegistry returns a Registry pre-loaded with built-in parsers.

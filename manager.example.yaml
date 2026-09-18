@@ -22,3 +22,18 @@ github_oauth:
 logging:
   level: "info"
   format: "console"    # console | json
+
+# 对象存储：资源（音色参考音频 / 图片 / 知识库文档原件）的上传与签名访问。
+# 走 S3 协议，可对接七牛云 Kodo、AWS S3、MinIO、阿里云 OSS 等；不需要时整段删除
+# （资源接口返回 503，其余功能不受影响）。
+storage:
+  type: "s3"
+  endpoint: "https://s3.cn-east-1.qiniucs.com"   # 七牛 Kodo 华东-浙江；区域对照见七牛《服务域名》
+  region: "cn-east-1"                            # 必须与 endpoint 的区域一致（参与签名）
+  bucket: "your-bucket"                          # 七牛填「S3 空间名」，见空间概览（可能不同于七牛空间名）
+  access_key: ""                                 # 建议留空，改用环境变量
+  secret_key: ""                                 # STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY
+  use_path_style: true                           # 七牛 / MinIO 建议 true；AWS S3 可设为 false
+  prefix: ""                                     # 可选 key 前缀，多环境共用一个桶时用 dev/prod
+  presign_ttl: "15m"                             # 预签名 URL 有效期（列表、预览、下载都走它）
+  max_upload_size: 52428800                      # 单文件上限 50MB（按用途还有更小的限制）

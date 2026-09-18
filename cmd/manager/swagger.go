@@ -906,3 +906,63 @@ func swaggerInternalKnowledgeSearch() {}
 // @Success 200 {array} object
 // @InternalRouter /internal/devices/tg-bots [get]
 func swaggerInternalTelegramBots() {}
+
+// swaggerUploadAsset uploads a resource file.
+// @Summary Upload resource
+// @Tags Assets
+// @Accept multipart/form-data
+// @Produce json
+// @Security BearerAuth
+// @Param file formData file true "Resource file"
+// @Param purpose formData string true "Purpose: image | voice_sample | kb_document"
+// @Success 201 {object} object
+// @Failure 400,401,413,502,503 {object} errorResponse
+// @Router /api/assets [post]
+func swaggerUploadAsset() {}
+
+// swaggerListAssets lists uploaded resources.
+// @Summary List resources
+// @Tags Assets
+// @Produce json
+// @Security BearerAuth
+// @Param purpose query string false "Filter by purpose (image | voice_sample | kb_document)"
+// @Param q query string false "Filter by file name"
+// @Param page query int false "Page number, starting at 1"
+// @Param page_size query int false "Page size (default 20, max 100)"
+// @Success 200 {object} object
+// @Failure 400,401,503 {object} errorResponse
+// @Router /api/assets [get]
+func swaggerListAssets() {}
+
+// swaggerGetAsset gets resource metadata with a presigned URL.
+// @Summary Get resource
+// @Tags Assets
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Asset ID"
+// @Success 200 {object} object
+// @Failure 401,403,404,503 {object} errorResponse
+// @Router /api/assets/{id} [get]
+func swaggerGetAsset() {}
+
+// swaggerAssetURL issues a presigned URL for a resource.
+// @Summary Presign resource URL
+// @Tags Assets
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Asset ID"
+// @Param download query int false "Set to 1 for a download URL with file name"
+// @Success 200 {object} object
+// @Failure 401,403,404,502,503 {object} errorResponse
+// @Router /api/assets/{id}/url [get]
+func swaggerAssetURL() {}
+
+// swaggerDeleteAsset deletes an uploaded image resource.
+// @Summary Delete resource
+// @Tags Assets
+// @Security BearerAuth
+// @Param id path string true "Asset ID"
+// @Success 204
+// @Failure 401,403,404,502,503 {object} errorResponse
+// @Router /api/assets/{id} [delete]
+func swaggerDeleteAsset() {}
