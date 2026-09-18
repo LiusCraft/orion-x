@@ -168,3 +168,85 @@ func TestVoiceCloneEndpointUsesConfiguredOverride(t *testing.T) {
 		t.Fatalf("voiceCloneEndpoint() returned surrounding whitespace")
 	}
 }
+
+func TestVoiceCloneEndpointDerivesRESTFromWebSocketURL(t *testing.T) {
+	const restPath = "/api/v1/services/audio/tts/customization"
+
+	tests := []struct {
+		name string
+		cfg  tts.Config
+		want string
+	}{
+		{
+			name: "wss inference endpoint switches to https",
+			cfg:  tts.Config{Endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/inference"},
+			want: "https://dashscope.aliyuncs.com" + restPath,
+		},
+		{
+			name: "ws inference endpoint switches to http",
+			cfg:  tts.Config{Endpoint: "ws://127.0.0.1:8080/api-ws/v1/inference"},
+			want: "http://127.0.0.1:8080" + restPath,
+		},
+		{
+			name: "wss base without inference path switches to https",
+			cfg:  tts.Config{Endpoint: "wss://dashscope.aliyuncs.com/"},
+			want: "https://dashscope.aliyuncs.com",
+		},
+		{
+			name: "explicit override keeps its scheme but normalises ws",
+			cfg:  tts.Config{Extra: map[string]any{"voice_clone_endpoint": "wss://clone.example.com/api/v1/services/audio/tts/customization"}},
+			want: "https://clone.example.com" + restPath,
+		},
+		{
+			name: "http endpoint is left as is",
+			cfg:  tts.Config{Endpoint: "https://example.com" + restPath},
+			want: "https://example.com" + restPath,
+		},
+		{
+			name: "empty endpoint falls back to the default",
+			cfg:  tts.Config{},
+			want: defaultVoiceCloneEndpoint,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := voiceCloneEndpoint(tc.cfg); got != tc.want {
+				t.Fatalf("voiceCloneEndpoint() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDashScopeProviderCloneVoiceFromWebSocketEndpoint 回归：模型里配的是 WS 推理地址
+// （wss://…/api-ws/v1/inference）时，复刻请求必须发到同一主机的 HTTPS REST 地址。
+func TestDashScopeProviderCloneVoiceFromWebSocketEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/services/audio/tts/customization" {
+			t.Errorf("path = %s, want voice-enrollment REST path", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output":{"voice_id":"cloned-voice"}}`))
+	}))
+	defer server.Close()
+
+	provider, err := NewDashScopeProvider(tts.Config{
+		APIKey:   "test-key",
+		Model:    "cosyvoice-v3-flash",
+		Endpoint: "ws" + strings.TrimPrefix(server.URL, "http") + "/api-ws/v1/inference",
+	})
+	if err != nil {
+		t.Fatalf("NewDashScopeProvider() error = %v", err)
+	}
+
+	result, err := provider.CloneVoice(context.Background(), tts.VoiceCloneRequest{
+		Prefix:         "myvoice",
+		SourceAudioURL: "https://example.com/voice.wav",
+	})
+	if err != nil {
+		t.Fatalf("CloneVoice() error = %v", err)
+	}
+	if result.VoiceID != "cloned-voice" {
+		t.Fatalf("voice ID = %q, want cloned-voice", result.VoiceID)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	tts "github.com/liuscraft/orion-x/internal/provider/tts"
@@ -123,19 +124,36 @@ type voiceCloneResponse struct {
 func voiceCloneEndpoint(cfg tts.Config) string {
 	if cfg.Extra != nil {
 		if endpoint, ok := cfg.Extra["voice_clone_endpoint"].(string); ok && strings.TrimSpace(endpoint) != "" {
-			return strings.TrimRight(strings.TrimSpace(endpoint), "/")
+			return websocketToHTTP(strings.TrimRight(strings.TrimSpace(endpoint), "/"))
 		}
 	}
 
 	endpoint := strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
 	const websocketPath = "/api-ws/v1/inference"
 	if base, ok := strings.CutSuffix(endpoint, websocketPath); ok {
-		return base + "/api/v1/services/audio/tts/customization"
+		return websocketToHTTP(base) + "/api/v1/services/audio/tts/customization"
 	}
 	if endpoint == "" {
 		return defaultVoiceCloneEndpoint
 	}
-	return endpoint
+	return websocketToHTTP(endpoint)
+}
+
+// websocketToHTTP 把 WebSocket 地址换成等价的 HTTP 地址（wss→https、ws→http）。
+// 模型里配的 BaseURL 是 WS 推理地址，而复刻（voice-enrollment）走的是 REST；
+// 老版本只换了路径没换 scheme，会得到 “unsupported protocol scheme \"wss\"”。
+func websocketToHTTP(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	switch parsed.Scheme {
+	case "wss":
+		parsed.Scheme = "https"
+	case "ws":
+		parsed.Scheme = "http"
+	}
+	return parsed.String()
 }
 
 func validateVoiceClonePrefix(prefix string) error {
