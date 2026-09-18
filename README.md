@@ -83,6 +83,23 @@ admin:
 
 也可通过环境变量覆盖：`DB_DSN`、`JWT_SECRET`、`ADMIN_USERNAME`、`ADMIN_PASSWORD` 与 `LOG_LEVEL`。首次启动时会创建配置中的管理员；账户已存在时不会覆盖其密码。
 
+可选启用对象存储（用于上传与签名访问音色参考音频、图片、知识库文档原件）。不配置时资源接口返回 503，其余功能不受影响：
+
+```yaml
+storage:
+  type: "s3"                                     # 走 S3 协议，可对接七牛云 Kodo / AWS S3 / MinIO 等
+  endpoint: "https://s3.cn-east-1.qiniucs.com"   # 七牛华东-浙江；region 必须与 endpoint 区域一致
+  region: "cn-east-1"
+  bucket: "your-bucket"                          # 七牛填「S3 空间名」（空间概览可见，可能不同于空间名）
+  access_key: ""                                 # 建议只放环境变量，不落配置文件
+  secret_key: ""
+  use_path_style: true                           # 七牛 / MinIO 建议 true；AWS S3 可设 false
+  prefix: ""                                     # 可选 key 前缀，多环境共桶时用 dev/prod
+  presign_ttl: "15m"                             # 预签名 URL 有效期
+```
+
+以上字段可用环境变量覆盖：`STORAGE_ENDPOINT`、`STORAGE_REGION`、`STORAGE_BUCKET`、`STORAGE_ACCESS_KEY`、`STORAGE_SECRET_KEY`。对象存储为私有桶即可：读取一律通过服务端签发的预签名 URL（默认 15 分钟有效）。
+
 ### 3. 启动控制面与运行时
 
 在三个终端分别执行：
@@ -187,6 +204,7 @@ Manager API 默认位于 `http://localhost:9090`：
 - `POST /api/auth/login`：获取 JWT
 - `/api/voicebots`、`/api/providers`、`/api/models`、`/api/mcp`：认证后的管理 API
 - `/api/data/memory`、`/api/data/knowledge`：记忆与知识库 API
+- `/api/assets`：资源上传、浏览与预签名访问（需配置对象存储）
 
 `/internal/*` 路由供 `wsserver` 在受信任网络内加载设备配置、写入记忆/会话轮次和执行知识检索使用，**没有 JWT 保护**。生产环境必须将 Manager 内部接口限制在私有网络或网关策略之后，不要直接暴露到公网。
 
@@ -203,6 +221,8 @@ Manager API 默认位于 `http://localhost:9090`：
 | `internal/agent/` | 流式 LLM Agent、工具调用与子任务 |
 | `internal/memory/` | 记忆快照、上下文压缩、后台回顾与会话检索 |
 | `internal/knowledge/` | 文档解析、切分、向量化、pgvector 检索与 HTTP 客户端 |
+| `internal/storage/` | 对象存储适配层（S3 协议，兼容七牛 Kodo / MinIO / AWS S3） |
+| `internal/assets/` | 资源上传校验、对象键规则、元数据与预签名访问 |
 | `internal/tools/` | 工具注册表、MCP 客户端、记忆/知识库工具 |
 | `internal/store/` | GORM 数据模型与 PostgreSQL 持久化 |
 | `pkg/pipeline/` | 线性与 DAG 流式处理管道 |

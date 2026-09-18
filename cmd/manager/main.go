@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 
+	"github.com/liuscraft/orion-x/internal/assets"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/knowledge/retriever"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/anthropic/messages"
@@ -24,6 +26,7 @@ import (
 	githuboauth "github.com/liuscraft/orion-x/internal/oauth/github"
 	_ "github.com/liuscraft/orion-x/internal/provider/asr/register"
 	_ "github.com/liuscraft/orion-x/internal/provider/tts/register"
+	"github.com/liuscraft/orion-x/internal/storage"
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
@@ -128,13 +131,16 @@ func main() {
 		logging.Infof("knowledge service ready")
 	}
 
+	// 对象存储 + 资源服务：未配置 storage 段时资源接口返回 503，manager 其余能力不受影响。
+	assetSvc := initAssetService(cfg.Storage, db)
+
 	// 注册第三方 OAuth 平台（仅配置完整时注册）
 	if cfg.GithubOAuth.ClientID != "" && cfg.GithubOAuth.ClientSecret != "" {
 		oauth.Register(githuboauth.New(cfg.GithubOAuth.ClientID, cfg.GithubOAuth.ClientSecret, cfg.GithubOAuth.RedirectURL))
 		logging.Infof("oauth: registered github provider")
 	}
 
-	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates)
+	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {
@@ -172,4 +178,24 @@ func migrateGithubBindings(users *store.UserStore, bindings *store.OAuthBindingS
 		logging.Infof("oauth: migrated %d legacy github bindings to oauth_bindings", len(legacy))
 	}
 	return nil
+}
+
+// initAssetService 构造对象存储与资源服务。
+// 未配置或初始化失败时返回 nil，资源接口随后返回 503。
+func initAssetService(cfg storage.Config, db *gorm.DB) *assets.Service {
+	if !cfg.Enabled() {
+		return nil
+	}
+	ctx := context.Background()
+	backend, err := storage.New(ctx, cfg)
+	if err != nil {
+		logging.Errorf("object storage disabled: %v", err)
+		return nil
+	}
+	if err := backend.Ping(ctx); err != nil {
+		logging.Warnf("object storage unreachable: %v", err)
+	} else {
+		logging.Infof("object storage ready: %s/%s", cfg.Endpoint, cfg.Bucket)
+	}
+	return assets.NewService(store.NewAssetStore(db), backend, cfg)
 }

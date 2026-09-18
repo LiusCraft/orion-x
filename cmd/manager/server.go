@@ -8,6 +8,7 @@ import (
 	"github.com/liuscraft/orion-x/cmd/manager/handler"
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
 	_ "github.com/liuscraft/orion-x/docs/manager"
+	"github.com/liuscraft/orion-x/internal/assets"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/store"
 )
@@ -32,6 +33,7 @@ func newRouter(
 	docStore *store.DocumentStore,
 	voicebotKBs *store.VoicebotKBStore,
 	agentTemplates *store.AgentTemplateStore,
+	assetSvc *assets.Service,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -73,6 +75,7 @@ func newRouter(
 	dataMemH := handler.NewDataMemoryHandler(memStore, devices, voicebots)
 	dataKnowH := handler.NewDataKnowledgeHandler(kbSvc, kbStore, docStore, devices, voicebots, voicebotKBs)
 	turnH := handler.NewTurnHandler(turnStore)
+	assetH := handler.NewAssetHandler(assetSvc)
 
 	api := r.Group("/api")
 	{
@@ -158,6 +161,14 @@ func newRouter(
 		knowledgeData.DELETE("/bots/:bot_id/knowledge_bases/:kb_id/bind", dataKnowH.UnbindKB)
 		knowledgeData.GET("/bots/:bot_id/knowledge_bases", dataKnowH.ListKBs)
 		knowledgeData.POST("/bots/:bot_id/knowledge_bases", dataKnowH.CreateKB)
+
+		// 资源（上传文件）：上传 / 浏览 / 预签名访问
+		assetRoutes := api.Group("/assets", jwtMw)
+		assetRoutes.POST("", assetH.Upload)
+		assetRoutes.GET("", assetH.List)
+		assetRoutes.GET("/:id", assetH.Get)
+		assetRoutes.GET("/:id/url", assetH.URL)
+		assetRoutes.DELETE("/:id", assetH.Delete)
 
 		// 智能体广场
 		api.GET("/agent-templates/system", jwtMw, tplH.ListSystem)

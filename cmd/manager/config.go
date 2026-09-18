@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/liuscraft/orion-x/internal/storage"
 )
 
 type ManagerConfig struct {
@@ -16,6 +18,7 @@ type ManagerConfig struct {
 	Admin       AdminConfig       `yaml:"admin"`
 	GithubOAuth GithubOAuthConfig `yaml:"github_oauth"`
 	Logging     LoggingConfig     `yaml:"logging"`
+	Storage     storage.Config    `yaml:"storage"`
 }
 
 type ServerConfig struct {
@@ -99,5 +102,21 @@ func applyManagerEnv(cfg *ManagerConfig) {
 	}
 	if v := strings.TrimSpace(os.Getenv("GITHUB_REDIRECT_URL")); v != "" {
 		cfg.GithubOAuth.RedirectURL = v
+	}
+	// 对象存储（AK/SK 建议只走环境变量，不落配置文件）
+	if v := strings.TrimSpace(os.Getenv("STORAGE_ENDPOINT")); v != "" {
+		cfg.Storage.Endpoint = v
+	}
+	if v := strings.TrimSpace(os.Getenv("STORAGE_REGION")); v != "" {
+		cfg.Storage.Region = v
+	}
+	if v := strings.TrimSpace(os.Getenv("STORAGE_BUCKET")); v != "" {
+		cfg.Storage.Bucket = v
+	}
+	if v := strings.TrimSpace(os.Getenv("STORAGE_ACCESS_KEY")); v != "" {
+		cfg.Storage.AccessKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("STORAGE_SECRET_KEY")); v != "" {
+		cfg.Storage.SecretKey = v
 	}
 }
