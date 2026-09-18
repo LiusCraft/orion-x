@@ -7,9 +7,11 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +20,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
+	"github.com/liuscraft/orion-x/internal/assets"
 	"github.com/liuscraft/orion-x/internal/language"
 	ttsprovider "github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/store"
@@ -28,8 +31,13 @@ var (
 	errVoiceCloneUnsupportedModel     = errors.New("model does not support voice cloning")
 	errVoiceCloneProviderUnconfigured = errors.New("voice cloning provider is not configured")
 	errVoiceCloneProviderUnavailable  = errors.New("provider does not implement voice cloning")
+	errVoiceCloneStorageUnconfigured  = errors.New("object storage is not configured for voice samples")
 	errVoiceCloneEmptyVoiceID         = errors.New("voice cloning provider returned an empty voice ID")
 )
+
+// voiceSamplePresignTTL 是交给复刻厂商拉取参考音频的预签名 URL 有效期。
+// 厂商可能在任务排队后才下载音频，故比资源库默认的 presign_ttl 留更长窗口。
+const voiceSamplePresignTTL = 2 * time.Hour
 
 // VoiceCloneModel is a TTS model that can create cloned voices.
 type VoiceCloneModel struct {
@@ -45,9 +53,11 @@ type VoiceCloneModel struct {
 
 type cloneVoiceRequest struct {
 	Name           string                  `json:"name"`
+	Description    string                  `json:"description,omitempty"`
 	Prefix         string                  `json:"prefix,omitempty"`
-	SourceAudioURL string                  `json:"source_audio_url"`
-	Format         ttsprovider.AudioFormat `json:"format"`
+	SourceAssetID  string                  `json:"source_asset_id,omitempty"`
+	SourceAudioURL string                  `json:"source_audio_url,omitempty"`
+	Format         ttsprovider.AudioFormat `json:"format,omitempty"`
 	Langs          pq.StringArray          `json:"langs,omitempty"`
 	Extra          map[string]any          `json:"extra,omitempty"`
 }
@@ -69,15 +79,17 @@ type voiceCloneVoiceStore interface {
 type providerVoiceCloneService struct {
 	models      voiceCloneModelStore
 	voices      voiceCloneVoiceStore
+	assets      voiceAssetStore
 	newProvider func(ttsprovider.ProviderConfig) (ttsprovider.Synthesizer, error)
 }
 
 func newProviderVoiceCloneService(
 	models voiceCloneModelStore,
 	voices voiceCloneVoiceStore,
+	assetSvc voiceAssetStore,
 	newProvider func(ttsprovider.ProviderConfig) (ttsprovider.Synthesizer, error),
 ) *providerVoiceCloneService {
-	return &providerVoiceCloneService{models: models, voices: voices, newProvider: newProvider}
+	return &providerVoiceCloneService{models: models, voices: voices, assets: assetSvc, newProvider: newProvider}
 }
 
 // GET /api/models/voice-cloning
@@ -169,6 +181,11 @@ func (s *providerVoiceCloneService) Clone(ctx context.Context, modelID, userID s
 	if err != nil {
 		return nil, err
 	}
+
+	source, err := s.resolveSourceAudio(ctx, userID, req)
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(model.Provider.APIKeyEnc) == "" {
 		return nil, errVoiceCloneProviderUnconfigured
 	}
@@ -191,8 +208,8 @@ func (s *providerVoiceCloneService) Clone(ctx context.Context, modelID, userID s
 	result, err := cloner.CloneVoice(ctx, ttsprovider.VoiceCloneRequest{
 		TargetModel:    model.ModelID,
 		Prefix:         req.Prefix,
-		Format:         req.Format,
-		SourceAudioURL: req.SourceAudioURL,
+		Format:         source.format,
+		SourceAudioURL: source.url,
 		LanguageHints:  req.Langs,
 		Extra:          req.Extra,
 	})
@@ -207,7 +224,9 @@ func (s *providerVoiceCloneService) Clone(ctx context.Context, modelID, userID s
 		ModelID:        model.ID,
 		VoiceID:        strings.TrimSpace(result.VoiceID),
 		Name:           req.Name,
-		SourceAudioURL: req.SourceAudioURL,
+		Description:    req.Description,
+		SourceAssetID:  source.assetID,
+		SourceAudioURL: source.legacyURL,
 		Langs:          req.Langs,
 		Creator:        userID,
 	})
@@ -215,6 +234,43 @@ func (s *providerVoiceCloneService) Clone(ctx context.Context, modelID, userID s
 		return nil, err
 	}
 	return voice, nil
+}
+
+// voiceCloneSource 是一次复刻的参考音频来源：要么是资源库里的 voice_sample 资源，
+// 要么是调用方直传的外部 URL（legacy）。
+type voiceCloneSource struct {
+	url       string // 传给厂商的可访问 URL
+	assetID   string // 落库：资源 ID
+	legacyURL string // 落库：外部 URL，资源来源时留空（预签名 URL 会过期，不入库）
+	format    ttsprovider.AudioFormat
+}
+
+func (s *providerVoiceCloneService) resolveSourceAudio(ctx context.Context, userID string, req cloneVoiceRequest) (voiceCloneSource, error) {
+	if req.SourceAssetID == "" {
+		return voiceCloneSource{url: req.SourceAudioURL, legacyURL: req.SourceAudioURL, format: req.Format}, nil
+	}
+	if s.assets == nil {
+		return voiceCloneSource{}, errVoiceCloneStorageUnconfigured
+	}
+
+	asset, err := s.assets.Get(ctx, userID, req.SourceAssetID)
+	if err != nil {
+		return voiceCloneSource{}, err
+	}
+	if assets.Purpose(asset.Purpose) != assets.PurposeVoiceSample {
+		return voiceCloneSource{}, fmt.Errorf("%w: source asset purpose must be %q, got %q",
+			ttsprovider.ErrBadRequest, assets.PurposeVoiceSample, asset.Purpose)
+	}
+	format, err := voiceCloneFormatForAsset(asset.Name)
+	if err != nil {
+		return voiceCloneSource{}, err
+	}
+
+	url, err := s.assets.PresignURLWithTTL(ctx, asset, voiceSamplePresignTTL, false)
+	if err != nil {
+		return voiceCloneSource{}, err
+	}
+	return voiceCloneSource{url: url, assetID: asset.ID, format: format}, nil
 }
 
 func cloneableTTSProvider(model store.AIModel, registered map[string]ttsprovider.ProviderMeta) (string, bool) {
@@ -262,20 +318,35 @@ func normalizeVoiceCloneRequest(req cloneVoiceRequest) (cloneVoiceRequest, error
 	if utf8.RuneCountInString(req.Name) > 128 {
 		return req, fmt.Errorf("%w: name must be at most 128 characters", ttsprovider.ErrBadRequest)
 	}
+	req.Description = strings.TrimSpace(req.Description)
 
+	req.SourceAssetID = strings.TrimSpace(req.SourceAssetID)
 	req.SourceAudioURL = strings.TrimSpace(req.SourceAudioURL)
-	if len(req.SourceAudioURL) > 512 {
-		return req, fmt.Errorf("%w: source audio URL must be at most 512 characters", ttsprovider.ErrBadRequest)
+	switch {
+	case req.SourceAssetID != "" && req.SourceAudioURL != "":
+		return req, fmt.Errorf("%w: source_asset_id and source_audio_url are mutually exclusive", ttsprovider.ErrBadRequest)
+	case req.SourceAssetID != "":
+		if len(req.SourceAssetID) > 36 {
+			return req, fmt.Errorf("%w: source_asset_id must be at most 36 characters", ttsprovider.ErrBadRequest)
+		}
+		// 音频格式由资源文件扩展名推导，忽略调用方传入的 format。
+		req.Format = ""
+	default:
+		if req.SourceAudioURL == "" {
+			return req, fmt.Errorf("%w: source_asset_id or source_audio_url is required", ttsprovider.ErrBadRequest)
+		}
+		if len(req.SourceAudioURL) > 512 {
+			return req, fmt.Errorf("%w: source audio URL must be at most 512 characters", ttsprovider.ErrBadRequest)
+		}
+		if err := validateSourceAudioURL(req.SourceAudioURL); err != nil {
+			return req, fmt.Errorf("%w: %v", ttsprovider.ErrBadRequest, err)
+		}
+		format, err := normalizeVoiceCloneFormat(req.Format)
+		if err != nil {
+			return req, err
+		}
+		req.Format = format
 	}
-	if err := validateSourceAudioURL(req.SourceAudioURL); err != nil {
-		return req, fmt.Errorf("%w: %v", ttsprovider.ErrBadRequest, err)
-	}
-
-	format, err := normalizeVoiceCloneFormat(req.Format)
-	if err != nil {
-		return req, err
-	}
-	req.Format = format
 
 	langs, err := normalizeVoiceCloneLangs(req.Langs)
 	if err != nil {
@@ -288,6 +359,17 @@ func normalizeVoiceCloneRequest(req cloneVoiceRequest) (cloneVoiceRequest, error
 		req.Prefix = generatedVoiceClonePrefix()
 	}
 	return req, nil
+}
+
+// voiceCloneFormatForAsset 从参考音频文件名推导厂商侧音频格式。
+// 可接受的扩展名由 assets 的 voice_sample 白名单保证。
+func voiceCloneFormatForAsset(fileName string) (ttsprovider.AudioFormat, error) {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
+	format, err := normalizeVoiceCloneFormat(ttsprovider.AudioFormat(ext))
+	if err != nil {
+		return "", fmt.Errorf("%w: unsupported source audio file %q", ttsprovider.ErrBadRequest, fileName)
+	}
+	return format, nil
 }
 
 func validateSourceAudioURL(raw string) error {
@@ -377,18 +459,22 @@ func (e *voiceCloneProviderError) Unwrap() error {
 
 func writeVoiceCloneError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound), errors.Is(err, store.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "model not found"})
-	case errors.Is(err, errVoiceCloneForbidden):
+	case errors.Is(err, gorm.ErrRecordNotFound), errors.Is(err, store.ErrNotFound), errors.Is(err, assets.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "model or source audio not found"})
+	case errors.Is(err, errVoiceCloneForbidden), errors.Is(err, assets.ErrForbidden):
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 	case errors.Is(err, errVoiceCloneUnsupportedModel),
 		errors.Is(err, errVoiceCloneProviderUnconfigured),
 		errors.Is(err, errVoiceCloneProviderUnavailable):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+	case errors.Is(err, errVoiceCloneStorageUnconfigured):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 	case errors.Is(err, ttsprovider.ErrBadRequest):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, ttsprovider.ErrTransient):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+	case errors.Is(err, assets.ErrStorage):
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 	case errors.Is(err, ttsprovider.ErrAuth), errors.Is(err, errVoiceCloneEmptyVoiceID):
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 	default:

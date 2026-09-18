@@ -330,6 +330,17 @@ func swaggerDeleteModel() {}
 // @Router /api/voices/system [get]
 func swaggerListSystemVoices() {}
 
+// swaggerListMyVoices lists the current user's own voices (cloned or manually added).
+// @Summary List my voices
+// @Tags Voices
+// @Produce json
+// @Security BearerAuth
+// @Param lang query string false "Filter by language code"
+// @Success 200 {array} object
+// @Failure 401 {object} errorResponse
+// @Router /api/voices/mine [get]
+func swaggerListMyVoices() {}
+
 // swaggerListVoices lists a model's voices.
 // @Summary List model voices
 // @Tags Voices
@@ -356,7 +367,7 @@ func swaggerCreateVoice() {}
 
 // swaggerCloneVoice clones a voice with the selected TTS model.
 // @Summary Clone voice
-// @Description The path model determines the provider and target model. The request body must include name, source_audio_url, and format; prefix is optional and generated when omitted.
+// @Description The path model determines the provider and target model. The request body must include name and either source_asset_id (a voice_sample resource from POST /api/assets) or source_audio_url with format; prefix is optional and generated when omitted. The reference audio is signed on demand and only source_asset_id is persisted.
 // @Tags Voices
 // @Accept json
 // @Produce json

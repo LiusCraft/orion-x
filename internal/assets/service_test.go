@@ -70,6 +70,7 @@ type fakeStorage struct {
 	putErr         error
 	deleteErr      error
 	lastKey        string
+	lastTTL        time.Duration
 	lastPutOptions storage.PutOptions
 	lastPresign    storage.PresignOptions
 }
@@ -101,8 +102,8 @@ func (f *fakeStorage) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-func (f *fakeStorage) PresignGet(_ context.Context, key string, _ time.Duration, opts storage.PresignOptions) (string, error) {
-	f.lastPresign = opts
+func (f *fakeStorage) PresignGet(_ context.Context, key string, ttl time.Duration, opts storage.PresignOptions) (string, error) {
+	f.lastTTL, f.lastPresign = ttl, opts
 	return "https://storage.test/" + key + "?signature=stub", nil
 }
 
@@ -350,6 +351,73 @@ func TestDeleteKeepsRecordWhenStorageFails(t *testing.T) {
 	}
 }
 
+// TestDeleteCascade 领域级联删除：音色删除时清掉参考音频。
+func TestDeleteCascade(t *testing.T) {
+	t.Run("matching purpose removes object and record", func(t *testing.T) {
+		st, be := newFakeStore(), newFakeStorage()
+		svc := newTestService(st, be)
+		st.byID["v1"] = &store.Asset{ID: "v1", OwnerID: "u", Purpose: string(PurposeVoiceSample), ObjectKey: "vk"}
+		be.objects["vk"] = []byte("audio")
+
+		if err := svc.DeleteCascade(context.Background(), "u", "v1", PurposeVoiceSample); err != nil {
+			t.Fatalf("delete cascade: %v", err)
+		}
+		if _, ok := be.objects["vk"]; ok {
+			t.Fatal("object not deleted")
+		}
+		if len(st.deleted) != 1 || st.deleted[0] != "v1" {
+			t.Fatalf("deleted = %v, want [v1]", st.deleted)
+		}
+	})
+
+	t.Run("purpose mismatch keeps the asset", func(t *testing.T) {
+		st, be := newFakeStore(), newFakeStorage()
+		svc := newTestService(st, be)
+		st.byID["doc"] = &store.Asset{ID: "doc", OwnerID: "u", Purpose: string(PurposeKBDocument), ObjectKey: "dk"}
+		be.objects["dk"] = []byte("doc")
+
+		if err := svc.DeleteCascade(context.Background(), "u", "doc", PurposeVoiceSample); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("err = %v, want ErrForbidden", err)
+		}
+		if _, ok := be.objects["dk"]; !ok {
+			t.Fatal("mismatched asset must not be deleted")
+		}
+	})
+
+	t.Run("missing record is treated as success", func(t *testing.T) {
+		st, be := newFakeStore(), newFakeStorage()
+		svc := newTestService(st, be)
+
+		if err := svc.DeleteCascade(context.Background(), "u", "gone", PurposeVoiceSample); err != nil {
+			t.Fatalf("err = %v, want nil for idempotent retry", err)
+		}
+	})
+
+	t.Run("foreign asset is forbidden", func(t *testing.T) {
+		st, be := newFakeStore(), newFakeStorage()
+		svc := newTestService(st, be)
+		st.byID["v1"] = &store.Asset{ID: "v1", OwnerID: "other", Purpose: string(PurposeVoiceSample), ObjectKey: "vk"}
+
+		if err := svc.DeleteCascade(context.Background(), "u", "v1", PurposeVoiceSample); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("err = %v, want ErrForbidden", err)
+		}
+	})
+
+	t.Run("storage failure keeps record for retry", func(t *testing.T) {
+		st, be := newFakeStore(), newFakeStorage()
+		be.deleteErr = errors.New("boom")
+		svc := newTestService(st, be)
+		st.byID["v1"] = &store.Asset{ID: "v1", OwnerID: "u", Purpose: string(PurposeVoiceSample), ObjectKey: "vk"}
+
+		if err := svc.DeleteCascade(context.Background(), "u", "v1", PurposeVoiceSample); !errors.Is(err, ErrStorage) {
+			t.Fatalf("err = %v, want ErrStorage", err)
+		}
+		if len(st.deleted) != 0 {
+			t.Fatal("record must survive a failed object delete")
+		}
+	})
+}
+
 // ── List / Presign ──
 
 func TestListNormalize(t *testing.T) {
@@ -413,6 +481,9 @@ func TestPresignURLAndView(t *testing.T) {
 	if ttl != time.Minute {
 		t.Fatalf("ttl = %v, want 1m", ttl)
 	}
+	if be.lastTTL != time.Minute {
+		t.Fatalf("signed ttl = %v, want 1m", be.lastTTL)
+	}
 	if be.lastPresign.DownloadFileName != asset.Name {
 		t.Fatalf("download name = %q, want %q", be.lastPresign.DownloadFileName, asset.Name)
 	}
@@ -431,6 +502,27 @@ func TestPresignURLAndView(t *testing.T) {
 	views, err := svc.Views(context.Background(), []store.Asset{*asset})
 	if err != nil || len(views) != 1 {
 		t.Fatalf("views = %v err=%v", views, err)
+	}
+}
+
+// TestPresignURLWithTTL 消费方（厂商拉取参考音频）需要比默认 presign_ttl 更长的窗口。
+func TestPresignURLWithTTL(t *testing.T) {
+	st, be := newFakeStore(), newFakeStorage()
+	svc := newTestService(st, be)
+	asset := &store.Asset{ID: "a1", OwnerID: "u", Purpose: string(PurposeVoiceSample), ObjectKey: "test/voice_sample/u/a1.wav"}
+
+	url, err := svc.PresignURLWithTTL(context.Background(), asset, 2*time.Hour, false)
+	if err != nil {
+		t.Fatalf("presign with ttl: %v", err)
+	}
+	if !strings.Contains(url, asset.ObjectKey) {
+		t.Fatalf("url = %q, want key inside", url)
+	}
+	if be.lastTTL != 2*time.Hour {
+		t.Fatalf("signed ttl = %v, want 2h", be.lastTTL)
+	}
+	if be.lastPresign.DownloadFileName != "" {
+		t.Fatal("vendor URL must stay inline, not an attachment")
 	}
 }
 

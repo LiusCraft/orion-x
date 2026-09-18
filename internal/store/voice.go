@@ -45,6 +45,19 @@ func (s *ModelVoiceStore) ListAllSystem(lang string) ([]ModelVoice, error) {
 	return list, nil
 }
 
+// ListByCreator 返回用户自建（含复刻）的音色，跨模型汇总，支持按 lang 过滤。
+func (s *ModelVoiceStore) ListByCreator(creatorID, lang string) ([]ModelVoice, error) {
+	q := s.db.Where("is_system = false AND creator = ?", creatorID)
+	if lang != "" {
+		q = q.Where("langs @> ?", pq.StringArray{lang})
+	}
+	var list []ModelVoice
+	if err := q.Order("created_at DESC").Find(&list).Error; err != nil {
+		return nil, fmt.Errorf("voice store: list by creator: %w", err)
+	}
+	return list, nil
+}
+
 func (s *ModelVoiceStore) GetByID(id string) (*ModelVoice, error) {
 	var v ModelVoice
 	if err := s.db.First(&v, "id = ?", id).Error; err != nil {
@@ -136,7 +149,9 @@ type CloneVoiceParams struct {
 	ModelID        string
 	VoiceID        string // 复刻后厂商返回的音色 ID
 	Name           string
-	SourceAudioURL string
+	Description    string
+	SourceAssetID  string // 参考音频资源 ID（voice_sample）；legacy URL 调用方留空
+	SourceAudioURL string // legacy：外部音频 URL，不写预签名 URL
 	Langs          pq.StringArray
 	Creator        string
 }
@@ -150,6 +165,8 @@ func (s *ModelVoiceStore) CreateCloned(p CloneVoiceParams) (*ModelVoice, error) 
 		ModelID:        p.ModelID,
 		VoiceID:        p.VoiceID,
 		Name:           p.Name,
+		Description:    p.Description,
+		SourceAssetID:  p.SourceAssetID,
 		SourceAudioURL: p.SourceAudioURL,
 		Langs:          p.Langs,
 		IsSystem:       false,

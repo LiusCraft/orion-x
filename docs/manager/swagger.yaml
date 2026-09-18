@@ -1626,8 +1626,10 @@ paths:
       consumes:
       - application/json
       description: The path model determines the provider and target model. The request
-        body must include name, source_audio_url, and format; prefix is optional and
-        generated when omitted.
+        body must include name and either source_asset_id (a voice_sample resource
+        from POST /api/assets) or source_audio_url with format; prefix is optional
+        and generated when omitted. The reference audio is signed on demand and only
+        source_asset_id is persisted.
       parameters:
       - description: Cloneable TTS model ID
         in: path
@@ -2406,6 +2408,31 @@ paths:
       summary: Toggle voicebot MCP binding
       tags:
       - MCP
+  /api/voices/mine:
+    get:
+      parameters:
+      - description: Filter by language code
+        in: query
+        name: lang
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: object
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: List my voices
+      tags:
+      - Voices
   /api/voices/system:
     get:
       produces:

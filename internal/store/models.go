@@ -133,6 +133,7 @@ type ModelVoice struct {
 	Emotions       datatypes.JSONMap `gorm:"type:jsonb" json:"emotions,omitempty"`
 	IsSystem       bool              `gorm:"not null;default:false;index" json:"is_system"`
 	IsCloned       bool              `gorm:"not null;default:false" json:"is_cloned"`
+	SourceAssetID  string            `gorm:"type:varchar(36);index" json:"source_asset_id,omitempty"`
 	SourceAudioURL string            `gorm:"type:varchar(512)" json:"source_audio_url,omitempty"`
 	MetaHash       string            `gorm:"type:varchar(64)" json:"-"`
 	Extra          datatypes.JSONMap `gorm:"type:jsonb" json:"extra,omitempty"`

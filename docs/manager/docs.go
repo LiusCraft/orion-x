@@ -2468,7 +2468,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "The path model determines the provider and target model. The request body must include name, source_audio_url, and format; prefix is optional and generated when omitted.",
+                "description": "The path model determines the provider and target model. The request body must include name and either source_asset_id (a voice_sample resource from POST /api/assets) or source_audio_url with format; prefix is optional and generated when omitted. The reference audio is signed on demand and only source_asset_id is persisted.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3804,6 +3804,47 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/voices/mine": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Voices"
+                ],
+                "summary": "List my voices",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by language code",
+                        "name": "lang",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/main.errorResponse"
                         }
