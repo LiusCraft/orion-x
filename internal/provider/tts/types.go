@@ -39,6 +39,7 @@ type AudioFormat string
 const (
 	FormatPCM  AudioFormat = "pcm"
 	FormatMP3  AudioFormat = "mp3"
+	FormatM4A  AudioFormat = "m4a"
 	FormatWAV  AudioFormat = "wav"
 	FormatOpus AudioFormat = "opus"
 	FormatFlac AudioFormat = "flac"

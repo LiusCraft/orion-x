@@ -378,7 +378,7 @@ storage:
 ## 11. 决策记录（2026-09-19）
 
 1. **统一管理页面（§8.4）：暂不做。** 本轮先交付后端的「上传 + 签名访问」能力，作为其它模块的统一资源入口；是否需要统一浏览页面后续再定，页面定义保留在 §8.4 作为备选方案。
-2. **语音复刻页：前端本轮不动。** `clone` 接口接受 `source_asset_id` 随 Phase 5 接入。
+2. **语音复刻页：随 Phase 5 接入（已完成）。** `clone` 接口接受 `source_asset_id`；`web/manager` 的 `VoiceClonePage` 改为真实上传（`purpose=voice_sample`）→ 选模型 → 复刻，`VoiceListPage` 与智能体 TTS 音色列表改用真实数据（含复刻音色）。
 3. **智能体 logo 字段：不做。**
 
 ## 12. 验证与测试
@@ -421,7 +421,7 @@ storage:
 | 2 | `store.Asset` + `internal/assets`（校验 / key / 上传 / 列表 / 删除 / 预签名）+ 单测；`db.go` AutoMigrate 加 `Asset` | ✅ 已完成 | `go test ./internal/assets/` |
 | 3 | `handler/asset.go` + 路由 + swagger 注解（`make swagger`）+ `manager.example.yaml` / README | ✅ 已完成 | 手工验证 §12.2-1、-2 |
 | 4 | 知识库集成（`Document.AssetID`、上传落对象存储、ingest 从存储读、重试、级联删除、`DeleteKB` 清理） | ⏳ 待办 | 手工验证 §12.2-3、-4、-5 |
-| 5 | 音色接口集成（`model_voices.source_asset_id`、clone 校验与落库） | ⏳ 待办 | 手工验证 §12.2-6 |
+| 5 | 音色接口集成（`model_voices.source_asset_id`、clone 校验与落库、资源级联删除、`/api/voices/mine`、可用资源含复刻音色） | ✅ 已完成 | 手工验证 §12.2-6；前端复刻页 / 已有音色页 `npm run build` 通过 |
 | 6 | 前端资源库页面（路由 `/data/assets`、导航「资源库」、`assetsApi`、上传 / 浏览 / 预览 / 下载 / 删除） | ⏳ 待办（§11-1 决定暂不做） | `npm run lint && npm run build`；手工验证 §12.2-7 |
 | — | 全局 | ✅ | `golangci-lint run ./...` 0 issues；`go test ./...` 全绿 |
 
@@ -435,3 +435,23 @@ storage:
   删除后资源 404 且对象从存储消失；
   错误路径：非法扩展名 400、伪装扩展名（HTML 改名 .png）400、超用途上限 400、未认证 401、越权 403、不存在 404、未配置存储 503、存储不可达 502（启动仅告警，其余功能正常）。
 - 未验证（环境限制）：真实七牛 Kodo 桶（无凭证，清单见 §12.3）；413 请求体超限路径（需要 >50MB 请求体，未构造）。
+
+## 15. 音色复刻接入（Phase 5，2026-09-19）
+
+后端：
+
+- `model_voices.source_asset_id`（AutoMigrate 自动加列）+ `source_audio_url` 保留为 legacy 字段；资源来源时**不把预签名 URL 写进库里**。
+- `POST /api/models/:id/voices/clone` 新增 `source_asset_id`（与 `source_audio_url` 二选一，同时传 400）：资源存在 → 归属当前用户 → `purpose == voice_sample`，否则 404 / 403 / 400；`format` 由资源文件名推导，调用方无需传。
+- 传给厂商的 URL 在请求时现算，TTL 用 `voiceSamplePresignTTL = 2h`（厂商可能排队后才下载），不复用资源库默认 `presign_ttl`。
+- 删除音色时级联删除 `voice_sample` 资源（`assets.DeleteCascade`：先删对象再删记录，记录不存在视为成功，存储失败则保留音色供重试）。
+- 新增 `GET /api/voices/mine`；`GET /api/available-resources` 现在包含用户自建 / 复刻音色，智能体 TTS 音色列表可直接选用。
+- 测试：`voice_clone_test.go`（资源路径 / 用途不符 / 越权 / 不存在 / 未配置存储 / 预签名失败 / 二选一校验）、`assets/service_test.go`（`DeleteCascade`、`PresignURLWithTTL`）。
+
+前端：
+
+- `VoiceClonePage` 真实上传（`POST /api/assets`，`purpose=voice_sample`，带上传进度）→ 选复刻模型 / 填名称描述 / 选语言 → `POST …/voices/clone`，失败回退到表单并展示服务端错误。
+- `VoiceListPage` 改用 `GET /api/voices/system` + `GET /api/voices/mine`，可试听与删除（`DELETE /api/models/{id}/voices/{vid}`）；`lib/api.ts` 新增 `assetsApi` / `voiceCloneApi` 与 `voiceApi.listMine` / `remove`。
+
+复刻音色的试听音频直接复用参考音频：`GET /api/voices/mine` 与 `GET /api/available-resources` 在响应时按 `source_asset_id` 现算预签名 URL（`voicePreviewTTL = 2h`，不入库），前端两个消费点（音色列表、智能体音色卡片）已有播放逻辑，无需改动。
+
+未做（后续）：厂商侧 `delete_voice`（删除音色不会删除厂商远端音色）；资源库页面（Phase 6，§11-1 决定暂不做）。

@@ -230,6 +230,7 @@ export interface ModelVoice {
 	emotions?: Record<string, unknown>;
 	is_system: boolean;
 	is_cloned: boolean;
+	source_asset_id?: string;
 	source_audio_url?: string;
 	extra?: Record<string, unknown>;
 	created_at: string;
@@ -256,6 +257,75 @@ export const voiceApi = {
 		http.get<ModelVoice[]>("/voices/system", {
 			params: lang ? { lang } : undefined,
 		}),
+	// 当前用户自建（含复刻）的音色
+	listMine: (lang?: string) =>
+		http.get<ModelVoice[]>("/voices/mine", {
+			params: lang ? { lang } : undefined,
+		}),
+	remove: (modelId: string, voiceId: string) =>
+		http.delete(`/models/${modelId}/voices/${voiceId}`),
+};
+
+export type AssetPurpose = "image" | "voice_sample" | "kb_document";
+
+export interface Asset {
+	id: string;
+	owner_id: string;
+	purpose: AssetPurpose;
+	name: string;
+	mime_type: string;
+	size: number;
+	url?: string;
+	created_at: string;
+	updated_at: string;
+	creator: string;
+}
+
+export const assetsApi = {
+	upload: (
+		file: File,
+		purpose: AssetPurpose,
+		onProgress?: (percent: number) => void,
+	) => {
+		const form = new FormData();
+		form.append("file", file);
+		form.append("purpose", purpose);
+		return http.post<Asset>("/assets", form, {
+			onUploadProgress: (e) => {
+				if (onProgress && e.total) {
+					onProgress(Math.round((e.loaded / e.total) * 100));
+				}
+			},
+		});
+	},
+	get: (id: string) => http.get<Asset>(`/assets/${id}`),
+};
+
+export interface VoiceCloneModel {
+	id: string;
+	name: string;
+	model_id: string;
+	provider_id: string;
+	provider_name: string;
+	provider_slug: string;
+	langs?: string[];
+	configured: boolean;
+}
+
+export interface VoiceCloneRequest {
+	name: string;
+	description?: string;
+	prefix?: string;
+	source_asset_id?: string;
+	source_audio_url?: string;
+	format?: string;
+	langs?: string[];
+}
+
+export const voiceCloneApi = {
+	models: () => http.get<VoiceCloneModel[]>("/models/voice-cloning"),
+	clone: (modelId: string, payload: VoiceCloneRequest) =>
+		http.post<ModelVoice>(`/models/${modelId}/voices/clone`, payload),
 };
 
 export interface AgentTemplate {

@@ -10,15 +10,31 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
+	"github.com/liuscraft/orion-x/internal/assets"
+	"github.com/liuscraft/orion-x/internal/logging"
+	ttsprovider "github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
 type VoiceHandler struct {
-	voices *store.ModelVoiceStore
+	voices       *store.ModelVoiceStore
+	cloneService voiceCloneService
+	assets       *assets.Service
 }
 
-func NewVoiceHandler(voices *store.ModelVoiceStore) *VoiceHandler {
-	return &VoiceHandler{voices: voices}
+// NewVoiceHandler 构造 VoiceHandler；assetSvc 为 nil 表示未配置对象存储，
+// 此时用 source_asset_id 的复刻请求会返回 503。
+func NewVoiceHandler(voices *store.ModelVoiceStore, models *store.AIModelStore, assetSvc *assets.Service) *VoiceHandler {
+	// 避免把 nil 的 *assets.Service 装进接口（typed nil 不等于 nil）。
+	var cloneAssets voiceAssetStore
+	if assetSvc != nil {
+		cloneAssets = assetSvc
+	}
+	return &VoiceHandler{
+		voices:       voices,
+		cloneService: newProviderVoiceCloneService(models, voices, cloneAssets, ttsprovider.NewProvider),
+		assets:       assetSvc,
+	}
 }
 
 // GET /api/models/:id/voices?lang=zh
@@ -39,6 +55,22 @@ func (h *VoiceHandler) ListSystem(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, list)
+}
+
+// GET /api/voices/mine — 当前用户自建（含复刻）的音色，跨模型汇总
+func (h *VoiceHandler) ListMine(c *gin.Context) {
+	list, err := h.voices.ListByCreator(middleware.UserID(c), c.Query("lang"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 复刻音色用参考音频当试听：预签名 URL 只在响应时现算，不入库。
+	var previews map[string]string
+	if h.assets != nil {
+		previews = voicePreviewURLs(c.Request.Context(), h.assets, middleware.UserID(c), list)
+	}
+	c.JSON(http.StatusOK, withPreviews(list, previews))
 }
 
 // GET /api/models/:id/voices/:vid
@@ -170,6 +202,17 @@ func (h *VoiceHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
+
+	// 参考音频随音色级联删除：先删资源（对象 + 行）再删音色，避免留下失配数据。
+	if v.SourceAssetID != "" && h.assets != nil {
+		if err := h.assets.DeleteCascade(c.Request.Context(), v.Creator, v.SourceAssetID, assets.PurposeVoiceSample); err != nil {
+			writeVoiceAssetError(c, err)
+			return
+		}
+	} else if v.SourceAssetID != "" {
+		logging.Warnf("voice delete: skip sample asset %s cascade: object storage is not configured", v.SourceAssetID)
+	}
+
 	if err := h.voices.Delete(v.ID); err != nil {
 		if errors.Is(err, store.ErrSystemRecord) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "cannot delete system voice"})
@@ -181,9 +224,25 @@ func (h *VoiceHandler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// writeVoiceAssetError 把资源服务的错误映射为 HTTP 响应。
+func writeVoiceAssetError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, assets.ErrForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+	case errors.Is(err, assets.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "asset not found"})
+	case errors.Is(err, assets.ErrStorage):
+		logging.Errorf("Voice asset storage error: %v", err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "对象存储操作失败，请重试"})
+	default:
+		logging.Errorf("Voice asset error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器内部错误"})
+	}
+}
+
 // PATCH /internal/voices/:id — 更新系统音色字段
 func (h *VoiceHandler) AdminUpdate(c *gin.Context) {
-	var updates map[string]any
+	updates := make(map[string]any)
 	if err := c.ShouldBindJSON(&updates); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -230,35 +289,6 @@ func (h *VoiceHandler) AdminCreate(c *gin.Context) {
 		Emotions:    req.Emotions,
 		Extra:       req.Extra,
 		Creator:     "system",
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusCreated, v)
-}
-
-type cloneVoiceRequest struct {
-	VoiceID        string         `json:"voice_id" binding:"required"` // 厂商返回的复刻音色 ID
-	Name           string         `json:"name" binding:"required"`
-	SourceAudioURL string         `json:"source_audio_url" binding:"required"`
-	Langs          pq.StringArray `json:"langs"`
-}
-
-// POST /api/models/:id/voices/clone
-func (h *VoiceHandler) Clone(c *gin.Context) {
-	var req cloneVoiceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	v, err := h.voices.CreateCloned(store.CloneVoiceParams{
-		ModelID:        c.Param("id"),
-		VoiceID:        req.VoiceID,
-		Name:           req.Name,
-		SourceAudioURL: req.SourceAudioURL,
-		Langs:          req.Langs,
-		Creator:        middleware.UserID(c),
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

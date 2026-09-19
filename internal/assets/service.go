@@ -251,6 +251,26 @@ func (s *Service) Delete(ctx context.Context, ownerID, assetID string) error {
 	if Purpose(a.Purpose) != PurposeImage {
 		return ErrForbidden
 	}
+	return s.remove(ctx, a)
+}
+
+// DeleteCascade 级联删除领域资源（如音色删除时清掉参考音频）：校验归属与用途后
+// 删除对象与记录。记录已不存在视为成功，便于领域侧重试；用途不匹配返回 ErrForbidden。
+func (s *Service) DeleteCascade(ctx context.Context, ownerID, assetID string, purpose Purpose) error {
+	a, err := s.Get(ctx, ownerID, assetID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if Purpose(a.Purpose) != purpose {
+		return ErrForbidden
+	}
+	return s.remove(ctx, a)
+}
+
+func (s *Service) remove(ctx context.Context, a *store.Asset) error {
 	if err := s.backend.Delete(ctx, a.ObjectKey); err != nil {
 		return fmt.Errorf("%w: %v", ErrStorage, err)
 	}
@@ -303,15 +323,25 @@ func (s *Service) List(ctx context.Context, q ListQuery) ([]store.Asset, int64, 
 
 // PresignURL 生成临时访问 URL（纯本地计算）。download=true 时附带下载文件名。
 func (s *Service) PresignURL(ctx context.Context, a *store.Asset, download bool) (string, time.Duration, error) {
+	url, err := s.PresignURLWithTTL(ctx, a, s.presignTTL, download)
+	if err != nil {
+		return "", 0, err
+	}
+	return url, s.presignTTL, nil
+}
+
+// PresignURLWithTTL 用指定有效期生成临时访问 URL。消费方若不能立即取件
+// （例如厂商异步拉取参考音频），需要比默认 presign_ttl 更长的窗口。
+func (s *Service) PresignURLWithTTL(ctx context.Context, a *store.Asset, ttl time.Duration, download bool) (string, error) {
 	opts := storage.PresignOptions{}
 	if download {
 		opts.DownloadFileName = a.Name
 	}
-	url, err := s.backend.PresignGet(ctx, a.ObjectKey, s.presignTTL, opts)
+	url, err := s.backend.PresignGet(ctx, a.ObjectKey, ttl, opts)
 	if err != nil {
-		return "", 0, fmt.Errorf("%w: %v", ErrStorage, err)
+		return "", fmt.Errorf("%w: %v", ErrStorage, err)
 	}
-	return url, s.presignTTL, nil
+	return url, nil
 }
 
 // View 是资源对外的 JSON 形态：元数据 + 临时访问 URL。

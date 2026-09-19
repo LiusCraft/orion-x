@@ -2164,6 +2164,39 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/models/voice-cloning": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Voices"
+                ],
+                "summary": "List voice-cloning TTS models",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/models/{id}": {
             "get": {
                 "security": [
@@ -2435,6 +2468,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "The path model determines the provider and target model. The request body must include name and either source_asset_id (a voice_sample resource from POST /api/assets) or source_audio_url with format; prefix is optional and generated when omitted. The reference audio is signed on demand and only source_asset_id is persisted.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2448,13 +2482,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Model ID",
+                        "description": "Cloneable TTS model ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
-                        "description": "Source voice",
+                        "description": "Voice clone fields",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -2482,8 +2516,32 @@ const docTemplate = `{
                             "$ref": "#/definitions/main.errorResponse"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/main.errorResponse"
                         }
@@ -3746,6 +3804,47 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/voices/mine": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Voices"
+                ],
+                "summary": "List my voices",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by language code",
+                        "name": "lang",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/main.errorResponse"
                         }

@@ -276,6 +276,16 @@ func swaggerCreateModel() {}
 // @Router /api/models/types [get]
 func swaggerModelTypes() {}
 
+// swaggerListVoiceCloneModels lists TTS models that support voice cloning.
+// @Summary List voice-cloning TTS models
+// @Tags Voices
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} object
+// @Failure 401 {object} errorResponse
+// @Router /api/models/voice-cloning [get]
+func swaggerListVoiceCloneModels() {}
+
 // swaggerGetModel gets a model.
 // @Summary Get model
 // @Tags Models
@@ -320,6 +330,17 @@ func swaggerDeleteModel() {}
 // @Router /api/voices/system [get]
 func swaggerListSystemVoices() {}
 
+// swaggerListMyVoices lists the current user's own voices (cloned or manually added).
+// @Summary List my voices
+// @Tags Voices
+// @Produce json
+// @Security BearerAuth
+// @Param lang query string false "Filter by language code"
+// @Success 200 {array} object
+// @Failure 401 {object} errorResponse
+// @Router /api/voices/mine [get]
+func swaggerListMyVoices() {}
+
 // swaggerListVoices lists a model's voices.
 // @Summary List model voices
 // @Tags Voices
@@ -344,16 +365,17 @@ func swaggerListVoices() {}
 // @Router /api/models/{id}/voices [post]
 func swaggerCreateVoice() {}
 
-// swaggerCloneVoice clones a voice.
+// swaggerCloneVoice clones a voice with the selected TTS model.
 // @Summary Clone voice
+// @Description The path model determines the provider and target model. The request body must include name and either source_asset_id (a voice_sample resource from POST /api/assets) or source_audio_url with format; prefix is optional and generated when omitted. The reference audio is signed on demand and only source_asset_id is persisted.
 // @Tags Voices
 // @Accept json
 // @Produce json
 // @Security BearerAuth
-// @Param id path string true "Model ID"
-// @Param request body object true "Source voice"
+// @Param id path string true "Cloneable TTS model ID"
+// @Param request body object true "Voice clone fields"
 // @Success 201 {object} object
-// @Failure 400,401,404 {object} errorResponse
+// @Failure 400,401,403,404,422,502,503 {object} errorResponse
 // @Router /api/models/{id}/voices/clone [post]
 func swaggerCloneVoice() {}
 

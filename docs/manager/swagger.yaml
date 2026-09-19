@@ -1625,13 +1625,18 @@ paths:
     post:
       consumes:
       - application/json
+      description: The path model determines the provider and target model. The request
+        body must include name and either source_asset_id (a voice_sample resource
+        from POST /api/assets) or source_audio_url with format; prefix is optional
+        and generated when omitted. The reference audio is signed on demand and only
+        source_asset_id is persisted.
       parameters:
-      - description: Model ID
+      - description: Cloneable TTS model ID
         in: path
         name: id
         required: true
         type: string
-      - description: Source voice
+      - description: Voice clone fields
         in: body
         name: request
         required: true
@@ -1652,8 +1657,24 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/main.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/main.errorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/main.errorResponse'
       security:
@@ -1681,6 +1702,26 @@ paths:
       summary: List model types
       tags:
       - Models
+  /api/models/voice-cloning:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: object
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: List voice-cloning TTS models
+      tags:
+      - Voices
   /api/providers:
     get:
       produces:
@@ -2367,6 +2408,31 @@ paths:
       summary: Toggle voicebot MCP binding
       tags:
       - MCP
+  /api/voices/mine:
+    get:
+      parameters:
+      - description: Filter by language code
+        in: query
+        name: lang
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: object
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: List my voices
+      tags:
+      - Voices
   /api/voices/system:
     get:
       produces:
