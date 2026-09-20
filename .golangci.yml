@@ -10,3 +10,19 @@ linters:
     - ineffassign
     - staticcheck
     - unused
+    # 计费的领域层必须保持零依赖（不碰数据库、HTTP 框架、仓储），否则将来把计费
+    # 拆成独立服务时会被业务代码一起拖下水。这条规则靠工具盯住，不靠自觉。
+    - depguard
+  settings:
+    depguard:
+      rules:
+        billing-domain:
+          files:
+            - "**/internal/billing/*.go"
+          deny:
+            - pkg: "gorm.io/gorm"
+              desc: "计费领域层不能依赖数据库"
+            - pkg: "github.com/gin-gonic/gin"
+              desc: "计费领域层不能依赖 HTTP 框架"
+            - pkg: "github.com/liuscraft/orion-x/internal/store"
+              desc: "计费领域层不能依赖仓储实现"

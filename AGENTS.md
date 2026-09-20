@@ -53,6 +53,19 @@ Two entry points:
 | `internal/memory/` | Session buffer + SQLite long-term memory |
 | `internal/session/` | Chat session / message tracking |
 | `internal/text/` | Text segmenter, markdown filter, emotion tags |
+| `internal/billing/` | 计费纯领域层（item / price / money / engine / estimate / wire + port），零依赖 |
+| `internal/billing/service/` | 控制面：仓储、结算事务、worker、回收；唯一 import `internal/store` 的计费包 |
+| `internal/billing/client/` | 数据面：HTTP client + `Sink`（缓冲/重试/本地熔断）；唯一 import `net/http` 的计费包 |
+| `internal/store/billing_*.go` | 计费 9 张表的 GORM 模型与仓储，只被 `billing/service` 使用 |
+
+### 计费（`docs/billing-design.md`）
+
+所有计费模式都归一为 `quantity × unit_price`，差异只落在计量点、舍入/阶梯、价格匹配范围三处。职责切得很硬，改代码前先看 §19：
+
+- **数据面（wsserver）只上报事实**：`internal/audio` / `internal/agent` 只吐原始量（合成了多少 rune、厂商报了多少秒、各糪 token），`item_code` 的映射在 `internal/channels/billing.go`。会话开始走 `authorize` 准入，过程中本地聚合，turn/会话边界 flush。
+- **控制面（manager）独占钱**：定价、价格匹配、金额计算、余额、流水、对账。用量事件先落库（append-only 事实），再由 worker 幂等派生账单。
+- 领域层是零依赖包，`depguard` 规则（`.golangci.yml` 的 `billing-domain`）会拦住它 import gorm / gin / store。
+- 新增一个计费项 = 一条目录 seed（`internal/billing/item.go` + `internal/store/billing_seed.go`，两边要同步）+ 一条价格行 + 一个数据面埋点，不改结算代码。
 
 Design docs in `docs/` -- read before modifying major modules.
 
