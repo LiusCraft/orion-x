@@ -27,7 +27,6 @@ import {
 	Check,
 	User,
 	Wallet,
-	CreditCard,
 	ChevronRight,
 	Shield,
 	Tag,
@@ -93,7 +92,6 @@ const NAV_GROUPS: NavGroup[] = [
 		label: "计费",
 		items: [
 			{ to: "/billing/usage", icon: BarChart3, label: "用量与余额", end: false },
-			{ to: "/billing/recharge", icon: CreditCard, label: "余额充值", end: false },
 			{ to: "/billing/prices", icon: Tag, label: "价格公示", end: false },
 			{
 				to: "/billing/admin",

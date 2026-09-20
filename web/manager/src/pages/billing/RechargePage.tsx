@@ -285,12 +285,17 @@ export default function RechargePage() {
 	}
 
 	// billingOff 只管余额那一栏（它此时也没东西可显），currency 优先用充值配置里的。
-	const balance = summary?.balance_micro ?? 0;
+	// 还没开户的人显示「—」而不是 ¥0.00：没开户和余额为零不是一回事。
+	const balanceHint = summaryLoading
+		? null
+		: summary?.account
+			? formatMicro(summary.balance_micro, currency)
+			: "—";
 	const expiryHint = pending ? paymentExpiryHint(pending.expires_at) : null;
 
 	return (
 		<div className="min-h-full">
-			<Header balanceHint={summaryLoading ? null : formatMicro(balance, currency)} />
+			<Header balanceHint={balanceHint} />
 
 			<div className="px-8 py-6 space-y-4">
 				<Banner message={banner} onClose={() => setBanner(null)} />
