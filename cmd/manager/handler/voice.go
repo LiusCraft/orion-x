@@ -11,6 +11,7 @@ import (
 
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
 	"github.com/liuscraft/orion-x/internal/assets"
+	"github.com/liuscraft/orion-x/internal/billing"
 	"github.com/liuscraft/orion-x/internal/logging"
 	ttsprovider "github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/store"
@@ -23,8 +24,9 @@ type VoiceHandler struct {
 }
 
 // NewVoiceHandler 构造 VoiceHandler；assetSvc 为 nil 表示未配置对象存储，
-// 此时用 source_asset_id 的复刻请求会返回 503。
-func NewVoiceHandler(voices *store.ModelVoiceStore, models *store.AIModelStore, assetSvc *assets.Service) *VoiceHandler {
+// 此时用 source_asset_id 的复刻请求会返回 503。meter 为 nil 表示计费关闭（复刻
+// 音色不计费）。
+func NewVoiceHandler(voices *store.ModelVoiceStore, models *store.AIModelStore, assetSvc *assets.Service, meter billing.Meter) *VoiceHandler {
 	// 避免把 nil 的 *assets.Service 装进接口（typed nil 不等于 nil）。
 	var cloneAssets voiceAssetStore
 	if assetSvc != nil {
@@ -32,7 +34,7 @@ func NewVoiceHandler(voices *store.ModelVoiceStore, models *store.AIModelStore, 
 	}
 	return &VoiceHandler{
 		voices:       voices,
-		cloneService: newProviderVoiceCloneService(models, voices, cloneAssets, ttsprovider.NewProvider),
+		cloneService: newProviderVoiceCloneService(models, voices, cloneAssets, ttsprovider.NewProvider, meter),
 		assets:       assetSvc,
 	}
 }

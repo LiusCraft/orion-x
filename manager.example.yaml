@@ -37,3 +37,24 @@ storage:
   prefix: ""                                     # 可选 key 前缀，多环境共用一个桶时用 dev/prod
   presign_ttl: "15m"                             # 预签名 URL 有效期（列表、预览、下载都走它）
   max_upload_size: 52428800                      # 单文件上限 50MB（按用途还有更小的限制）
+
+# 服务间调用的共享 token（wsserver → manager 的 /internal/billing/*）。
+# 建议只走环境变量 INTERNAL_TOKEN，不落配置文件。
+#
+# 留空 = /internal/billing/* **拒绝一切请求**（不是“不鉴权”）：忘了配如果等于放行，
+# 那迟早会发生在生产上。存量 /internal/* 接口暂不受它影响。
+internal:
+  token: ""
+
+# 计费（控制面）。整段可以删掉：不写就是启用，用 service 的默认参数跑；
+# 只有显式写 enabled: false 才算关闭（关闭后 /api/billing/* 返回 503，结算 worker
+# 也不启动，内部接口不注册）。
+# billing:
+#   enabled: true                   # nil = 启用；显式 false 关闭
+#   currency: "CNY"                 # 单币种部署，P1 不做汇率
+#   reserve_seconds: 600            # 会话预冻结覆盖的时长，也是下发给数据面的 max_session_seconds
+#   reserve_rate_micro: 0           # 每秒预留额（微元）；0 = 按 duration 类计费项的单价估算
+#   settlement_mode: "async"        # sync | async（P1 默认 async）
+#   overdraft_policy: "deny"        # deny = 余额扣负就停服；allow = 挂账
+#   period_timezone: "Asia/Shanghai"  # 账期（自然月）的时区，默认 UTC
+#   signup_grant_micro: 5000000     # 新账户注册赠款总额（微元，5000000 = ¥5），按计费项均分

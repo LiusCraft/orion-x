@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -9,6 +11,8 @@ import (
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
 	_ "github.com/liuscraft/orion-x/docs/manager"
 	"github.com/liuscraft/orion-x/internal/assets"
+	"github.com/liuscraft/orion-x/internal/billing"
+	"github.com/liuscraft/orion-x/internal/billing/service"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/store"
 )
@@ -34,6 +38,8 @@ func newRouter(
 	voicebotKBs *store.VoicebotKBStore,
 	agentTemplates *store.AgentTemplateStore,
 	assetSvc *assets.Service,
+	internalToken string,
+	billingSvc *service.Service,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -63,11 +69,20 @@ func newRouter(
 	devH := handler.NewDeviceHandler(voicebots, devices)
 	providerH := handler.NewProviderHandler(providers)
 	modelH := handler.NewModelHandler(models)
-	voiceH := handler.NewVoiceHandler(voices, models, assetSvc)
+	// 计费关闭（billing.enabled: false）时 billingSvc 为 nil：业务模块拿到的是 nil
+	// 接口（不是“非 nil 接口 + nil 指针”，那样每个方法都会 panic），所有计费路由回 503。
+	var billingMeter billing.Meter
+	if billingSvc != nil {
+		billingMeter = billingSvc
+	}
+	voiceH := handler.NewVoiceHandler(voices, models, assetSvc, billingMeter)
 	langH := handler.NewLanguageHandler()
 	mcpH := handler.NewMCPHandler(mcpMarket, mcpServers, mcpBindings, voicebots)
 	internalH := handler.NewInternalHandler(voicebots, devices, models, voices, mcpBindings)
 	oauthH := handler.NewOAuthHandler(users, bindings, signToken)
+	billingInternalH := handler.NewInternalBillingHandler(billingSvc)
+	billingAdminH := handler.NewBillingAdminHandler(billingSvc)
+	billingUserH := handler.NewBillingUserHandler(billingSvc)
 
 	availableH := handler.NewAvailableHandler(providers, models, voices, assetSvc)
 	tplH := handler.NewAgentTemplateHandler(agentTemplates)
@@ -204,6 +219,32 @@ func newRouter(
 		// 语言字典（只读）
 		api.GET("/languages", jwtMw, langH.List)
 		api.GET("/languages/:code", jwtMw, langH.Get)
+
+		// 计费（§8）。管理端要 is_admin，用户端只要 JWT。
+		// GET /api/billing/prices 在两个面里都是同一个路径（§8 的设计表就是这样），
+		// Gin 不允许同一路径注册两次，所以只注册一条、按 is_admin 分流：管理员看全部
+		// 价格版本（带筛选参数），普通用户只看当前生效的平台标准价。
+		billingAdmin := api.Group("/billing", jwtMw, middleware.RequireAdmin())
+		billingAdmin.GET("/items", billingAdminH.Items)
+		billingAdmin.PUT("/items/:code", billingAdminH.SetItem)
+		billingAdmin.POST("/prices", billingAdminH.CreatePrice)
+		billingAdmin.PUT("/prices/:id", billingAdminH.UpdatePrice)
+		billingAdmin.DELETE("/prices/:id", billingAdminH.DeletePrice)
+		billingAdmin.GET("/accounts", billingAdminH.Accounts)
+		billingAdmin.POST("/accounts/:id/adjust", billingAdminH.AdjustAccount)
+		billingAdmin.GET("/ledger", billingAdminH.Ledger)
+		billingAdmin.GET("/stats", billingAdminH.Stats)
+
+		billingUser := api.Group("/billing", jwtMw)
+		billingUser.GET("/summary", billingUserH.Summary)
+		billingUser.GET("/usage", billingUserH.Usage)
+		api.GET("/billing/prices", jwtMw, func(c *gin.Context) {
+			if middleware.IsAdmin(c) {
+				billingAdminH.ListPrices(c)
+				return
+			}
+			billingUserH.Prices(c)
+		})
 	}
 
 	// Internal routes — intended for service-to-service calls within the same
@@ -226,6 +267,19 @@ func newRouter(
 		internal.POST("/agent-templates", tplH.AdminCreate)
 		internal.PUT("/agent-templates/:id", tplH.AdminUpdate)
 		internal.DELETE("/agent-templates/:id", tplH.AdminDelete)
+
+		// 数据面调的三个计费接口（§6.1）：路径常量在 internal/billing，这里只把
+		// 开头的 /internal 去掉（路由组已经带了）。
+		//
+		// 只给这三条挂 InternalAuth：存量 /internal/* 的调用方还带着一轮跟计费无关
+		// 的回归，P1 不动它们。计费关闭时不注册——不存在的端点该是 404，而不是一个
+		// 永远回 503 的空壳。
+		if billingSvc != nil {
+			internalAuth := middleware.InternalAuth(internalToken)
+			internal.POST(strings.TrimPrefix(billing.PathAuthorize, "/internal"), internalAuth, billingInternalH.Authorize)
+			internal.POST(strings.TrimPrefix(billing.PathUsageEvents, "/internal"), internalAuth, billingInternalH.UsageEvents)
+			internal.POST(strings.TrimPrefix(billing.PathSettle, "/internal"), internalAuth, billingInternalH.Settle)
+		}
 	}
 	return r
 }
