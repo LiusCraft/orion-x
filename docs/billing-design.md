@@ -824,6 +824,7 @@ type SubjectResolver interface {
 internal/billing/           纯领域：item / price / money / engine / estimate / wire + port 定义
 internal/billing/service/   控制面实现：仓储、结算事务、worker、回收 —— 唯一 import store 的地方
 internal/billing/client/    数据面客户端 + Sink 实现 —— 唯一 import net/http 的地方
+internal/billing/gateway/   出站支付网关适配器（epay），实现 domain 里的 PaymentGateway port
 ```
 
 `internal/store/billing_*.go` 只被 `billing/service` 用。领域包保持零依赖，数据面才能安全地引 wire 类型和 `Estimate`。
@@ -861,4 +862,28 @@ linters:
               desc: "计费领域层不能依赖仓储实现"
 ```
 
-这段我还没往 `.golangci.yml` 里放，因为仓里要求改完跑一遍 `golangci-lint run ./...`，而我在这边跑不了命令（终端不可用），规则语法没验证过。要加的话请先跑一次确认。
+这段已经在 `.golangci.yml` 里了：`billing-domain` 规则只匹配 `**/internal/billing/*.go`（领域包的直接子文件），所以 `service/` / `client/` / `gateway/` 这些子包不受它约束——它们本来就是实现，该碰数据库和 HTTP 就去碰。
+
+### 19.1 充值的接入（支付渠道 → 余额）
+
+按第一条规则推出来的形状，接一个支付渠道要写的代码只有三块，而且都不是结算代码：
+
+**数据面没有变化。** 充值不产生用量事件，`internal/audio` / `internal/agent` 一行都不用改。钱不经过 authorize → report → settle 这条链路，它是另一条更短的链路：
+
+```
+下单（pending）→ 网关收款 → 回调/对账（paid）→ 入账（credited）
+```
+
+**`billing_ledger` 的 `kind` / `ref_type` 用开放枚举，不改结算代码。** 充值写的是 `kind = recharge`、`ref_type = order`（`billing.RefOrder`），幂等键是 `credit:order:<out_trade_no>`（`billing.RechargeIdempotencyKey`）。回调可能重复、对账可能重扫、sweeper 可能重试，全靠这个键兜底。**不要给充值建 `billing_items` seed 和价格行**：它不是 `quantity × unit_price` 的计量项，只写余额与流水（`billing_grants` 那条路留给赠款——赠款和充值款必须分得开，否则退款和算实收全说不清，§12）。
+
+**不是计量项，所以没有价格匹配、没有阶梯、没有舍入。** 支付侧唯一涉及金额精度的判断是：网关的 `money` 只有两位小数，所以下单金额必须是整分（`amount_micro % billing.MicroPerCent == 0`），不整分就拒，而不是四舍五入——金额只允许被拒绝，不允许被悄悄改写。
+
+另外两张表 `billing_payment_orders` / `billing_payment_notifications` 不在原来的 9 张里。它们不是计费引擎的账，只是「钱进来之前」的单据，所以仓储也分开（`store.PaymentStore` 而不是挂在 `BillingStore` 上）。`paid` 与 `credited` 分成两个状态是有意的：网关确认收款和余额加上是两次写库，中间挂了由 sweeper 扫 `paid` 未入账补上，不会丢账也不会重复入账。
+
+接第二家渠道时新增 `internal/billing/gateway/<vendor>`，实现同一个 `billing.PaymentGateway` port；`service` / `store` / `handler` 都不用动。
+
+**退款的方向是反的，顺序必须是“先网关、后账”。** 入账（充值）可以先把钱落到余额再慢慢对账，退款不行：退款一旦让我们这边的余额变了，钱就已经“还”回去了，而网关那边的退款可能根本没发出去——那笔钱就凭空多出来了。所以 `RefundRecharge` 是「调网关 → 写 refund 流水 → 把订单推成 refunded」，每一步都幂等（网关对同一笔订单拒绝二次退款、流水走 `refund:order:<out_trade_no>` 幂等键、订单是条件更新）。残留窗口只有中间那一步：网关退成了而流水没写成——它不做自动重试（在网关那里重试等于再退一次），只打 error 日志等人工介入。
+
+退款只能**整单退**。部分退款会让订单状态和实退金额对不上，而且 `refund:order:<out_trade_no>` 这个幂等键就不够用了——真要做，先加一张退款单表，键换成 `refund:<refund_id>`。
+
+退款写的是 `kind = refund` 的 debit 流水，由 `Service.Refund` 完成（它和 `Credit` 是一对，都住 `charge.go`）。注意它**不会**拦透支：钱已经退出去了，余额就必须跟着变负——该不该拦是调用方的业务判断，不是记账的事。

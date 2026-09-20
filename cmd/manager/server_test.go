@@ -20,7 +20,7 @@ func newBillingTestRouter(t *testing.T, billingSvc *service.Service, internalTok
 	return newRouter(secret,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		sign, nil, nil, nil, nil, nil, nil, nil, nil,
-		internalToken, billingSvc)
+		internalToken, billingSvc, nil)
 }
 
 func hasRoute(r *gin.Engine, method, path string) bool {
@@ -83,6 +83,16 @@ func TestBillingRoutesWhenEnabled(t *testing.T) {
 		{http.MethodGet, "/api/billing/stats", true},
 		{http.MethodGet, "/api/billing/summary", true},
 		{http.MethodGet, "/api/billing/usage", true},
+		// 充值：同一个 /api/billing/recharge 下同时有静态路径（列表）与参数路径
+		// （查单），Gin 的路由树能共存；回调两条是匿名路由，绝不能挂 JWT。
+		{http.MethodPost, "/api/billing/recharge", true},
+		{http.MethodGet, "/api/billing/recharge", true},
+		{http.MethodGet, "/api/billing/recharge/config", true},
+		{http.MethodGet, "/api/billing/recharge/:out_trade_no", true},
+		{http.MethodPost, "/api/billing/recharge/:out_trade_no/refund", true},
+		{http.MethodPost, "/pay/epay/notify", true},
+		{http.MethodGet, "/pay/epay/notify", true},
+		{http.MethodGet, "/pay/epay/return", true},
 	}
 	for _, tc := range cases {
 		if got := hasRoute(r, tc.method, tc.path); got != tc.want {

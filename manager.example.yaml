@@ -57,4 +57,29 @@ internal:
 #   settlement_mode: "async"        # sync | async（P1 默认 async）
 #   overdraft_policy: "deny"        # deny = 余额扣负就停服；allow = 挂账
 #   period_timezone: "Asia/Shanghai"  # 账期（自然月）的时区，默认 UTC
-#   signup_grant_micro: 5000000     # 新账户注册赠款总额（微元，5000000 = ¥5），按计费项均分
+#   signup_grant_micro: 5000000     # 新账户注册赠款总额（微元，5000000 = ￥5），按计费项均分
+
+# 充值（支付渠道 → 余额）。整段可以删掉：不写就是**没接支付**，
+# /api/billing/recharge 回 503，其余功能不受影响（和 billing 段默认启用相反，
+# 支付默认关闭——没配商户密钥就启用，用户点「充值」那一刻才会失败）。
+#
+# 需要公网可达的回调地址：把 notify_url 指到 manager 的 /pay/epay/notify。
+# 商户密钥建议只走环境变量 EPAY_KEY，不落配置文件。
+#
+# 接入后建议在网关后台把 /pay/epay/notify 加进白名单/回源规则（如果网关有的话），
+# 并确认 notify_url 走的是直连而不是经过会丢掉 POST body 的缓存/代理。
+#
+payment:
+  enabled: true                     # nil 或 false = 未接入
+  api_base_url: "https://pay.example.com"  # 必须 https：查询/退款接口会带商户密钥
+  pid: 1001                         # 商户 ID
+  key: ""                           # 商户密钥（建议只走 EPAY_KEY 环境变量）
+  notify_url: "https://api.example.com/pay/epay/notify"  # 异步通知，公网可达
+  return_url: "https://www.example.com/pay/epay/return"  # 同步跳转（后端路由）
+  channels: ["epay:alipay", "epay:wxpay"]  # 开放哪些渠道，留空 = 全部
+  min_amount_micro: 1000000         # 单笔下限（微元，1000000 = ￥1）
+  max_amount_micro: 10000000000     # 单笔上限（微元，10000000000 = ￥10000）
+  order_ttl: "30m"                  # 订单有效期，超时后 sweeper 先查单再关单
+  subject_prefix: "余额充值 "        # 订单标题前缀（收银台上显示）
+  timeout: 30                       # 请求网关的超时秒数
+  debug: false                      # 打印 SDK 请求日志（含签名），生产别开

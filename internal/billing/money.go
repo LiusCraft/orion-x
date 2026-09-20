@@ -1,6 +1,7 @@
 package billing
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -10,6 +11,10 @@ import (
 // MicroPerUnit 是一个货币单位（元）对应的微单位数。全链路金额都用 int64
 // 微单位表示，不用浮点。
 const MicroPerUnit = 1_000_000
+
+// MicroPerCent 是一分钱（0.01 元）的微单位数。第三方支付网关的 money 字段通常
+// 只有两位小数，所以走支付渠道的金额必须是它的整数倍（见 gateway/epay）。
+const MicroPerCent = MicroPerUnit / 100
 
 // Rounding 是一次结算内的舍入口径。
 type Rounding string
@@ -99,6 +104,46 @@ func roundBig(numerator *big.Int, denominator int64, r Rounding) int64 {
 	default: // RoundingNone 与未知取值都退化为截断（QuoRem 已按 0 截断）
 	}
 	return quo.Int64()
+}
+
+// ParseMicro 是 FormatMicro 的逆：把货币字符串（"1"、"1.5"、"0.000001"）解析成
+// 微单位，最多 6 位小数。支付网关回调里的 money 就是这种字符串。
+//
+// 先解析再比较，不要用 float64 中转：金额比对的任何精度损失都是直接的钱。
+func ParseMicro(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, errors.New("billing: empty amount")
+	}
+	if strings.HasPrefix(s, "-") {
+		return 0, fmt.Errorf("billing: negative amount %q", s)
+	}
+
+	whole, frac, _ := strings.Cut(s, ".")
+	if whole == "" {
+		whole = "0"
+	}
+	if len(frac) > 6 {
+		return 0, fmt.Errorf("billing: amount %q is finer than a micro unit", s)
+	}
+	for len(frac) < 6 {
+		frac += "0"
+	}
+	for _, r := range whole + frac {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("billing: malformed amount %q", s)
+		}
+	}
+
+	w, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("billing: malformed amount %q: %w", s, err)
+	}
+	f, err := strconv.ParseInt(frac, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("billing: malformed amount %q: %w", s, err)
+	}
+	return w*MicroPerUnit + f, nil
 }
 
 // FormatMicro 把微单位金额格式化成货币字符串，供展示用（不做汇率换算）。

@@ -74,6 +74,25 @@ func ChargeIdempotencyKey(refType, refID string) string {
 	return "charge:" + refType + ":" + refID
 }
 
+// RechargeIdempotencyKey 是一笔充值入账的幂等键。
+//
+// 它必须与 Service.Credit 内部拼的键（"credit:" + RefType + ":" + RefID，RefType
+// 取 billing.RefOrder）逐字一致：充值走的是 Credit，重复的支付回调、对账补单、
+// worker 重试都靠这个键变成一次入账。支付模块用它在上报前先查账（LedgerExists），
+// 免得把“已经入过账”当成失败来重试。
+func RechargeIdempotencyKey(outTradeNo string) string {
+	return "credit:" + RefOrder + ":" + outTradeNo
+}
+
+// RefundIdempotencyKey 是一笔退款出账的幂等键。
+//
+// 与 Service.Refund 内部拼的键（"refund:" + RefType + ":" + RefID）逐字一致。
+// 一笔订单只支持**全额**退款，所以仅用订单号就能唯一确定这笔出账；真要支持部分
+// 退款，键里得再加退款单号，也就需要一张单独的退款单表了。
+func RefundIdempotencyKey(outTradeNo string) string {
+	return "refund:" + RefOrder + ":" + outTradeNo
+}
+
 // SettleIdempotencyKey 是会话结算的幂等键。
 func SettleIdempotencyKey(sessionID string) string {
 	return "settle:" + sessionID
