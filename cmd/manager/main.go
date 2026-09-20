@@ -17,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"github.com/liuscraft/orion-x/internal/apikey"
 	"github.com/liuscraft/orion-x/internal/assets"
 	"github.com/liuscraft/orion-x/internal/billing"
 	"github.com/liuscraft/orion-x/internal/billing/gateway/epay"
@@ -95,6 +96,13 @@ func main() {
 	}
 
 	users := store.NewUserStore(db)
+	// 访问密钥的可复制形态用派生密钥封在库里：主密钥就是 jwt.secret（已经是必须
+	// 保护的部署密钥），换 secret 会让旧密钥复制不可用，但认证不受影响。
+	boxKey, err := apikey.DeriveSecretKey([]byte(cfg.JWT.Secret))
+	if err != nil {
+		logging.Fatalf("derive api key secret box: %v", err)
+	}
+	apiKeys := store.NewAPIKeyStore(db, boxKey)
 	bindings := store.NewOAuthBindingStore(db)
 	voicebots := store.NewVoicebotStore(db)
 	devices := store.NewDeviceStore(db)
@@ -203,7 +211,7 @@ func main() {
 		paymentSvc.StartSweeper(workerCtx, time.Minute)
 	}
 
-	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc, paymentSvc)
+	r := newRouter(secret, users, apiKeys, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc, paymentSvc)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {

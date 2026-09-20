@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/liuscraft/orion-x/internal/apikey"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/provider"
@@ -35,6 +36,9 @@ type DeviceTGBotInfo struct {
 type Dependencies struct {
 	// DeviceCfgLoader 用于按设备 ID 加载配置（含 LLM/ASR/TTS/MCP 等）。
 	DeviceCfgLoader DeviceConfigLoader
+	// APIKeyAuth 校验客户端带来的访问密钥（xiaozhi 握手的接入鉴权）。
+	// nil = 无法校验：带了密钥的连接会被拒，不带密钥的照旧（见 AuthConfig）。
+	APIKeyAuth APIKeyAuthorizer
 	// Sessions and Tasks are process-wide so a task can be mounted from any
 	// channel into any currently active session.
 	Sessions  *session.Manager
@@ -44,6 +48,13 @@ type Dependencies struct {
 	// P1 只接 xiaozhi WS 通道：TG 那边的会话边界本来就模糊（一个聊天窗口可以活
 	// 好几天），硬套“一次连接 = 一次会话”会引出一堆没人答得上来的问题（§15.5）。
 	Billing BillingFactory
+}
+
+// APIKeyAuthorizer 把一次接入请求交给控制面判定。响应里的 Allowed=false 是正常
+// 结果（含机器可读的 RejectReason）；error 只表示“没走通”（控制面不可达、token
+// 不对、响应不合法），调用方必须按“验证不了就不放行”处理。
+type APIKeyAuthorizer interface {
+	Authorize(ctx context.Context, key, deviceID string) (apikey.AuthorizeResponse, error)
 }
 
 // Manager 管理多个 Channel 的生命周期。进程级单例。

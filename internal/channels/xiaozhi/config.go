@@ -17,6 +17,7 @@ type Config struct {
 	Server  ServerConfig  `yaml:"server"`
 	Health  HealthConfig  `yaml:"health"`
 	Manager ManagerConfig `yaml:"manager"`
+	Auth    AuthConfig    `yaml:"auth"`
 	Billing BillingConfig `yaml:"billing"`
 	Logging LoggingConfig `yaml:"logging"`
 }
@@ -35,9 +36,21 @@ type HealthConfig struct {
 // ManagerConfig holds the manager service URL and the internal service token.
 type ManagerConfig struct {
 	URL string `yaml:"url"`
-	// Token 是访问 /internal/billing/* 的 Bearer token，必须与 manager 的
-	// internal.token 一致。没配的话控制面会拒掉所有计费请求（§14.1）。
+	// Token 是访问 /internal/* 的 Bearer token（计费与接入鉴权都要），必须与
+	// manager 的 internal.token 一致。没配的话控制面会拒掉所有计费请求与密钥校验
+	// （§14.1），后者意味着带密钥的接入会被拒。
 	Token string `yaml:"token"`
+}
+
+// AuthConfig 是握手时的接入鉴权开关。
+//
+// 默认（RequireAPIKey=false）只校验“客户端主动带来的密钥”：带了就要对，不带就
+// 照旧按 device_id 接入——存量设备不带凭据，一刀切会全部连不上。打开开关后
+// 没有密钥的连接一律拒，用于把设备接入锁死。
+type AuthConfig struct {
+	// RequireAPIKey 为 true 时，只有带有效 API Key（apikey:scope:voice）的连接
+	// 才被接受。
+	RequireAPIKey bool `yaml:"require_api_key"`
 }
 
 // BillingConfig 是数据面计费的本地开关。

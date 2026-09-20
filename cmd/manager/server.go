@@ -10,6 +10,7 @@ import (
 	"github.com/liuscraft/orion-x/cmd/manager/handler"
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
 	_ "github.com/liuscraft/orion-x/docs/manager"
+	"github.com/liuscraft/orion-x/internal/apikey"
 	"github.com/liuscraft/orion-x/internal/assets"
 	"github.com/liuscraft/orion-x/internal/billing"
 	"github.com/liuscraft/orion-x/internal/billing/service"
@@ -20,6 +21,7 @@ import (
 func newRouter(
 	jwtSecret []byte,
 	users *store.UserStore,
+	apiKeys *store.APIKeyStore,
 	bindings *store.OAuthBindingStore,
 	voicebots *store.VoicebotStore,
 	devices *store.DeviceStore,
@@ -56,7 +58,7 @@ func newRouter(
 		if allowed {
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -66,6 +68,8 @@ func newRouter(
 	})
 
 	authH := handler.NewAuthHandler(users, bindings, signToken)
+	apiKeyH := handler.NewAPIKeyHandler(apiKeys, users)
+	apiKeyAuthH := handler.NewAPIKeyAuthorizeHandler(apiKeys, devices, voicebots)
 	botH := handler.NewVoicebotHandler(voicebots)
 	devH := handler.NewDeviceHandler(voicebots, devices)
 	providerH := handler.NewProviderHandler(providers)
@@ -108,15 +112,25 @@ func newRouter(
 		auth.GET("/oauth/:provider/login", oauthH.Login)
 		auth.GET("/oauth/:provider/callback", oauthH.Callback)
 
-		jwtMw := middleware.JWT(jwtSecret)
+		// 认证链：JWT 或 API Key；授权（API Key 的可达范围）在同一处完成。
+		authMw := middleware.Auth(jwtSecret, apiKeys)
 
-		authed := api.Group("/auth", jwtMw)
+		// 访问密钥：签发与管理都只从控制台会话走。API Key 自己调不了这里
+		// （middleware.Auth 的路由表里没有 /api/apikeys），也就没法自我提权。
+		keyRoutes := api.Group("/apikeys", authMw)
+		keyRoutes.GET("", apiKeyH.List)
+		keyRoutes.POST("", apiKeyH.Create)
+		// 唯一能取回明文的路径：验一次账号密码再解封（前端拿到就直接复制）。
+		keyRoutes.POST("/:id/reveal", apiKeyH.Reveal)
+		keyRoutes.DELETE("/:id", apiKeyH.Delete)
+
+		authed := api.Group("/auth", authMw)
 		authed.POST("/change-password", authH.ChangePassword)
 		authed.POST("/bind-email", authH.BindEmail)
 		authed.POST("/oauth/:provider/unbind", oauthH.Unbind)
 		authed.GET("/profile", authH.Profile)
 
-		bots := api.Group("/voicebots", jwtMw)
+		bots := api.Group("/voicebots", authMw)
 		bots.GET("", botH.List)
 		bots.POST("", botH.Create)
 		bots.GET("/:id", botH.Get)
@@ -129,7 +143,7 @@ func newRouter(
 		bots.PUT("/:id/devices/:did/channels/telegram", devH.SetTelegramChannel)
 		bots.DELETE("/:id/devices/:did/channels/telegram", devH.DeleteTelegramChannel)
 
-		pvd := api.Group("/providers", jwtMw)
+		pvd := api.Group("/providers", authMw)
 		pvd.GET("", providerH.List)
 		pvd.POST("", providerH.Create)
 		pvd.GET("/slugs", providerH.Slugs)
@@ -137,7 +151,7 @@ func newRouter(
 		pvd.PUT("/:id", providerH.Update)
 		pvd.DELETE("/:id", providerH.Delete)
 
-		mdl := api.Group("/models", jwtMw)
+		mdl := api.Group("/models", authMw)
 		mdl.GET("", modelH.List)
 		mdl.POST("", modelH.Create)
 		mdl.GET("/types", modelH.Types)
@@ -145,8 +159,8 @@ func newRouter(
 		mdl.GET("/:id", modelH.Get)
 		mdl.PUT("/:id", modelH.Update)
 		mdl.DELETE("/:id", modelH.Delete)
-		api.GET("/voices/system", jwtMw, voiceH.ListSystem)
-		api.GET("/voices/mine", jwtMw, voiceH.ListMine)
+		api.GET("/voices/system", authMw, voiceH.ListSystem)
+		api.GET("/voices/mine", authMw, voiceH.ListMine)
 		mdl.GET("/:id/voices", voiceH.List)
 		mdl.POST("/:id/voices", voiceH.Create)
 		mdl.POST("/:id/voices/clone", voiceH.Clone)
@@ -155,17 +169,17 @@ func newRouter(
 		mdl.DELETE("/:id/voices/:vid", voiceH.Delete)
 
 		// 可用资源（无 API key）
-		api.GET("/available-resources", jwtMw, availableH.List)
+		api.GET("/available-resources", authMw, availableH.List)
 
 		// 记忆管理（用户级）
-		data := api.Group("/data/memory", jwtMw)
+		data := api.Group("/data/memory", authMw)
 		data.GET("/agents", dataMemH.ListAgents)
 		data.GET("/agents/:agent_id/devices", dataMemH.ListDevices)
 		data.GET("/devices/:device_id/entries", dataMemH.ListEntries)
 		data.DELETE("/:id", dataMemH.DeleteMemory)
 
 		// 知识库管理
-		knowledgeData := api.Group("/data/knowledge", jwtMw)
+		knowledgeData := api.Group("/data/knowledge", authMw)
 		knowledgeData.GET("/knowledge_bases", dataKnowH.ListAllKBs)
 		knowledgeData.GET("/knowledge_bases/:kb_id", dataKnowH.GetKB)
 		knowledgeData.GET("/knowledge_bases/:kb_id/search", dataKnowH.SearchKB)
@@ -184,7 +198,7 @@ func newRouter(
 		knowledgeData.POST("/bots/:bot_id/knowledge_bases", dataKnowH.CreateKB)
 
 		// 资源（上传文件）：上传 / 浏览 / 预签名访问
-		assetRoutes := api.Group("/assets", jwtMw)
+		assetRoutes := api.Group("/assets", authMw)
 		assetRoutes.POST("", assetH.Upload)
 		assetRoutes.GET("", assetH.List)
 		assetRoutes.GET("/:id", assetH.Get)
@@ -192,25 +206,25 @@ func newRouter(
 		assetRoutes.DELETE("/:id", assetH.Delete)
 
 		// 智能体广场
-		api.GET("/agent-templates/system", jwtMw, tplH.ListSystem)
-		api.GET("/agent-templates/:id", jwtMw, tplH.Get)
-		api.POST("/agent-templates/:id/use", jwtMw, tplH.Use)
+		api.GET("/agent-templates/system", authMw, tplH.ListSystem)
+		api.GET("/agent-templates/:id", authMw, tplH.Get)
+		api.POST("/agent-templates/:id/use", authMw, tplH.Use)
 
 		// 预留：活跃会话列表
-		api.GET("/sessions", jwtMw, func(c *gin.Context) {
+		api.GET("/sessions", authMw, func(c *gin.Context) {
 			c.JSON(200, []any{})
 		})
 
 		// MCP 市场 & 用户级 MCP server CRUD
-		api.GET("/mcp/market", jwtMw, mcpH.ListMarket)
-		api.GET("/mcp/servers", jwtMw, mcpH.ListServers)
-		api.POST("/mcp/servers", jwtMw, mcpH.CreateServer)
-		api.POST("/mcp/test-connection", jwtMw, mcpH.TestConnection)
-		api.POST("/mcp/list-tools", jwtMw, mcpH.ListTools)
-		api.POST("/mcp/call-tool", jwtMw, mcpH.CallTool)
-		api.GET("/mcp/servers/:serverID", jwtMw, mcpH.GetServer)
-		api.PUT("/mcp/servers/:serverID", jwtMw, mcpH.UpdateServer)
-		api.DELETE("/mcp/servers/:serverID", jwtMw, mcpH.DeleteServer)
+		api.GET("/mcp/market", authMw, mcpH.ListMarket)
+		api.GET("/mcp/servers", authMw, mcpH.ListServers)
+		api.POST("/mcp/servers", authMw, mcpH.CreateServer)
+		api.POST("/mcp/test-connection", authMw, mcpH.TestConnection)
+		api.POST("/mcp/list-tools", authMw, mcpH.ListTools)
+		api.POST("/mcp/call-tool", authMw, mcpH.CallTool)
+		api.GET("/mcp/servers/:serverID", authMw, mcpH.GetServer)
+		api.PUT("/mcp/servers/:serverID", authMw, mcpH.UpdateServer)
+		api.DELETE("/mcp/servers/:serverID", authMw, mcpH.DeleteServer)
 
 		// voicebot MCP 绑定
 		bots.GET("/:id/mcps", mcpH.ListVoicebotMCPServers)
@@ -221,14 +235,14 @@ func newRouter(
 		// TG 绑定管理
 
 		// 语言字典（只读）
-		api.GET("/languages", jwtMw, langH.List)
-		api.GET("/languages/:code", jwtMw, langH.Get)
+		api.GET("/languages", authMw, langH.List)
+		api.GET("/languages/:code", authMw, langH.Get)
 
 		// 计费（§8）。管理端要 is_admin，用户端只要 JWT。
 		// GET /api/billing/prices 在两个面里都是同一个路径（§8 的设计表就是这样），
 		// Gin 不允许同一路径注册两次，所以只注册一条、按 is_admin 分流：管理员看全部
 		// 价格版本（带筛选参数），普通用户只看当前生效的平台标准价。
-		billingAdmin := api.Group("/billing", jwtMw, middleware.RequireAdmin())
+		billingAdmin := api.Group("/billing", authMw, middleware.RequireAdmin())
 		billingAdmin.GET("/items", billingAdminH.Items)
 		billingAdmin.PUT("/items/:code", billingAdminH.SetItem)
 		billingAdmin.POST("/prices", billingAdminH.CreatePrice)
@@ -239,7 +253,7 @@ func newRouter(
 		billingAdmin.GET("/ledger", billingAdminH.Ledger)
 		billingAdmin.GET("/stats", billingAdminH.Stats)
 
-		billingUser := api.Group("/billing", jwtMw)
+		billingUser := api.Group("/billing", authMw)
 		billingUser.GET("/summary", billingUserH.Summary)
 		billingUser.GET("/usage", billingUserH.Usage)
 		// 模型监控页的数据源：按模型 × 计费项聚合的用量，账户由控制面自己推。
@@ -250,7 +264,7 @@ func newRouter(
 		billingUser.GET("/recharge/:out_trade_no", paymentH.GetRecharge)
 		// 退款是真把钱退出去，只给 admin。
 		billingAdmin.POST("/recharge/:out_trade_no/refund", paymentH.RefundRecharge)
-		api.GET("/billing/prices", jwtMw, func(c *gin.Context) {
+		api.GET("/billing/prices", authMw, func(c *gin.Context) {
 			if middleware.IsAdmin(c) {
 				billingAdminH.ListPrices(c)
 				return
@@ -286,14 +300,18 @@ func newRouter(
 		internal.PUT("/agent-templates/:id", tplH.AdminUpdate)
 		internal.DELETE("/agent-templates/:id", tplH.AdminDelete)
 
-		// 数据面调的三个计费接口（§6.1）：路径常量在 internal/billing，这里只把
+		// 数据面调的计费接口（§6.1）：路径常量在 internal/billing，这里只把
 		// 开头的 /internal 去掉（路由组已经带了）。
 		//
-		// 只给这三条挂 InternalAuth：存量 /internal/* 的调用方还带着一轮跟计费无关
+		// 只给这几条挂 InternalAuth：存量 /internal/* 的调用方还带着一轮跟计费无关
 		// 的回归，P1 不动它们。计费关闭时不注册——不存在的端点该是 404，而不是一个
 		// 永远回 503 的空壳。
+		//
+		// 接在后面的 /internal/apikey/authorize 是 wsserver 握手的接入校验：它是个
+		// “密钥合法性预言机”，必须带内部 token。
+		internalAuth := middleware.InternalAuth(internalToken)
+		internal.POST(strings.TrimPrefix(apikey.PathAuthorize, "/internal"), internalAuth, apiKeyAuthH.Authorize)
 		if billingSvc != nil {
-			internalAuth := middleware.InternalAuth(internalToken)
 			internal.POST(strings.TrimPrefix(billing.PathAuthorize, "/internal"), internalAuth, billingInternalH.Authorize)
 			internal.POST(strings.TrimPrefix(billing.PathUsageEvents, "/internal"), internalAuth, billingInternalH.UsageEvents)
 			internal.POST(strings.TrimPrefix(billing.PathSettle, "/internal"), internalAuth, billingInternalH.Settle)

@@ -146,7 +146,7 @@ logging:
 | 模型与供应商 | 管理 API 供应商、ASR/TTS/LLM 模型和模型音色；按语言筛选可用资源 |
 | MCP | 浏览市场、维护私有 MCP 服务、测试连接/工具调用，并绑定到智能体 |
 | 数据 | 按智能体/设备查看与删除记忆；管理知识库、文档上传、URL 导入、检索和绑定 |
-| 账户 | 登录、修改密码、绑定邮箱、查看账户/API Key 与用量资源页面 |
+| 账户 | 登录、修改密码、绑定邮箱、签发/吊销 API Key（访问密钥）与用量资源页面 |
 
 构建静态前端：
 
@@ -159,6 +159,8 @@ make build-frontend
 ## WebSocket 接入
 
 小智 WebSocket 服务默认监听 `ws://HOST:8080/ws`。客户端在第一条文本帧发送 `hello`，其中 `device_id` 必填；服务端据此解析设备配置并返回协商后的会话参数。
+
+接入鉴权是可选的：升级请求带上控制台签发的 API Key（`Authorization: Bearer ox:sk:...` 或 `?access_token=ox:sk:...`，需勾选「语音接入」范围）时，服务端会校验密钥与设备属主，只能接入自己名下的设备；不带的连接照旧按 `device_id` 接入。要锁定为“无钥不入”，在 `wsserver.yaml` 里打开 `auth.require_api_key: true`（需要 `manager.token` 与 Manager 的 `internal.token` 一致）。
 
 ```json
 {
@@ -205,6 +207,9 @@ Manager API 默认位于 `http://localhost:9090`：
 - `/api/voicebots`、`/api/providers`、`/api/models`、`/api/mcp`：认证后的管理 API
 - `/api/data/memory`、`/api/data/knowledge`：记忆与知识库 API
 - `/api/assets`：资源上传、浏览与预签名访问（需配置对象存储）
+- `/api/apikeys`：签发、列出、删除访问密钥，验证账号密码后可再次复制明文
+
+访问密钥让程序化调用不必持有控制台会话，请求带 `X-API-Key: ox:sk:...` 或 `Authorization: Bearer ox:sk:...` 即可。它的可达范围只有智能体（`/api/voicebots`、`/api/agent-templates`）、MCP（`/api/mcp`）与数据（`/api/data/*`、`/api/assets`）三类接口，由权限范围 `apikey:scope:all` / `apikey:scope:read` / `apikey:scope:agent` / `apikey:scope:mcp` / `apikey:scope:data` 决定；`apikey:scope:voice` 不是 REST 命名空间，而是接入 wsserver 的会话凭据（见上文「WebSocket 接入」）。供应商密钥、模型与音色、计费、密钥管理仍然只认控制台 JWT。签发与管理只能在控制台会话里做——密钥自己调不了 `/api/apikeys`，所以不存在拿旧密钥换新密钥的提权路径。设计说明见 [docs/apikey-design.md](docs/apikey-design.md)。
 
 `/internal/*` 路由供 `wsserver` 在受信任网络内加载设备配置、写入记忆/会话轮次和执行知识检索使用，**没有 JWT 保护**。生产环境必须将 Manager 内部接口限制在私有网络或网关策略之后，不要直接暴露到公网。
 
@@ -223,6 +228,7 @@ Manager API 默认位于 `http://localhost:9090`：
 | `internal/knowledge/` | 文档解析、切分、向量化、pgvector 检索与 HTTP 客户端 |
 | `internal/storage/` | 对象存储适配层（S3 协议，兼容七牛 Kodo / MinIO / AWS S3） |
 | `internal/assets/` | 资源上传校验、对象键规则、元数据与预签名访问 |
+| `internal/apikey/` | 访问密钥领域层：凭据格式、摘要与权限范围判定 |
 | `internal/tools/` | 工具注册表、MCP 客户端、记忆/知识库工具 |
 | `internal/store/` | GORM 数据模型与 PostgreSQL 持久化 |
 | `pkg/pipeline/` | 线性与 DAG 流式处理管道 |

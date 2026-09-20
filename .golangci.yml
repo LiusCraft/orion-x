@@ -26,3 +26,15 @@ linters:
               desc: "计费领域层不能依赖 HTTP 框架"
             - pkg: "github.com/liuscraft/orion-x/internal/store"
               desc: "计费领域层不能依赖仓储实现"
+        # 访问密钥的领域层同样保持零依赖：凭据格式与权限范围判定要被数据面、
+        # 控制面、离线工具同时复用，不能跟某一层实现绑死。
+        apikey-domain:
+          files:
+            - "**/internal/apikey/*.go"
+          deny:
+            - pkg: "gorm.io/gorm"
+              desc: "访问密钥领域层不能依赖数据库"
+            - pkg: "github.com/gin-gonic/gin"
+              desc: "访问密钥领域层不能依赖 HTTP 框架"
+            - pkg: "github.com/liuscraft/orion-x/internal/store"
+              desc: "访问密钥领域层不能依赖仓储实现"

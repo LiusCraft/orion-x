@@ -18,6 +18,31 @@ xiaozhi-esp32-server 的设计（JSON 控制帧 + 二进制音频帧），但裁
 
 `type` 字段保持可扩展，未来需要再加。消息结构定义在 `internal/wsproto/`。
 
+## 接入鉴权（API Key）
+
+凭据在 **HTTP 升级请求**上，不在 JSON 帧里（协议本身不含 token 字段）：
+
+```
+GET /ws HTTP/1.1
+Authorization: Bearer ox:sk:...        # 或 /ws?access_token=ox:sk:...
+Device-Id: dev-1
+```
+
+- 凭据是控制台签发的访问密钥，必须带 `apikey:scope:voice` 范围；判定由 wsserver 问 manager
+  的 `/internal/apikey/authorize`（一次同步调用，超时 1s）。
+- **密钥只能接入自己名下的设备**：设备 → 智能体 → `owner_id` 要与密钥属主一致。范围不对、
+  设备不存在、设备属于别人，都是拒绝，理由分别是 `key:scope_missing` / `device:not_found` /
+  `device:owner_mismatch`。
+- 默认（`auth.require_api_key: false`）只在客户端**主动带**密钥时校验：带了就必须对，
+  不带就照旧按 `device_id` 接入（存量设备都不带凭据）。打开开关后没密钥的连接一律拒。
+- 不是我们格式的凭据（比如固件自带的随机 token）在默认模式下忽略，开关打开时视为没带。
+- 验证不了（manager 不可达 / 内部 token 没配 / 数据面没注入校验器）→ 拒绝（`key:unavailable`）：
+  取不到结论时不放行。
+- 拒绝的收尾与计费拒绝一致：先回一条 `hello`，再关闭连接，code 1008（policy violation），
+  reason 就是上面那串机器可读的原因。
+
+完整设计见 [apikey-design.md](apikey-design.md) §3.1。
+
 ## 消息格式
 
 ### hello（握手，双向）
@@ -260,3 +285,9 @@ macOS 上，任何加载过 Silero VAD（`mode=auto` 的连接）的进程在 `m
 - `sentence_end` 的正确解析依赖 `word_timestamp_enabled: true`（已硬编码在
   `sendRunTask` 的参数中），如果未来 DashScope API 变更导致该参数失效，需要
   相应调整 provider 层的检测逻辑。
+
+- 接入鉴权是**可选**的：默认只校验主动带 API Key 的连接。需要“无钥不入”的部署要
+  显式打开 `auth.require_api_key`（见 apikey-design.md §3.1）。
+
+- TG 通道不走 API Key：它按设备自己的 Bot Token 工作，没有“一次连接 = 一次会话”
+  的边界（见 billing-design.md §15.5）。

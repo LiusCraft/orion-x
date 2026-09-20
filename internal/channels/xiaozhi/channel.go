@@ -208,17 +208,25 @@ func (s *XiaozhiWSChannel) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.connWG.Add(1)
 	go func() {
 		defer s.connWG.Done()
-		s.handleConnection(conn)
+		s.handleConnection(conn, authorization)
 	}()
 }
 
 // handleConnection handles the full lifecycle of a single WebSocket connection.
-func (s *XiaozhiWSChannel) handleConnection(rawConn *websocket.Conn) {
+// credential 是握手 HTTP 层带来的接入凭据（Authorization / access_token），可能为空。
+func (s *XiaozhiWSChannel) handleConnection(rawConn *websocket.Conn, credential string) {
 	defer func() { _ = rawConn.Close() }()
 
 	hello, err := s.readHello(rawConn)
 	if err != nil {
 		logging.Warnf("xiaozhi-channel: handshake failed: %v", err)
+		return
+	}
+
+	// 接入鉴权：控制台签发的 API Key（apikey:scope:voice）可以接入自己名下的设备。
+	// 拒绝走与计费拒绝同一条路径：先回 hello 再发 Close，设备不会卡在等 hello。
+	if rejected := s.authorizeConnection(hello.DeviceID, credential); rejected != nil {
+		s.rejectConnection(rawConn, hello, rejected)
 		return
 	}
 

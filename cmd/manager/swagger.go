@@ -7,7 +7,7 @@
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
-// @description Enter a JWT as `Bearer <token>`.
+// @description Enter a JWT as `Bearer <token>`, or an API key as `Bearer ox:sk:...` (the `X-API-Key` header works too).
 //
 //nolint:unused // Swagger operation declarations below are consumed by swag at generation time.
 package main
@@ -61,6 +61,52 @@ func swaggerBindEmail() {}
 // @Failure 401,404 {object} errorResponse
 // @Router /api/auth/profile [get]
 func swaggerProfile() {}
+
+// swaggerListAPIKeys documents listing the caller's access keys.
+// @Summary List API keys
+// @Tags API Keys
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} object
+// @Failure 401 {object} errorResponse
+// @Router /api/apikeys [get]
+func swaggerListAPIKeys() {}
+
+// swaggerRevealAPIKey documents copying a key's plaintext after re-authenticating.
+// @Summary Reveal API key
+// @Tags API Keys
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "API key ID"
+// @Param request body object true "Account password"
+// @Success 200 {object} object
+// @Failure 400,403,404,409 {object} errorResponse
+// @Router /api/apikeys/{id}/reveal [post]
+func swaggerRevealAPIKey() {}
+
+// swaggerCreateAPIKey documents issuing an access key. The plaintext is returned
+// in this response too, so the caller can copy it without re-authenticating.
+// @Summary Create API key
+// @Tags API Keys
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body object true "Name and permission scopes (apikey:scope:*)"
+// @Success 201 {object} object
+// @Failure 400,401 {object} errorResponse
+// @Router /api/apikeys [post]
+func swaggerCreateAPIKey() {}
+
+// swaggerDeleteAPIKey documents revoking an access key.
+// @Summary Delete API key
+// @Tags API Keys
+// @Security BearerAuth
+// @Param id path string true "API key ID"
+// @Success 204
+// @Failure 401,404 {object} errorResponse
+// @Router /api/apikeys/{id} [delete]
+func swaggerDeleteAPIKey() {}
 
 // swaggerVoicebots documents voicebot collection operations.
 // @Summary List voicebots
@@ -829,6 +875,17 @@ func swaggerLanguage() {}
 // @Failure 400,404 {object} errorResponse
 // @InternalRouter /internal/device-config [get]
 func swaggerInternalDeviceConfig() {}
+
+// swaggerInternalAPIKeyAuthorize documents the WebSocket handshake access check.
+// @Summary Authorize a voice session with an API key
+// @Tags Internal
+// @Accept json
+// @Produce json
+// @Param request body object true "key and device_id"
+// @Success 200 {object} object
+// @Failure 400,401,500 {object} errorResponse
+// @InternalRouter /internal/apikey/authorize [post]
+func swaggerInternalAPIKeyAuthorize() {}
 
 // swaggerInternalVoiceCreate creates a system voice.
 // @Summary Create system voice

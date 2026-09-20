@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	apikeyclient "github.com/liuscraft/orion-x/internal/apikey/client"
 	billingclient "github.com/liuscraft/orion-x/internal/billing/client"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/anthropic/messages"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
@@ -115,9 +116,17 @@ func main() {
 
 	// Shared dependencies for channels
 	deviceCfgLoader := xiaozhi.NewHTTPDeviceConfigLoader(cfg.Manager.URL)
+	apiKeyAuth := apikeyclient.New(apikeyclient.Config{
+		BaseURL: cfg.Manager.URL,
+		Token:   cfg.Manager.Token,
+	})
+	if cfg.Auth.RequireAPIKey && strings.TrimSpace(cfg.Manager.Token) == "" {
+		logging.Warnf("auth: require_api_key is on but manager.token is empty — every connection will be rejected")
+	}
 	sessions := session.NewManager()
 	deps := &channels.Dependencies{
 		DeviceCfgLoader: deviceCfgLoader,
+		APIKeyAuth:      apiKeyAuth,
 		Sessions:        sessions,
 		Tasks:           task.NewRegistry(sessions),
 		Providers:       provider.NewPool(),

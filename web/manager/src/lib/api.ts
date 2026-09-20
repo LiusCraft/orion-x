@@ -90,6 +90,38 @@ export const authApi = {
 		}>("/auth/profile"),
 };
 
+export type ApiKeyScope =
+	| "apikey:scope:all"
+	| "apikey:scope:read"
+	| "apikey:scope:agent"
+	| "apikey:scope:mcp"
+	| "apikey:scope:data"
+	| "apikey:scope:voice";
+
+export interface ApiKey {
+	id: string;
+	name: string;
+	/** 明文只在创建响应里出现一次，列表接口不会返回它。 */
+	key?: string;
+	masked_key: string;
+	scopes: ApiKeyScope[];
+	call_count: number;
+	last_used_at?: string;
+	created_at: string;
+}
+
+// 访问密钥：程序化调用凭据。签发、管理、复制明文都只能从控制台会话走，
+// 复制明文还要再验一次账号密码。
+export const apiKeyApi = {
+	list: () => http.get<ApiKey[]>("/apikeys"),
+	create: (name: string, scopes: ApiKeyScope[]) =>
+		http.post<ApiKey>("/apikeys", { name, scopes }),
+	// 明文在服务端是加密保存的，只有验证账号密码后才会解开返回。
+	reveal: (id: string, password: string) =>
+		http.post<{ key: string }>(`/apikeys/${id}/reveal`, { password }),
+	remove: (id: string) => http.delete(`/apikeys/${id}`),
+};
+
 export const voicebotApi = {
 	list: () => http.get<Voicebot[]>("/voicebots"),
 	get: (id: string) => http.get<Voicebot>(`/voicebots/${id}`),

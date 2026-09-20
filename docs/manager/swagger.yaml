@@ -12,6 +12,124 @@ info:
   title: Orion X Manager API
   version: "1.0"
 paths:
+  /api/apikeys:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: object
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: List API keys
+      tags:
+      - API Keys
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Name and permission scopes (apikey:scope:*)
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create API key
+      tags:
+      - API Keys
+  /api/apikeys/{id}:
+    delete:
+      parameters:
+      - description: API key ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete API key
+      tags:
+      - API Keys
+  /api/apikeys/{id}/reveal:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: API key ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Account password
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Reveal API key
+      tags:
+      - API Keys
   /api/assets:
     get:
       parameters:
@@ -2455,7 +2573,8 @@ paths:
       - Voices
 securityDefinitions:
   BearerAuth:
-    description: Enter a JWT as `Bearer <token>`.
+    description: Enter a JWT as `Bearer <token>`, or an API key as `Bearer ox:sk:...`
+      (the `X-API-Key` header works too).
     in: header
     name: Authorization
     type: apiKey

@@ -9,6 +9,14 @@ manager:
   url: "http://localhost:9090"   # manager 服务地址，用于查询设备配置
   token: ""                      # 服务间调用凭据，必须与 manager 的 internal.token 一致
                                 # 建议只走环境变量 MANAGER_TOKEN；留空则控制面会拒掉所有计费请求
+                                # 与 API Key 校验（后者会让带密钥的接入被拒）
+
+auth:
+  # 默认 false：只在客户端主动带 API Key（Authorization: Bearer ox:sk:... 或
+  # ?access_token=ox:sk:...）时校验——带了就必须对，且设备要属于该密钥的属主；
+  # 不带就照旧按 device_id 接入（存量设备都不带凭据）。
+  # true：所有连接必须带 apikey:scope:voice 的密钥，否则拒绝（Close 1008）。
+  require_api_key: false
 
 # 计费（数据面）。整段可以删掉：不写就是启用。
 # billing:

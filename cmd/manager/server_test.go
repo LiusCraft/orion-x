@@ -18,7 +18,7 @@ func newBillingTestRouter(t *testing.T, billingSvc *service.Service, internalTok
 	secret := []byte("test-secret")
 	sign := func(userID string, isAdmin bool) (string, error) { return signToken(secret, userID, isAdmin) }
 	return newRouter(secret,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		sign, nil, nil, nil, nil, nil, nil, nil, nil,
 		internalToken, billingSvc, nil)
 }

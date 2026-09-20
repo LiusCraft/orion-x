@@ -41,6 +41,7 @@ Two entry points:
 | Package | Role |
 | --- | --- |
 | `internal/config/` | JSON config loader + validation |
+| `internal/apikey/` | 访问密钥领域层：凭据格式、摘要、权限范围判定（零依赖） |
 | `internal/logging/` | Zap wrapper; use `logging.Infof/Errorf/...` (not std lib `log`) |
 | `internal/agent/` | LLM agent with tool calling loop |
 | `internal/pipeline/` | Linear + DAG pipeline: `Stage` interface, `Builder`/`DAGBuilder`, `Message` bus |
@@ -81,6 +82,16 @@ Two entry points:
 - `paid` 与 `credited` 分开落库；manager 里有个每分钟的 sweeper 扫 `paid` 未入账补账、扫过期未付主动查单。改动这两段时记得它们要幂等。
 - 退款（`POST /api/billing/recharge/:out_trade_no/refund`，仅 admin）是**先让网关退钱、再改自己的账**：顺序反了的话，网关调用挂了而账已经退了，钱就凭空多出来。整单退，不支持部分退款（那需要一张单独退款单表），幂等键 `refund:order:<out_trade_no>`（`billing.RefundIdempotencyKey`），出账走 `service.Service.Refund`（`kind = refund`）。
 
+### 访问密钥（`internal/apikey`，设计见 `docs/apikey-design.md`）
+
+密钥是用户自建的**程序化调用凭据**，用来在控制台会话之外调 Manager API：
+
+- **明文可复制，但要重验身份**：认证走 `key_hash`（SHA-256）；可复制形态是 `key_secret`（AES-256-GCM，密钥由 `jwt.secret` 经 HKDF 派生，换 secret 后旧密文解不开但密钥照旧能用）。`POST /api/apikeys/:id/reveal` 验过账号密码才解密返回，列表页只有脱敏串。
+- **默认拒绝**：`cmd/manager/middleware/apikey.go` 的 `apiKeyRouteScopes` 是唯一允许 API Key 触达的路由表（agent / mcp / data 三个命名空间），表外路由（供应商密钥、模型、计费、密钥管理）只认控制台会话。新增路由不必记得加白名单。
+- **密钥管不了密钥**：签发、删除、复制都只在控制台会话里做，密钥自己调不了 `/api/apikeys`，没有“旧钥换新钥”的提权路径。
+- **范围语义**：`apikey:scope:all` 可写表内的全部命名空间并可用于 wsserver 接入，`apikey:scope:read` 只放行安全方法，其余取值按命名空间命中；`apikey:scope:voice` 不对应 REST，而是握手时的设备接入凭据（数据面走 `/internal/apikey/authorize` 问控制面，取不到结论就拒）。
+- 认证与授权都写在 `middleware.Auth` 里（不拆两个中间件），这样“新路由忘了挂授权”不可能发生。
+
 Design docs in `docs/` -- read before modifying major modules.
 
 ## Naming conventions
@@ -90,6 +101,7 @@ Design docs in `docs/` -- read before modifying major modules.
 - 计费项：`llm:tokens:input`、`tts:characters`、`voice:clone`
 - 枚举值：`voice:clone`（meter source）、`half:up`（rounding）、`usage:event`（ref type）
 - 幂等键：`settle:<event_id>`、`voice:clone:<voice_id>`、`credit:order:<out_trade_no>`、`refund:order:<out_trade_no>`
+- 权限范围：`apikey:scope:all`、`apikey:scope:read`、`apikey:scope:voice`；密钥前缀：`ox:sk:`
 
 不适用，保持原样：
 
