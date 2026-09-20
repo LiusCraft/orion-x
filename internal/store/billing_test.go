@@ -82,6 +82,7 @@ func newDryRunBillingStore(t *testing.T) (*BillingStore, *sqlRecorder) {
 // DryRun 下写操作不会真的执行，RowsAffected 为 0，所以断言里要容忍 ErrNotFound。
 func TestBillingStoreSQL(t *testing.T) {
 	at := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	dayAfter := at.Add(24 * time.Hour)
 
 	tests := []struct {
 		name       string
@@ -298,6 +299,40 @@ func TestBillingStoreSQL(t *testing.T) {
 				`GROUP BY "item_code"`,
 			},
 			wantErr: gorm.ErrDryRunModeUnsupported, // Scan 在 DryRun 下没有行可扫
+		},
+		{
+			// 报表要按模型看用量：分组键必须带上 item_code（不同计费项单位不同，加不到
+			// 一起），状态上只排掉 rejected——pending / skipped / unpaid 正是排查时
+			// 要看见的“量到了但没算成钱”。
+			name: "sum usage by model joins the model metadata and keeps every non-rejected event",
+			run: func(s *BillingStore) error {
+				_, err := s.SumUsageByModel(UsageByModelQuery{
+					AccountID: "acct-1",
+					From:      &at,
+					To:        &dayAfter,
+					Limit:     500,
+				})
+				return err
+			},
+			wantSQL: []string{
+				`SELECT billing_usage_events.aimodel_id AS aimodel_id,`,
+				`LEFT JOIN ai_models ON ai_models.id = billing_usage_events.aimodel_id`,
+				`LEFT JOIN providers ON providers.id = COALESCE(ai_models.provider_id, billing_usage_events.provider_id)`,
+				`COALESCE(ai_models.name, '') AS model_name`,
+				`SUM(CASE WHEN billing_usage_events.status = 'charged' THEN billing_usage_events.amount_micro ELSE 0 END) AS amount_micro`,
+				`SUM(CASE WHEN billing_usage_events.status = 'pending' THEN 1 ELSE 0 END) AS pending_events`,
+				`SUM(CASE WHEN billing_usage_events.status = 'unpaid' THEN 1 ELSE 0 END) AS unpaid_events`,
+				`SUM(CASE WHEN billing_usage_events.status = 'skipped' THEN 1 ELSE 0 END) AS skipped_events`,
+				`billing_usage_events.status <> 'rejected'`,
+				`billing_usage_events.account_id = 'acct-1'`,
+				`billing_usage_events.occurred_at >= '2026-09-20 10:00:00'`,
+				`billing_usage_events.occurred_at < '2026-09-21 10:00:00'`,
+				`GROUP BY billing_usage_events.aimodel_id, billing_usage_events.item_code, ai_models.name,`,
+				`ORDER BY billing_usage_events.aimodel_id ASC,billing_usage_events.item_code ASC`,
+				`LIMIT 500`,
+			},
+			notWantSQL: []string{`FOR UPDATE`},
+			wantErr:    gorm.ErrDryRunModeUnsupported, // Scan 在 DryRun 下没有行可扫
 		},
 		{
 			name: "list accounts escapes the keyword and groups the OR",

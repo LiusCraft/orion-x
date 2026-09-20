@@ -113,6 +113,7 @@ func TestBillingHandlersAreUnavailableWhenDisabled(t *testing.T) {
 		{name: "admin stats", handler: admin.Stats, request: "/api/billing/stats"},
 		{name: "user summary", handler: user.Summary, request: "/api/billing/summary"},
 		{name: "user usage", handler: user.Usage, request: "/api/billing/usage"},
+		{name: "user usage by model", handler: user.ModelUsage, request: "/api/billing/usage-by-model"},
 		{name: "user prices", handler: user.Prices, request: "/api/billing/prices"},
 	}
 
