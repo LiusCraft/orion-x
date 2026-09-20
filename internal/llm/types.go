@@ -267,6 +267,14 @@ const (
 	StopReasonUnknown       StopReason = "unknown"
 )
 
+// Usage 是归一（互斥）口径的 LLM 用量：各字段之间不重叠、不包含关系。
+//
+//   - InputTokens 已剔除 CacheReadTokens + CacheWriteTokens；
+//   - OutputTokens 已剔除 ReasoningTokens；
+//   - TotalTokens 保持厂商报的原始总量（不是上面几项之和，也别拿它当计费量）。
+//
+// 各 adapter 负责在写入时做减法（见 docs/billing-design.md §13）；只需要
+// “总共用了多少”的调用方必须自己把需要的字段加起来。
 type Usage struct {
 	InputTokens       int64           `json:"input_tokens"`
 	OutputTokens      int64           `json:"output_tokens"`

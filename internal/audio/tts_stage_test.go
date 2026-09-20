@@ -16,6 +16,7 @@ import (
 type mockTTSProcessor struct {
 	mu             sync.Mutex
 	onChunk        func(TTSChunk)
+	onSynthesis    func(Synthesis)
 	writeCalls     []string
 	writeErr       error
 	flushCalls     int
@@ -40,6 +41,12 @@ func (m *mockTTSProcessor) OnChunk(fn func(TTSChunk)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onChunk = fn
+}
+
+func (m *mockTTSProcessor) OnSynthesis(fn func(Synthesis)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onSynthesis = fn
 }
 
 func (m *mockTTSProcessor) Interrupt() error {

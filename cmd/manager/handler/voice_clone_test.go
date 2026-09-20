@@ -164,7 +164,7 @@ func TestProviderVoiceCloneServiceListModels(t *testing.T) {
 	unknownTarget.ModelID = "unknown-model"
 
 	models := &fakeVoiceCloneModelStore{list: []store.AIModel{wrongCategory, unknownTarget, unconfigured, configured}}
-	service := newProviderVoiceCloneService(models, &fakeVoiceCloneVoiceStore{}, nil, nil)
+	service := newProviderVoiceCloneService(models, &fakeVoiceCloneVoiceStore{}, nil, nil, nil)
 
 	got, err := service.ListModels("user-1")
 	if err != nil {
@@ -198,7 +198,7 @@ func TestProviderVoiceCloneServiceClone(t *testing.T) {
 	service := newProviderVoiceCloneService(models, voices, nil, func(cfg ttsprovider.ProviderConfig) (ttsprovider.Synthesizer, error) {
 		providerConfig = cfg
 		return cloner, nil
-	})
+	}, nil)
 
 	got, err := service.Clone(context.Background(), model.ID, "user-1", cloneVoiceRequest{
 		Name:           "  My cloned voice  ",
@@ -283,7 +283,7 @@ func TestProviderVoiceCloneServiceCloneFromAsset(t *testing.T) {
 	cloner := &fakeVoiceCloner{result: &ttsprovider.VoiceCloneResult{VoiceID: "provider-voice"}}
 	service := newProviderVoiceCloneService(models, voices, assetSvc, func(ttsprovider.ProviderConfig) (ttsprovider.Synthesizer, error) {
 		return cloner, nil
-	})
+	}, nil)
 
 	if _, err := service.Clone(context.Background(), model.ID, "user-1", cloneVoiceRequest{
 		Name:          "My voice",
@@ -354,7 +354,7 @@ func TestProviderVoiceCloneServiceRejectsInvalidSourceAsset(t *testing.T) {
 			service := newProviderVoiceCloneService(models, &fakeVoiceCloneVoiceStore{}, tc.assets, func(ttsprovider.ProviderConfig) (ttsprovider.Synthesizer, error) {
 				t.Fatal("provider constructor must not be called")
 				return nil, nil
-			})
+			}, nil)
 
 			_, err := service.Clone(context.Background(), model.ID, "user-1", cloneVoiceRequest{Name: "My voice", SourceAssetID: "asset-1"})
 			if !errors.Is(err, tc.wantErr) {
@@ -378,7 +378,7 @@ func TestVoiceCloneHandlers(t *testing.T) {
 	assetSvc := &fakeVoiceCloneAssets{asset: voiceSampleAsset("asset-1", "sample.wav"), presignURL: "https://storage.test/sample.wav?signature=stub"}
 	service := newProviderVoiceCloneService(models, voices, assetSvc, func(ttsprovider.ProviderConfig) (ttsprovider.Synthesizer, error) {
 		return cloner, nil
-	})
+	}, nil)
 	handler := &VoiceHandler{cloneService: service}
 
 	router := gin.New()
@@ -466,7 +466,7 @@ func TestProviderVoiceCloneServiceRejectsForeignModel(t *testing.T) {
 	service := newProviderVoiceCloneService(models, &fakeVoiceCloneVoiceStore{}, nil, func(ttsprovider.ProviderConfig) (ttsprovider.Synthesizer, error) {
 		t.Fatal("provider constructor must not be called")
 		return nil, nil
-	})
+	}, nil)
 
 	_, err := service.Clone(context.Background(), model.ID, "user-1", cloneVoiceRequest{})
 	if !errors.Is(err, errVoiceCloneForbidden) {

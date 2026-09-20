@@ -22,7 +22,8 @@ import MyModelsPage from "@/pages/models/MyModelsPage";
 import ProvidersPage from "@/pages/models/ProvidersPage";
 
 import UsagePage from "@/pages/billing/UsagePage";
-import ResourcesPage from "@/pages/billing/ResourcesPage";
+import PricesPage from "@/pages/billing/PricesPage";
+import AdminBillingPage from "@/pages/billing/AdminBillingPage";
 
 import AccountPage from "@/pages/AccountPage";
 import ApiKeysPage from "@/pages/ApiKeysPage";
@@ -33,13 +34,20 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 	return <>{children}</>;
 }
 
+/** 管理端的计费页面只给 admin 看；其他人回自己的用量页。 */
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+	const { isAdmin } = useAuthStore();
+	if (!isAdmin) return <Navigate to="/billing/usage" replace />;
+	return <>{children}</>;
+}
+
 /** Handles OAuth redirect and redirects authenticated users away from /login. */
 function RootRoute() {
+	const { token } = useAuthStore();
 	const params = new URLSearchParams(window.location.search);
 	if (params.has("token") || params.has("error")) {
 		return <LoginPage />;
 	}
-	const { token } = useAuthStore();
 	return <Navigate to={token ? "/agents" : "/login"} replace />;
 }
 
@@ -83,7 +91,15 @@ export default function App() {
 
 					{/* Billing */}
 					<Route path="/billing/usage" element={<UsagePage />} />
-					<Route path="/billing/resources" element={<ResourcesPage />} />
+					<Route path="/billing/prices" element={<PricesPage />} />
+					<Route
+						path="/billing/admin"
+						element={
+							<RequireAdmin>
+								<AdminBillingPage />
+							</RequireAdmin>
+						}
+					/>
 
 					{/* Account & Keys */}
 					<Route path="/account" element={<AccountPage />} />

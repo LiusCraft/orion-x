@@ -40,6 +40,10 @@ type Dependencies struct {
 	Sessions  *session.Manager
 	Tasks     *task.Registry
 	Providers *provider.Pool
+	// Billing 为每个设备会话创建一个计费句柄；nil = 计费关闭（所有调用 no-op）。
+	// P1 只接 xiaozhi WS 通道：TG 那边的会话边界本来就模糊（一个聊天窗口可以活
+	// 好几天），硬套“一次连接 = 一次会话”会引出一堆没人答得上来的问题（§15.5）。
+	Billing BillingFactory
 }
 
 // Manager 管理多个 Channel 的生命周期。进程级单例。

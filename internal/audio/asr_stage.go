@@ -47,13 +47,17 @@ func (s *ASRStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 		if !result.IsFinal {
 			return // 中间结果不走 pipeline，外部通过 ASRProcessor 回调直接处理
 		}
+		metadata := pipeline.Metadata{
+			Timestamp: time.Now(),
+		}
+		if result.UsageSeconds > 0 {
+			metadata.Extra = map[string]interface{}{MetadataASRSecondsKey: result.UsageSeconds}
+		}
 		select {
 		case output <- pipeline.Message{
-			Type:    pipeline.MessageTypeData,
-			Payload: result.Text,
-			Metadata: pipeline.Metadata{
-				Timestamp: time.Now(),
-			},
+			Type:     pipeline.MessageTypeData,
+			Payload:  result.Text,
+			Metadata: metadata,
 		}:
 		case <-ctx.Done():
 		}
@@ -136,6 +140,22 @@ func (s *ASRStage) Process(ctx context.Context, input <-chan pipeline.Message) <
 	}()
 
 	return output
+}
+
+// MetadataASRSecondsKey 是 pipeline.Message.Metadata.Extra 里携带厂商 ASR 时长的键。
+const MetadataASRSecondsKey = "asr_audio_seconds"
+
+// ASRSecondsFromMetadata 从消息元数据里取出 ASR 厂商时长（秒）。
+func ASRSecondsFromMetadata(md pipeline.Metadata) (int64, bool) {
+	if md.Extra == nil {
+		return 0, false
+	}
+	raw, ok := md.Extra[MetadataASRSecondsKey]
+	if !ok {
+		return 0, false
+	}
+	seconds, ok := raw.(int64)
+	return seconds, ok
 }
 
 func (s *ASRStage) readFromSource(ctx context.Context) {

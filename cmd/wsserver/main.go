@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	billingclient "github.com/liuscraft/orion-x/internal/billing/client"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/anthropic/messages"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai/responses"
@@ -27,6 +28,35 @@ import (
 	"github.com/liuscraft/orion-x/internal/channels/tg"
 	"github.com/liuscraft/orion-x/internal/channels/xiaozhi"
 )
+
+// newBillingFactory 构造数据面的计费接线。
+//
+// 返回 nil 表示计费关闭：通道层拿到 nil 后所有调用 no-op（cmd/voicebot 与 TG 通道
+// 就是这种）。计费只上报事实，定价与账户都在 manager 那边（docs/billing-design.md §6 / §19）。
+func newBillingFactory(cfg *xiaozhi.Config) channels.BillingFactory {
+	if !cfg.Billing.BillingEnabled() {
+		logging.Warnf("billing: disabled by config, sessions will not be metered")
+		return nil
+	}
+	managerURL := strings.TrimRight(strings.TrimSpace(cfg.Manager.URL), "/")
+	if managerURL == "" {
+		return nil
+	}
+	client := billingclient.New(billingclient.Config{
+		BaseURL: managerURL,
+		Token:   cfg.Manager.Token,
+	})
+	suspensions := billingclient.NewSuspensionCache(cfg.Billing.SuspensionTTL)
+	return func(_ context.Context, meta channels.BillingSessionMeta) channels.BillingSession {
+		return billingclient.NewSession(billingclient.SessionConfig{
+			Client:      client,
+			Suspensions: suspensions,
+			DeviceID:    meta.DeviceID,
+			SessionID:   meta.SessionID,
+			Channel:     meta.Channel,
+		})
+	}
+}
 
 func main() {
 	configPath := flag.String("config", "data/wsserver.yaml", "config file path")
@@ -91,6 +121,7 @@ func main() {
 		Sessions:        sessions,
 		Tasks:           task.NewRegistry(sessions),
 		Providers:       provider.NewPool(),
+		Billing:         newBillingFactory(cfg),
 	}
 
 	chMgr := channels.NewManager(deps)

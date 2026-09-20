@@ -9,13 +9,16 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+	_ "time/tzdata" // 把时区库编进二进制：billing.period_timezone 在没装 tzdata 的容器里也能解析
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"github.com/liuscraft/orion-x/internal/assets"
+	"github.com/liuscraft/orion-x/internal/billing/service"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/knowledge/retriever"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/anthropic/messages"
@@ -69,6 +72,24 @@ func main() {
 	// 同步系统智能体模板种子数据
 	if err := store.SyncSystemTemplates(db); err != nil {
 		logging.Warnf("sync system agent templates: %v", err)
+	}
+
+	// 同步内置计费项目录。billing_items 只是代码里那份常量的投影，失败也不该拦下
+	// 进程（下次启动或管理员改一行 enabled 就好了）。
+	if err := store.SyncBillingItems(db); err != nil {
+		logging.Warnf("sync billing items: %v", err)
+	}
+	// 兜底价：只在某个会话计费项还没有任何生效价格时插入，不覆盖运营录的真实价格。
+	// 没配 fallback_price_micro 而价格表又为空的话，会话会被 price_missing 拒掉——
+	// 那时只能靠管理端录价格（§3.4）。
+	if cfg.Billing.FallbackPriceMicro > 0 {
+		created, err := store.SyncBillingFallbackPrices(db, cfg.Billing.FallbackPriceMicro)
+		if err != nil {
+			logging.Warnf("sync billing fallback prices: %v", err)
+		} else if created > 0 {
+			logging.Warnf("billing: seeded %d fallback price row(s) at %d micro/unit — 真实价格请用管理端 API 录（录完把 fallback_price_micro 清掉）",
+				created, cfg.Billing.FallbackPriceMicro)
+		}
 	}
 
 	users := store.NewUserStore(db)
@@ -140,7 +161,40 @@ func main() {
 		logging.Infof("oauth: registered github provider")
 	}
 
-	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc)
+	// 计费控制面。billing.enabled: false 时根本不建 service：所有 /api/billing/* 回
+	// 503，也不跑结算 worker（§16.4 的 worker 就是 manager 进程里的 goroutine）。
+	var billingSvc *service.Service
+	if !cfg.Billing.Disabled() {
+		billingCfg, err := cfg.Billing.ServiceConfig(timeNow)
+		if err != nil {
+			logging.Fatalf("billing config: %v", err)
+		}
+		billingSvc = service.New(
+			store.NewBillingStore(db),
+			service.NewSubjectResolver(devices, voicebots, models, voices),
+			billingCfg,
+		)
+		if strings.TrimSpace(cfg.Internal.Token) == "" {
+			logging.Warnf("billing: internal.token is not configured — /internal/billing/* will reject every request")
+		}
+		logging.Infof("billing ready: currency=%s reserve_seconds=%d settlement=%s overdraft=%s period_tz=%s",
+			billingCfg.Currency, billingCfg.ReserveSeconds, billingCfg.SettlementMode,
+			billingCfg.OverdraftPolicy, billingCfg.PeriodLocation)
+	}
+
+	// 结算 worker（tick 结算 + 预冻结回收）跟 HTTP 服务同进程，退出靠 cancel（§16.4）。
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+	var workerWG sync.WaitGroup
+	if billingSvc != nil {
+		workerWG.Add(1)
+		go func() {
+			defer workerWG.Done()
+			billingSvc.RunWorker(workerCtx)
+		}()
+	}
+
+	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {
@@ -159,6 +213,11 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		logging.Errorf("shutdown: %v", err)
 	}
+
+	// §16.4：SIGTERM → cancel() → wg.Wait()，等在途的那批结算跑完。被截断的事务
+	// 只会回滚，事件还是 pending，下次启动会重放，所以不会丢账。
+	workerCancel()
+	workerWG.Wait()
 	logging.Infof("manager stopped")
 }
 

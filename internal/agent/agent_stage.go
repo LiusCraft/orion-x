@@ -103,6 +103,10 @@ func (s *AgentStage) runAgentWithInterrupt(
 	agentCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// 每个 turn 一个全新的 collector：本 turn 的用量在 turn 边界取走且清零，
+	// 不跨 turn 累计。
+	agentCtx = WithUsageCollector(agentCtx, NewUsageCollector())
+
 	eventChan, err := s.agent.Run(agentCtx, s.session)
 	if err != nil {
 		logging.Errorf("AgentStage: agent process error: %v", err)
@@ -157,6 +161,22 @@ func (s *AgentStage) drainEventChan(eventChan <-chan AgentEvent) {
 	}
 }
 
+// UsageMetadataKey 是 pipeline.Message.Metadata.Extra 里携带 LLM 用量的键。
+const UsageMetadataKey = "llm_usage"
+
+// UsageFromMetadata 从消息元数据里取出本次 turn 的 LLM 用量。
+func UsageFromMetadata(md pipeline.Metadata) (Usage, bool) {
+	if md.Extra == nil {
+		return Usage{}, false
+	}
+	raw, ok := md.Extra[UsageMetadataKey]
+	if !ok {
+		return Usage{}, false
+	}
+	usage, ok := raw.(Usage)
+	return usage, ok
+}
+
 // convertAgentEvent 转换 AgentEvent 到 Pipeline Message
 func (s *AgentStage) convertAgentEvent(event AgentEvent, metadata pipeline.Metadata) pipeline.Message {
 	switch e := event.(type) {
@@ -173,9 +193,17 @@ func (s *AgentStage) convertAgentEvent(event AgentEvent, metadata pipeline.Metad
 		}
 
 	case *FinishedEvent:
+		md := metadata
+		if e.Usage != nil {
+			md.Extra = make(map[string]interface{}, len(metadata.Extra)+1)
+			for k, v := range metadata.Extra {
+				md.Extra[k] = v
+			}
+			md.Extra[UsageMetadataKey] = *e.Usage
+		}
 		msg := pipeline.Message{
 			Type:     pipeline.MessageTypeFinished,
-			Metadata: metadata,
+			Metadata: md,
 		}
 		if e.Error != nil {
 			msg.Metadata.Error = e.Error

@@ -75,6 +75,11 @@ func (sa *SubAgent) forward(ctx context.Context, events <-chan AgentEvent) {
 			} else {
 				msg = pipeline.NewMessage(pipeline.MessageTypeFinished, nil)
 			}
+			// 子代理与主 agent 可能共用同一个 turn 的 collector（谁先 Take 谁负责上报），
+			// 所以它的用量必须能带出来，不能在这里丢掉。
+			if e.Usage != nil {
+				msg.Metadata.Extra = map[string]interface{}{UsageMetadataKey: *e.Usage}
+			}
 		default:
 			continue
 		}

@@ -327,11 +327,13 @@ func (a *adapter) convertResponse(resp *openairesponses.Response) llm.Response {
 		data, _ := json.Marshal(contextData{Items: contextItems})
 		message.ProviderContext = &llm.ProviderContext{Adapter: "openai-responses", Model: a.cfg.Model, Scope: a.cfg.Scope, Data: data}
 	}
-	usage := llm.Usage{}
-	usage.InputTokens = int64(resp.Usage.InputTokens)
-	usage.OutputTokens = int64(resp.Usage.OutputTokens)
-	usage.TotalTokens = int64(resp.Usage.TotalTokens)
-	usage.ReasoningTokens = int64(resp.Usage.OutputTokensDetails.ReasoningTokens)
+	usage := provider.NormalizeUsage(provider.UsageParts{
+		InputTokens:     int64(resp.Usage.InputTokens),
+		OutputTokens:    int64(resp.Usage.OutputTokens),
+		TotalTokens:     int64(resp.Usage.TotalTokens),
+		CacheReadTokens: int64(resp.Usage.InputTokensDetails.CachedTokens),
+		ReasoningTokens: int64(resp.Usage.OutputTokensDetails.ReasoningTokens),
+	})
 	return llm.Response{ID: resp.ID, Model: string(resp.Model), Message: message, StopReason: stop, Usage: usage}
 }
 

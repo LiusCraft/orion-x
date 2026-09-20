@@ -52,7 +52,7 @@ func (a *Agent) runLoop(ctx context.Context, sess *session.Session, emit func(Ag
 				return
 			}
 			logging.Errorf("Agent: step error: %v", err)
-			emit(&FinishedEvent{Error: err})
+			emit(&FinishedEvent{Error: err, Usage: TakeUsage(ctx)})
 			return
 		}
 
@@ -66,7 +66,7 @@ func (a *Agent) runLoop(ctx context.Context, sess *session.Session, emit func(Ag
 		if len(result.toolCalls) == 0 {
 			logging.Infof("Agent: done (no tool calls), total time=%v", time.Since(processStart))
 			a.recordTurn(ctx, sess, processStart)
-			emit(&FinishedEvent{Error: nil})
+			emit(&FinishedEvent{Error: nil, Usage: TakeUsage(ctx)})
 			return
 		}
 
@@ -79,14 +79,14 @@ func (a *Agent) runLoop(ctx context.Context, sess *session.Session, emit func(Ag
 				return
 			}
 			logging.Errorf("Agent: tool exec error: %v", fatalErr)
-			emit(&FinishedEvent{Error: fatalErr})
+			emit(&FinishedEvent{Error: fatalErr, Usage: TakeUsage(ctx)})
 			return
 		}
 	}
 
 	a.recordTurn(ctx, sess, processStart)
 	logging.Infof("Agent: reached max steps (%d)", a.maxSteps)
-	emit(&FinishedEvent{Error: fmt.Errorf("reached max steps (%d)", a.maxSteps)})
+	emit(&FinishedEvent{Error: fmt.Errorf("reached max steps (%d)", a.maxSteps), Usage: TakeUsage(ctx)})
 }
 
 // toolCallRecord holds one tool invocation + its result for turn persistence.

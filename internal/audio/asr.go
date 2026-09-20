@@ -17,6 +17,9 @@ import (
 type ASRResult struct {
 	Text    string
 	IsFinal bool
+	// UsageSeconds 是厂商为该次识别上报的音频时长，单位秒（不是毫秒）。0 表示
+	// 厂商没报。它只是一个原始事实，怎么换算成计费量由接线层决定。
+	UsageSeconds int64
 }
 
 // ASRConfig configures an ASRProcessor.
@@ -218,7 +221,7 @@ func (p *asrProcessor) Stop() error {
 			if seg := segmenter.Flush(); seg != nil && seg.Bytes > 0 {
 				p.recognizer.OnResult(func(result asr.Result) {
 					if result.IsFinal && result.Text != "" {
-						p.emitResult(result.Text)
+						p.emitResult(result.Text, asrSecondsOf([]asr.Result{result}))
 					}
 				})
 				if err := p.recognizer.Start(ctx); err == nil {
@@ -438,6 +441,7 @@ func (p *asrProcessor) processVAD(ctx context.Context, audio []byte) {
 // runASRLoop 管理 ASR 会话生命周期，并在完成后执行 coalescence 等待。
 func (p *asrProcessor) runASRLoop(ctx context.Context) {
 	var accumulated []string
+	var accumulatedSeconds int64
 	startConsumed := false // waitForMoreSpeech 是否已经消费了下一个 start 信号
 
 	for {
@@ -450,16 +454,17 @@ func (p *asrProcessor) runASRLoop(ctx context.Context) {
 		}
 		startConsumed = false
 
-		text, cancelled := p.runOneSession(ctx)
+		text, seconds, cancelled := p.runOneSession(ctx)
 		if cancelled {
 			if len(accumulated) > 0 {
-				p.emitResult(strings.Join(accumulated, ""))
+				p.emitResult(strings.Join(accumulated, ""), accumulatedSeconds)
 			}
 			return
 		}
 		if text != "" {
 			accumulated = append(accumulated, text)
 		}
+		accumulatedSeconds += seconds
 
 		// 等待 silenceTimeout，期间监听人声活动；如果有新 start 则继续合并
 		if p.waitForMoreSpeech(ctx) {
@@ -469,19 +474,21 @@ func (p *asrProcessor) runASRLoop(ctx context.Context) {
 
 		if len(accumulated) > 0 {
 			finalText := strings.Join(accumulated, "")
-			logging.Infof("ASRProcessor: emitting result (text_len=%d, merged_segments=%d)",
-				len([]rune(finalText)), len(accumulated))
-			p.emitResult(finalText)
+			logging.Infof("ASRProcessor: emitting result (text_len=%d, merged_segments=%d, usage_seconds=%d)",
+				len([]rune(finalText)), len(accumulated), accumulatedSeconds)
+			p.emitResult(finalText, accumulatedSeconds)
 			accumulated = accumulated[:0]
+			accumulatedSeconds = 0
 		}
 	}
 }
 
 // runOneSession 执行一次完整的 ASR 会话：Start → 实时 SendAudio → Finish。
-// 返回识别文本，以及是否因 ctx 取消而退出。
-func (p *asrProcessor) runOneSession(ctx context.Context) (string, bool) {
+// 返回识别文本、厂商上报的音频秒数（asrSecondsOf 归并），以及是否因 ctx 取消而退出。
+func (p *asrProcessor) runOneSession(ctx context.Context) (string, int64, bool) {
 	var mu sync.Mutex
 	var texts []string
+	var finals []asr.Result
 	p.recognizer.OnResult(func(result asr.Result) {
 		logging.Infof("ASRProcessor: result received (final=%v, text_len=%d, usage_duration=%s, begin_ms=%d, end_ms=%s)",
 			result.IsFinal,
@@ -493,6 +500,8 @@ func (p *asrProcessor) runOneSession(ctx context.Context) (string, bool) {
 		if result.IsFinal && result.Text != "" {
 			mu.Lock()
 			texts = append(texts, result.Text)
+			// 参与时长归并的只有 final result，跟 emitResult 的过滤条件一致。
+			finals = append(finals, result)
 			mu.Unlock()
 		}
 	})
@@ -501,11 +510,11 @@ func (p *asrProcessor) runOneSession(ctx context.Context) (string, bool) {
 	logging.Infof("ASRProcessor: ASR task starting")
 	if err := p.recognizer.Start(ctx); err != nil {
 		if errors.Is(err, context.Canceled) {
-			return "", true
+			return "", 0, true
 		}
 		logging.Errorf("ASRProcessor: start error: %v", err)
 		p.drainUntilFinish(ctx)
-		return "", false
+		return "", 0, false
 	}
 	logging.Infof("ASRProcessor: recognizer started in %v", time.Since(startAt))
 
@@ -518,7 +527,7 @@ loop:
 		case frame := <-p.asrFrameCh:
 			if err := p.recognizer.SendAudio(ctx, frame); err != nil {
 				if errors.Is(err, context.Canceled) {
-					return "", true
+					return "", 0, true
 				}
 				logging.Errorf("ASRProcessor: send audio error: %v", err)
 			}
@@ -527,7 +536,7 @@ loop:
 		case <-p.asrFinishCh:
 			break loop
 		case <-ctx.Done():
-			return "", true
+			return "", 0, true
 		}
 	}
 	logging.Infof("ASRProcessor: sent audio in %v (bytes=%d, frames=%d)", time.Since(sendStart), sentBytes, sentFrames)
@@ -551,17 +560,18 @@ doFinish:
 	finishStart := time.Now()
 	if err := p.recognizer.Finish(ctx); err != nil {
 		if errors.Is(err, context.Canceled) {
-			return "", true
+			return "", 0, true
 		}
 		logging.Errorf("ASRProcessor: finish error: %v", err)
-		return "", false
+		return "", 0, false
 	}
 	logging.Infof("ASRProcessor: recognizer finished in %v", time.Since(finishStart))
 
 	mu.Lock()
 	text := strings.Join(texts, "")
+	finalResults := append([]asr.Result(nil), finals...)
 	mu.Unlock()
-	return text, false
+	return text, asrSecondsOf(finalResults), false
 }
 
 // waitForMoreSpeech 在 ASR 完成后等待 silenceTimeout，
@@ -609,13 +619,42 @@ func (p *asrProcessor) drainUntilFinish(ctx context.Context) {
 	}
 }
 
-func (p *asrProcessor) emitResult(text string) {
+// emitResult 把一段合并好的识别文本（连同厂商上报的秒数）交给 onResult 回调。
+func (p *asrProcessor) emitResult(text string, usageSeconds int64) {
 	p.mu.Lock()
 	fn := p.onResult
 	p.mu.Unlock()
 	if fn != nil {
-		fn(ASRResult{Text: text, IsFinal: true})
+		fn(ASRResult{Text: text, IsFinal: true, UsageSeconds: usageSeconds})
 	}
+}
+
+// asrSecondsOf 把一个 recognizer task 内多条 final result 的厂商时长归并成一个秒数。
+// 归并规则（取 max = 厂商给的是累计值 / 求和 = 厂商给的是增量值）必须跟厂商口径一致，
+// 改起来只动这一行。DashScope 在 sentence 级事件里带的是累计值，所以这里取 max；
+// 口径未实测前，这里同时把原始值打一条 Info 日志，便于对账（docs/billing-design.md §13）。
+//
+// 调用方只应传入 final result（IsFinal && Text != ""），与 emitResult 的过滤条件一致。
+func asrSecondsOf(results []asr.Result) int64 {
+	var raw []int
+	for _, result := range results {
+		if result.UsageDuration != nil {
+			raw = append(raw, *result.UsageDuration)
+		}
+	}
+	if len(raw) == 0 {
+		return 0
+	}
+	seconds := 0
+	for _, v := range raw {
+		if v > seconds {
+			seconds = v
+		}
+	}
+	if len(raw) > 1 {
+		logging.Infof("ASRProcessor: merging %d vendor usage durations %v (rule=max) -> %ds", len(raw), raw, seconds)
+	}
+	return int64(seconds)
 }
 
 func cloneBytes(b []byte) []byte {

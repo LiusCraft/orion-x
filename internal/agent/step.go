@@ -63,6 +63,9 @@ func (a *Agent) runStep(ctx context.Context, messages []llm.Message, emit func(A
 			lastFilteredLength = nextLength
 		case llm.EventResponseDone:
 			finalResponse = event.Response
+			// 一旦拿到响应就立刻记账（放在这里而不是函数末尾）：这之后无论
+			// 是流报错还是提前返回，本步的用量都已经落进 collector 了。
+			recordUsage(ctx, finalResponse)
 		}
 	}
 

@@ -26,6 +26,12 @@ type TTSChunk struct {
 	SentenceText string
 }
 
+// Synthesis 是一次“已经发给厂商合成”的原始事实。
+type Synthesis struct {
+	Text  string
+	Runes int // len([]rune(Text))，语音计费的计费量
+}
+
 // TTSConfig 配置 TTSProcessor。
 type TTSConfig struct {
 	// Provider 是 TTS 后端。必填。
@@ -67,6 +73,9 @@ type TTSProcessor interface {
 	Write(text string, opts tts.SynthesisOptions) error
 	Flush(opts tts.SynthesisOptions) error
 	OnChunk(func(TTSChunk))
+	// OnSynthesis 注册“文本已发给厂商合成”的回调：每句在 dispatcher 出队时触发一次，
+	// 包含被 Interrupt 打断的那句（厂商已经合成、已经计费），不包括被丢弃的句子。
+	OnSynthesis(func(Synthesis))
 	Interrupt() error
 	Start(ctx context.Context) error
 	Stop() error
@@ -174,9 +183,10 @@ type ttsProcessor struct {
 	cfg     *TTSConfig
 	baseReq tts.SynthesizeRequest
 
-	// mu 保护：onChunk、started、splitter、turnStarted、currentEmotion
+	// mu 保护：onChunk、onSynthesis、started、splitter、turnStarted、currentEmotion
 	mu             sync.Mutex
 	onChunk        func(TTSChunk)
+	onSynthesis    func(Synthesis)
 	started        bool
 	splitter       *sentenceSplitter
 	turnStarted    bool   // 本轮第一次 Write 后置 true，Interrupt 后复位
@@ -211,6 +221,12 @@ func (p *ttsProcessor) OnChunk(fn func(TTSChunk)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.onChunk = fn
+}
+
+func (p *ttsProcessor) OnSynthesis(fn func(Synthesis)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onSynthesis = fn
 }
 
 func (p *ttsProcessor) Start(ctx context.Context) error {
@@ -449,12 +465,26 @@ func (p *ttsProcessor) dispatcher() {
 				continue
 			}
 
+			// 分句已经定稿：从这里开始这段文本必然发给厂商。计量点就设在出队处，
+			// 之后再被 Interrupt 也不会减免（docs/billing-design.md §6.2/§13）。
+			p.notifySynthesis(item.req.Input.Text)
+
 			if p.streamingProv != nil {
 				p.dispatchStreaming(synthCtx, item)
 			} else {
 				p.dispatchBatch(synthCtx, item)
 			}
 		}
+	}
+}
+
+// notifySynthesis 上报“这段文本已经交给厂商合成”这个原始事实（不涉及任何计费词汇）。
+func (p *ttsProcessor) notifySynthesis(text string) {
+	p.mu.Lock()
+	fn := p.onSynthesis
+	p.mu.Unlock()
+	if fn != nil {
+		fn(Synthesis{Text: text, Runes: len([]rune(text))})
 	}
 }
 
