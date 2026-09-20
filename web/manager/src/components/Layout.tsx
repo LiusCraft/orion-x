@@ -1,7 +1,9 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/lib/store";
+import { billingApi } from "@/lib/api";
+import { formatMicro } from "@/lib/billing";
 import { useTheme } from "./ThemeProvider";
 import {
 	Bot,
@@ -16,7 +18,6 @@ import {
 	Activity,
 	Layers,
 	BarChart3,
-	CreditCard,
 	Key,
 	Building2,
 	Sun,
@@ -28,9 +29,25 @@ import {
 	Wallet,
 	ChevronRight,
 	Shield,
+	Tag,
+	type LucideIcon,
 } from "lucide-react";
 
-const NAV_GROUPS = [
+interface NavItem {
+	to: string;
+	icon: LucideIcon;
+	label: string;
+	end?: boolean;
+	/** 只给 admin 看的入口（路由层也会拦一道） */
+	adminOnly?: boolean;
+}
+
+interface NavGroup {
+	label: string;
+	items: NavItem[];
+}
+
+const NAV_GROUPS: NavGroup[] = [
 	{
 		label: "智能体",
 		items: [
@@ -74,12 +91,14 @@ const NAV_GROUPS = [
 	{
 		label: "计费",
 		items: [
-			{ to: "/billing/usage", icon: BarChart3, label: "用量统计", end: false },
+			{ to: "/billing/usage", icon: BarChart3, label: "用量与余额", end: false },
+			{ to: "/billing/prices", icon: Tag, label: "价格公示", end: false },
 			{
-				to: "/billing/resources",
-				icon: CreditCard,
-				label: "其他资源",
+				to: "/billing/admin",
+				icon: Wallet,
+				label: "计费管理",
 				end: false,
+				adminOnly: true,
 			},
 		],
 	},
@@ -146,9 +165,25 @@ function UserPopover({
 	onLogout: () => void;
 }) {
 	const [open, setOpen] = useState(false);
+	const [balance, setBalance] = useState<string | null>(null);
+	const [balanceLoaded, setBalanceLoaded] = useState(false);
 	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const hoverRef = useRef<HTMLDivElement>(null);
 	const navigate = useNavigate();
+
+	// 可用额度懒加载：打开 popover 才请求，计费未启用或请求失败都显示 —。
+	useEffect(() => {
+		if (!open || balanceLoaded) return;
+		setBalanceLoaded(true);
+		billingApi
+			.summary()
+			.then(({ data }) => {
+				setBalance(
+					data.account ? formatMicro(data.balance_micro, data.currency) : null,
+				);
+			})
+			.catch(() => setBalance(null));
+	}, [open, balanceLoaded]);
 
 	const enter = () => {
 		if (timerRef.current) clearTimeout(timerRef.current);
@@ -265,7 +300,7 @@ function UserPopover({
 						<div>
 							<p className="text-[10px] text-zinc-500 mb-0.5">可用额度</p>
 							<p className="text-lg font-semibold text-white tracking-tight">
-								¥ 4.64
+								{balance ?? "—"}
 							</p>
 						</div>
 						<button className="text-xs text-violet-400 hover:text-violet-300 mt-1 cursor-pointer">
@@ -279,7 +314,7 @@ function UserPopover({
 }
 
 export default function Layout() {
-	const { username, userId, logout } = useAuthStore();
+	const { username, userId, isAdmin, logout } = useAuthStore();
 	const { theme, setTheme } = useTheme();
 	const navigate = useNavigate();
 
@@ -334,34 +369,38 @@ export default function Layout() {
 								<p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest px-2 mb-1.5">
 									{group.label}
 								</p>
-								{group.items.map(({ to, icon: Icon, label, end }) => (
-									<NavLink
-										key={to}
-										to={to}
-										end={end}
-										className={({ isActive }) =>
-											cn(
-												"flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-sm transition-all duration-150 mb-0.5",
-												isActive
-													? "bg-violet-600 text-white font-medium shadow-md shadow-violet-600/20"
-													: "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/70",
-											)
-										}
-									>
-										{({ isActive }) => (
-											<>
-												<Icon
-													className={cn(
-														"w-4 h-4 shrink-0",
-														isActive ? "text-violet-200" : "text-zinc-500",
-													)}
-													strokeWidth={1.5}
-												/>
-												{label}
-											</>
-										)}
-									</NavLink>
-								))}
+								{group.items
+									.filter((item) => !item.adminOnly || isAdmin)
+									.map(({ to, icon: Icon, label, end }) => (
+										<NavLink
+											key={to}
+											to={to}
+											end={end}
+											className={({ isActive }) =>
+												cn(
+													"flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-sm transition-all duration-150 mb-0.5",
+													isActive
+														? "bg-violet-600 text-white font-medium shadow-md shadow-violet-600/20"
+														: "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/70",
+												)
+											}
+										>
+											{({ isActive }) => (
+												<>
+													<Icon
+														className={cn(
+															"w-4 h-4 shrink-0",
+															isActive
+																? "text-violet-200"
+																: "text-zinc-500",
+														)}
+														strokeWidth={1.5}
+													/>
+													{label}
+												</>
+											)}
+										</NavLink>
+									))}
 							</div>
 						))}
 					</nav>

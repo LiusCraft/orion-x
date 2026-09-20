@@ -732,3 +732,281 @@ export const availableResourcesApi = {
 			params: lang ? { lang } : undefined,
 		}),
 };
+
+// ------------------------------------------------------------------ 计费
+//
+// 行形状对应 internal/store/billing_models.go，字段名与 JSON tag 一一对应；金额一律是
+// int64 微单位（1e-6 元），展示统一走 @/lib/billing。
+
+export type BillingChargeMode = "count" | "duration" | "usage" | "recurring";
+export type BillingUnit =
+	| "call"
+	| "second"
+	| "token"
+	| "char"
+	| "byte"
+	| "period";
+export type BillingMeterSource =
+	| "llm"
+	| "tts"
+	| "asr"
+	| "voice:clone"
+	| "session"
+	| "mcp"
+	| "kb";
+export type BillingResourceType = "item" | "provider" | "model" | "voice";
+export type BillingRounding = "none" | "ceil" | "half:up";
+export type BillingAccountStatus = "active" | "suspended" | "closed";
+export type BillingSubjectType = "user" | "org";
+export type BillingDirection = "debit" | "credit";
+export type BillingUsageStatus =
+	| "pending"
+	| "charged"
+	| "skipped"
+	| "unpaid"
+	| "rejected";
+
+export interface BillingItem {
+	code: string;
+	name: string;
+	charge_mode: BillingChargeMode;
+	unit: BillingUnit;
+	meter_source: BillingMeterSource;
+	enabled: boolean;
+	is_system: boolean;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface BillingTier {
+	up_to: number;
+	unit_price_micro: number;
+}
+
+export interface BillingPrice {
+	id: string;
+	item_code: string;
+	/** '' = 平台标准价 */
+	account_id: string;
+	resource_type: BillingResourceType;
+	resource_id: string;
+	currency: string;
+	unit_price_micro: number;
+	unit_size: number;
+	min_charge_micro: number;
+	rounding: BillingRounding;
+	tiers?: BillingTier[];
+	effective_from: string;
+	effective_to?: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+/** 新建价格版本时提交的字段：scope 与生效时间必填，其余由服务端补默认值。 */
+export interface BillingPriceCreate {
+	item_code: string;
+	account_id?: string;
+	resource_type?: BillingResourceType;
+	resource_id?: string;
+	currency?: string;
+	unit_price_micro: number;
+	unit_size: number;
+	min_charge_micro?: number;
+	rounding?: BillingRounding;
+	tiers?: BillingTier[];
+	effective_from?: string;
+}
+
+/** 局部更新一版价格；服务端只认识这 8 个字段，其余一律 400。 */
+export interface BillingPriceUpdate {
+	currency?: string;
+	unit_price_micro?: number;
+	unit_size?: number;
+	min_charge_micro?: number;
+	rounding?: BillingRounding;
+	tiers?: BillingTier[];
+	effective_from?: string;
+	effective_to?: string;
+}
+
+export interface BillingAccount {
+	id: string;
+	subject_type: BillingSubjectType;
+	subject_id: string;
+	currency: string;
+	balance_micro: number;
+	frozen_micro: number;
+	credit_limit_micro: number;
+	status: BillingAccountStatus;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface BillingLedger {
+	id: number;
+	account_id: string;
+	direction: BillingDirection;
+	amount_micro: number;
+	balance_after_micro: number;
+	kind: string;
+	item_code: string;
+	ref_type: string;
+	ref_id: string;
+	idempotency_key: string;
+	occurred_at: string;
+	note?: string;
+	creator?: string;
+}
+
+export interface BillingUsageEvent {
+	id: string;
+	account_id: string;
+	voicebot_id: string;
+	device_id: string;
+	session_id: string;
+	item_code: string;
+	quantity: number;
+	aimodel_id: string;
+	provider_id: string;
+	voice_id: string;
+	byok: boolean;
+	occurred_at: string;
+	received_at: string;
+	turn_index: number;
+	dimensions?: Record<string, unknown>;
+	status: BillingUsageStatus;
+	price_id: string;
+	amount_micro: number;
+	last_error?: string;
+}
+
+/** 按计费项聚合的一行（summary.top_items / stats.usage_by_item）。 */
+export interface BillingUsageAggregate {
+	item_code: string;
+	quantity: number;
+	amount_micro: number;
+}
+
+export interface BillingSummary {
+	/** 还没有任何用量的人没有账户，这里是 null */
+	account: BillingAccount | null;
+	currency: string;
+	balance_micro: number;
+	frozen_micro: number;
+	credit_limit_micro: number;
+	period_charged_micro: number;
+	top_items?: BillingUsageAggregate[];
+	from: string;
+	to: string;
+}
+
+export interface BillingStats {
+	account: BillingAccount;
+	summary: BillingSummary;
+	usage_by_item: BillingUsageAggregate[];
+	from: string;
+	to: string;
+}
+
+export interface BillingPageList<T> {
+	items: T[];
+	total: number;
+	page: number;
+	page_size: number;
+}
+
+/** 价格列表不带 total：价格表按 scope 唯一，量级是“几十条版本”。 */
+export interface BillingPriceList {
+	items: BillingPrice[];
+	page: number;
+	page_size: number;
+}
+
+export interface BillingItemList {
+	items: BillingItem[];
+	total: number;
+}
+
+export interface BillingAdjustRequest {
+	amount_micro: number;
+	item_code?: string;
+	note: string;
+	/** true = 限定计费项的赠款，进 billing_grants，不动余额 */
+	grant?: boolean;
+	ref_id?: string;
+}
+
+export interface BillingSummaryParams {
+	/** RFC3339；都省略 = 本账期到现在 */
+	from?: string;
+	to?: string;
+}
+
+export interface BillingUsageParams extends BillingSummaryParams {
+	item_code?: string;
+	page?: number;
+	page_size?: number;
+}
+
+export interface BillingPriceQueryParams {
+	item_code?: string;
+	account_id?: string;
+	resource_type?: BillingResourceType;
+	resource_id?: string;
+	active_only?: string;
+	page?: number;
+	page_size?: number;
+}
+
+export interface BillingAccountQueryParams {
+	subject_type?: BillingSubjectType;
+	status?: BillingAccountStatus;
+	keyword?: string;
+	page?: number;
+	page_size?: number;
+}
+
+export interface BillingLedgerQueryParams extends BillingSummaryParams {
+	account_id?: string;
+	item_code?: string;
+	kind?: string;
+	page?: number;
+	page_size?: number;
+}
+
+// 用户端：只读自己的账户与用量。返回 503 表示平台没开计费，不是错误。
+export const billingApi = {
+	summary: (params?: BillingSummaryParams) =>
+		http.get<BillingSummary>("/billing/summary", { params }),
+	usage: (params?: BillingUsageParams) =>
+		http.get<BillingPageList<BillingUsageEvent>>("/billing/usage", { params }),
+	prices: () => http.get<BillingPriceList>("/billing/prices"),
+};
+
+// 管理端：定价、账户、流水、报表（middleware.RequireAdmin）。
+export const billingAdminApi = {
+	items: () => http.get<BillingItemList>("/billing/items"),
+	setItem: (code: string, enabled: boolean) =>
+		http.put<{ code: string; enabled: boolean }>(
+			`/billing/items/${encodeURIComponent(code)}`,
+			{ enabled },
+		),
+	prices: (params?: BillingPriceQueryParams) =>
+		http.get<BillingPriceList>("/billing/prices", { params }),
+	createPrice: (data: BillingPriceCreate) =>
+		http.post<BillingPrice>("/billing/prices", data),
+	updatePrice: (id: string, data: BillingPriceUpdate) =>
+		http.put<BillingPrice>(`/billing/prices/${id}`, data),
+	deletePrice: (id: string) => http.delete(`/billing/prices/${id}`),
+	accounts: (params?: BillingAccountQueryParams) =>
+		http.get<BillingPageList<BillingAccount>>("/billing/accounts", { params }),
+	adjust: (id: string, data: BillingAdjustRequest) =>
+		http.post<BillingAccount>(
+			`/billing/accounts/${encodeURIComponent(id)}/adjust`,
+			data,
+		),
+	ledger: (params?: BillingLedgerQueryParams) =>
+		http.get<BillingPageList<BillingLedger>>("/billing/ledger", { params }),
+	stats: (params: { account_id: string } & BillingSummaryParams) =>
+		http.get<BillingStats>("/billing/stats", { params }),
+};
