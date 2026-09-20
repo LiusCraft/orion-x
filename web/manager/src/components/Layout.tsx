@@ -286,7 +286,10 @@ function UserPopover({
 				{/* 费用与成本 */}
 				<PCard>
 					<button
-						onClick={() => navigate("/billing/usage")}
+						onClick={() => {
+							setOpen(false);
+							navigate("/billing/usage");
+						}}
 						className="flex items-center gap-1.5 w-[calc(100%+32px)] -mx-4 px-4 py-1.5 -my-1.5 text-left transition-colors hover:bg-zinc-800 cursor-pointer"
 					>
 						<Wallet className="w-3.5 h-3.5 text-violet-400" strokeWidth={1.5} />
@@ -303,7 +306,13 @@ function UserPopover({
 								{balance ?? "—"}
 							</p>
 						</div>
-						<button className="text-xs text-violet-400 hover:text-violet-300 mt-1 cursor-pointer">
+						<button
+							onClick={() => {
+								setOpen(false);
+								navigate("/billing/recharge");
+							}}
+							className="text-xs text-violet-400 hover:text-violet-300 mt-1 cursor-pointer"
+						>
 							充值汇款
 						</button>
 					</div>

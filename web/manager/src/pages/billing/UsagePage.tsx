@@ -5,6 +5,8 @@
 // 而不是报错；查不到账户也不是错误，是"还没产生过用量"。
 
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { cn } from "@/lib/utils";
 import {
 	Activity,
 	AlertCircle,
@@ -12,6 +14,7 @@ import {
 	CircleDollarSign,
 	Coins,
 	Lock,
+	Plus,
 	RefreshCw,
 } from "lucide-react";
 import { SimpleSelect } from "@/components/ui/select";
@@ -76,9 +79,28 @@ export default function UsagePage() {
 	const [listLoading, setListLoading] = useState(true);
 	const [disabled, setDisabled] = useState(false);
 	const [error, setError] = useState("");
+	const [rechargeAvailable, setRechargeAvailable] = useState(false);
 	const [reloadKey, setReloadKey] = useState(0);
 
 	const range = useMemo(() => periodRange(preset), [preset]);
+
+	// 充值入口只在服务端接了支付渠道时才给：没接的话点进去只有一句「暂不支持在线充值」，
+	// 与其给个死胡同，不如不给这个按钮。判据是 recharge/config 返回 503（和计费未启用
+	// 同一个信号），其余错误也当不可用——宁可少一个入口，也不给一个会失败的入口。
+	useEffect(() => {
+		let cancelled = false;
+		billingApi
+			.rechargeConfig()
+			.then(() => {
+				if (!cancelled) setRechargeAvailable(true);
+			})
+			.catch(() => {
+				if (!cancelled) setRechargeAvailable(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [reloadKey]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -199,7 +221,8 @@ export default function UsagePage() {
 						<EmptyState
 							icon={CircleDollarSign}
 							title="还没有计费账户"
-							hint="账户在第一次产生用量时由控制面自动创建（含注册赠款），这里会显示余额与本账期消耗。"
+							hint="第一次产生用量时会自动开通账户（含注册赠款），这里会显示余额与本账期消耗。也可以先充值，到账后账户自动开通。"
+							action={rechargeAvailable ? <RechargeButton /> : undefined}
 						/>
 					</div>
 				) : (
@@ -216,13 +239,16 @@ export default function UsagePage() {
 										/>
 									</div>
 								</div>
-								<p
-									className={`text-xl font-semibold font-mono ${
-										balance < 0 ? "text-red-400" : "text-white"
-									}`}
-								>
-									{formatMicro(balance, currency)}
-								</p>
+								<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+									<p
+										className={`text-xl font-semibold font-mono ${
+											balance < 0 ? "text-red-400" : "text-white"
+										}`}
+									>
+										{formatMicro(balance, currency)}
+									</p>
+									{rechargeAvailable && <RechargeButton className="ml-auto" />}
+								</div>
 								<p className="text-[11px] text-zinc-600 mt-0.5">
 									{balance < 0 ? (
 										<span className="text-red-400/90">
@@ -542,6 +568,26 @@ export default function UsagePage() {
 				/>
 			</div>
 		</div>
+	);
+}
+
+/**
+ * 充值入口。调用方只在服务端接了支付渠道（rechargeAvailable）时才渲染它：它就是个
+ * 跳 `/billing/recharge` 的按钮，付钱的事全在那边（这里不做任何下单）。
+ */
+function RechargeButton({ className }: { className?: string }) {
+	const navigate = useNavigate();
+	return (
+		<button
+			onClick={() => navigate("/billing/recharge")}
+			className={cn(
+				"inline-flex items-center gap-1 h-7 px-2.5 text-xs rounded-lg bg-violet-600 hover:bg-violet-500 text-white shadow-md shadow-violet-600/20 transition-colors cursor-pointer shrink-0",
+				className,
+			)}
+		>
+			<Plus className="w-3.5 h-3.5" strokeWidth={2} />
+			充值
+		</button>
 	);
 }
 

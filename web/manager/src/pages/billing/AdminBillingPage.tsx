@@ -9,12 +9,14 @@ import AccountsTab from "./admin/AccountsTab";
 import ItemsTab from "./admin/ItemsTab";
 import LedgerTab from "./admin/LedgerTab";
 import PricesTab from "./admin/PricesTab";
+import RechargeTab from "./admin/RechargeTab";
 import StatsTab from "./admin/StatsTab";
 
 const TABS = [
 	{ value: "accounts", label: "账户" },
 	{ value: "prices", label: "价格版本" },
 	{ value: "items", label: "计费项" },
+	{ value: "recharge", label: "充值订单" },
 	{ value: "ledger", label: "流水" },
 	{ value: "stats", label: "报表" },
 ];
@@ -29,7 +31,7 @@ export default function AdminBillingPage() {
 						计费管理
 					</h1>
 					<p className="text-sm text-zinc-500 mt-0.5">
-						账户余额与人工调整、价格版本、计费项目录、流水与报表
+						账户余额与人工调整、价格版本、计费项目录、充值订单、流水与报表
 					</p>
 				</div>
 			</div>
@@ -56,6 +58,9 @@ export default function AdminBillingPage() {
 					</TabsContent>
 					<TabsContent value="items" className="mt-5">
 						<ItemsTab />
+					</TabsContent>
+					<TabsContent value="recharge" className="mt-5">
+						<RechargeTab />
 					</TabsContent>
 					<TabsContent value="ledger" className="mt-5">
 						<LedgerTab />

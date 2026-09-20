@@ -40,6 +40,7 @@ func newRouter(
 	assetSvc *assets.Service,
 	internalToken string,
 	billingSvc *service.Service,
+	paymentSvc *service.PaymentService,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -83,6 +84,9 @@ func newRouter(
 	billingInternalH := handler.NewInternalBillingHandler(billingSvc)
 	billingAdminH := handler.NewBillingAdminHandler(billingSvc)
 	billingUserH := handler.NewBillingUserHandler(billingSvc)
+	// 充值通道没接（payment 段没配）时 paymentSvc 为 nil：路由照样注册，每个请求
+	// 回 503，前端不用为「这部署接没接支付」写分支。
+	paymentH := handler.NewPaymentHandler(paymentSvc)
 
 	availableH := handler.NewAvailableHandler(providers, models, voices, assetSvc)
 	tplH := handler.NewAgentTemplateHandler(agentTemplates)
@@ -240,6 +244,12 @@ func newRouter(
 		billingUser.GET("/usage", billingUserH.Usage)
 		// 模型监控页的数据源：按模型 × 计费项聚合的用量，账户由控制面自己推。
 		billingUser.GET("/usage-by-model", billingUserH.ModelUsage)
+		billingUser.POST("/recharge", paymentH.CreateRecharge)
+		billingUser.GET("/recharge", paymentH.ListRecharges)
+		billingUser.GET("/recharge/config", paymentH.RechargeConfig)
+		billingUser.GET("/recharge/:out_trade_no", paymentH.GetRecharge)
+		// 退款是真把钱退出去，只给 admin。
+		billingAdmin.POST("/recharge/:out_trade_no/refund", paymentH.RefundRecharge)
 		api.GET("/billing/prices", jwtMw, func(c *gin.Context) {
 			if middleware.IsAdmin(c) {
 				billingAdminH.ListPrices(c)
@@ -248,6 +258,12 @@ func newRouter(
 			billingUserH.Prices(c)
 		})
 	}
+
+	// 支付网关的回调：公网匿名路由（网关不带 token），安全性来自签名而不是身份。
+	// 这两条不能挂在 /api 组下，也不能挂任何鉴权中间件。
+	r.POST("/pay/epay/notify", paymentH.Notify)
+	r.GET("/pay/epay/notify", paymentH.Notify) // 有些实现用 GET 通知
+	r.GET("/pay/epay/return", paymentH.Return)
 
 	// Internal routes — intended for service-to-service calls within the same
 	// network, not exposed to end users (no JWT required).

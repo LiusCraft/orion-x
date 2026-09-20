@@ -550,6 +550,19 @@ type CreditRequest struct {
 	Creator     string
 }
 
+// RefundRequest 是一笔退款出账（充值的反向操作）。
+//
+// AmountMicro 是**正数**（“退多少”），方向由 Refund 自己变成 debit；RefID 是外部
+// 引用（支付订单号），也是幂等来源。
+type RefundRequest struct {
+	SubjectType string
+	SubjectID   string
+	AmountMicro int64
+	RefID       string
+	Note        string
+	Creator     string
+}
+
 // AdjustRequest 是一次人工调整，金额可正可负，必须带备注。
 type AdjustRequest struct {
 	SubjectType string
@@ -582,6 +595,32 @@ func (s *Service) Credit(ctx context.Context, req CreditRequest) (*store.Billing
 		key = "credit:" + refType + ":" + shortID()
 	}
 	return s.applyBalanceChange(ctx, account.ID, req.AmountMicro, billing.LedgerKindRecharge, req.ItemCode, refType, key, req.Note, req.Creator)
+}
+
+// Refund 出账：把一笔已经入账的钱退回去，写 refund 流水（debit）。
+//
+// 它和 Credit 是一对：入账用 ref_type + ref_id 拼幂等键，退款用 "refund:" 前缀拼
+// 同一个外部引用。所以“重试一次退款”和“重试一次充值”一样安全。允许把余额扣成
+// 负数（钱已经真的退出去了，账必须跟着走）；要不要拦截是调用方的业务判断。
+func (s *Service) Refund(ctx context.Context, req RefundRequest) (*store.BillingAccount, error) {
+	if err := validateSubject(req.SubjectType, req.SubjectID); err != nil {
+		return nil, err
+	}
+	if req.AmountMicro <= 0 {
+		return nil, fmt.Errorf("%w: amount_micro must be positive", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(req.Note) == "" {
+		return nil, fmt.Errorf("%w: note is required for refunds", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(req.RefID) == "" {
+		return nil, fmt.Errorf("%w: ref_id is required for refunds", ErrInvalidRequest)
+	}
+	account, err := s.ensureAccount(ctx, req.SubjectType, req.SubjectID)
+	if err != nil {
+		return nil, err
+	}
+	key := billing.RefundIdempotencyKey(req.RefID)
+	return s.applyBalanceChange(ctx, account.ID, -req.AmountMicro, billing.LedgerKindRefund, "", billing.RefOrder, key, req.Note, req.Creator)
 }
 
 // Adjust 人工调整：写 adjust 流水，必须带备注和操作者，不动历史事件行。

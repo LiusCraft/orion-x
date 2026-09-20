@@ -132,6 +132,20 @@ func (s *BillingStore) CountLedger(q LedgerQuery) (int64, error) {
 	return total, nil
 }
 
+// LedgerExists 判断某个幂等键是不是已经入过账了。
+//
+// 入账方（充值、外部业务模块）在调 Credit 之前用它短路重放：Credit 撞上
+// idempotency_key 唯一索引会返回错误，而「已经入过账」不是失败——主动查一次比
+// 去解析驱动层的唯一键错误码可靠。
+func (s *BillingStore) LedgerExists(idempotencyKey string) (bool, error) {
+	var count int64
+	err := s.db.Model(&BillingLedger{}).Where("idempotency_key = ?", idempotencyKey).Limit(1).Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("billing store: ledger exists: %w", err)
+	}
+	return count > 0, nil
+}
+
 // ExpiredGrants 返回已过期但还没作废过的赠款：作废与否用 `expire:<grant_id>` 这条
 // 流水判断，所以重复调用不会重复写流水（过期赠款不删行、也不改数，§12）。
 func (s *BillingStore) ExpiredGrants(tx *gorm.DB, now time.Time) ([]BillingGrant, error) {

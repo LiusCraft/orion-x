@@ -18,6 +18,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/liuscraft/orion-x/internal/assets"
+	"github.com/liuscraft/orion-x/internal/billing"
+	"github.com/liuscraft/orion-x/internal/billing/gateway/epay"
 	"github.com/liuscraft/orion-x/internal/billing/service"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/knowledge/retriever"
@@ -182,6 +184,9 @@ func main() {
 			billingCfg.OverdraftPolicy, billingCfg.PeriodLocation)
 	}
 
+	// 充值通道（支付渠道 → 余额）。
+	paymentSvc := initPaymentService(cfg.Payment, db, billingSvc, timeNow)
+
 	// 结算 worker（tick 结算 + 预冻结回收）跟 HTTP 服务同进程，退出靠 cancel（§16.4）。
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
@@ -193,8 +198,12 @@ func main() {
 			billingSvc.RunWorker(workerCtx)
 		}()
 	}
+	// 充值的对账 sweeper 同理：补「网关收了钱但回调没到」的单子，同进程、同退出。
+	if paymentSvc != nil {
+		paymentSvc.StartSweeper(workerCtx, time.Minute)
+	}
 
-	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc)
+	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc, paymentSvc)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {
@@ -237,6 +246,52 @@ func migrateGithubBindings(users *store.UserStore, bindings *store.OAuthBindingS
 		logging.Infof("oauth: migrated %d legacy github bindings to oauth_bindings", len(legacy))
 	}
 	return nil
+}
+
+// initPaymentService 组装充值通道（支付渠道 → 余额）。
+//
+// 三种情况返回 nil（/api/billing/recharge 回 503，其余功能不受影响）：
+//   - payment 段没配，或显式写了 enabled: false；
+//   - 计费被关掉——充值要写 balance_micro 与流水，那是计费引擎的活，没有入账的去处；
+//   - 网关参数不合法（缺密钥、不是 https）。
+//
+// 参数不合法时只记错误不 Fatalf：一个部署「没接支付」和「进程起不来」是两回事。
+func initPaymentService(cfg PaymentConfig, db *gorm.DB, billingSvc *service.Service, now func() time.Time) *service.PaymentService {
+	if cfg.Disabled() {
+		return nil
+	}
+	if billingSvc == nil {
+		logging.Warnf("payment: enabled but billing is disabled — recharge is unavailable")
+		return nil
+	}
+
+	channels, err := cfg.ChannelsAllowlist()
+	if err != nil {
+		logging.Errorf("payment disabled: %v", err)
+		return nil
+	}
+	gateway, err := epay.New(epay.Config{
+		APIBaseURL: cfg.APIBaseURL,
+		PID:        cfg.PID,
+		Key:        cfg.Key,
+		NotifyURL:  cfg.NotifyURL,
+		ReturnURL:  cfg.ReturnURL,
+		Timeout:    cfg.Timeout,
+		Debug:      cfg.Debug,
+	})
+	if err != nil {
+		logging.Errorf("payment disabled: %v", err)
+		return nil
+	}
+
+	svcCfg := cfg.PaymentServiceConfig(channels)
+	if now != nil {
+		svcCfg.Now = now
+	}
+	logging.Infof("payment ready: gateway=%s pid=%d channels=%v min=%s max=%s ttl=%s",
+		cfg.APIBaseURL, cfg.PID, channels,
+		billing.FormatMicro(svcCfg.MinAmountMicro), billing.FormatMicro(svcCfg.MaxAmountMicro), svcCfg.OrderTTL)
+	return service.NewPaymentService(store.NewPaymentStore(db), billingSvc, gateway, svcCfg)
 }
 
 // initAssetService 构造对象存储与资源服务。
