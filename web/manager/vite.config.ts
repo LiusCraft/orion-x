@@ -14,8 +14,8 @@ export default defineConfig({
 	port: 5173,
 	strictPort: true,
     proxy: {
-      '/api': 'http://localhost:9090',
-      '/internal': 'http://localhost:9090',
+      '/api/': 'http://localhost:9090',
+      '/internal/': 'http://localhost:9090',
     },
   },
 })
