@@ -1,6 +1,6 @@
 // Package assets 管理「资源」（用户上传的文件）：校验、落对象存储、元数据与访问 URL。
 //
-// 资源由使用它的领域创建：知识库文档（kb_document）、音色参考音频（voice_sample）、
+// 资源由使用它的领域创建：知识库文档（kb:document）、音色参考音频（voice:sample）、
 // 图片（image）。领域表只保存 asset_id 指针；对象键与预签名 URL 都从这里产生。
 package assets
 
@@ -31,9 +31,9 @@ const (
 	// PurposeImage 图片：资源库直接上传（logo / 封面 / 头像）。
 	PurposeImage Purpose = "image"
 	// PurposeVoiceSample 音色复刻参考音频。
-	PurposeVoiceSample Purpose = "voice_sample"
+	PurposeVoiceSample Purpose = "voice:sample"
 	// PurposeKBDocument 知识库原始文档（用于解析与向量化）。
-	PurposeKBDocument Purpose = "kb_document"
+	PurposeKBDocument Purpose = "kb:document"
 )
 
 var (

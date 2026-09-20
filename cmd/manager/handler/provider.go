@@ -123,7 +123,7 @@ func (h *ProviderHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, updated)
 }
 
-// ProviderSlug 系统支持的 provider slug（从各工厂注册表动态收集）
+// ProviderSlug 系统支持的 provider slug（从各工厂注册表动态收集，格式为 `<category>:<provider>`）
 type ProviderSlug struct {
 	Slug     string `json:"slug"`
 	Category string `json:"category"`
@@ -136,7 +136,7 @@ func (h *ProviderHandler) Slugs(c *gin.Context) {
 	var slugs []ProviderSlug
 	for key, meta := range asrprovider.ListRegistered() {
 		slugs = append(slugs, ProviderSlug{
-			Slug:     "asr/" + key,
+			Slug:     "asr:" + key,
 			Category: "asr",
 			Name:     meta.Name,
 			BaseURL:  meta.DefaultBaseURL,
@@ -144,7 +144,7 @@ func (h *ProviderHandler) Slugs(c *gin.Context) {
 	}
 	for key, meta := range ttsprovider.ListRegistered() {
 		slugs = append(slugs, ProviderSlug{
-			Slug:     "tts/" + key,
+			Slug:     "tts:" + key,
 			Category: "tts",
 			Name:     meta.Name,
 			BaseURL:  meta.DefaultBaseURL,
@@ -152,7 +152,7 @@ func (h *ProviderHandler) Slugs(c *gin.Context) {
 	}
 	for key, meta := range llmprovider.DefaultRegistry().ListRegistered() {
 		slugs = append(slugs, ProviderSlug{
-			Slug:     "llm/" + key,
+			Slug:     "llm:" + key,
 			Category: "llm",
 			Name:     meta.Name,
 			BaseURL:  meta.DefaultBaseURL,

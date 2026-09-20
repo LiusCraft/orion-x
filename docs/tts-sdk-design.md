@@ -357,7 +357,7 @@ const (
     FeatureStreaming    Feature = "streaming"
     FeatureSSML         Feature = "ssml"
     FeatureEmotion      Feature = "emotion"
-    FeatureVoiceCloning Feature = "voice_cloning"
+    FeatureVoiceCloning Feature = "voice:cloning"
     FeatureWarmup       Feature = "warmup"
 )
 ```
@@ -392,7 +392,7 @@ type ProviderMeta struct {
     Description    string
     DefaultBaseURL string
     Models         map[string]ModelInfo
-    Features       []Feature // streaming / ssml / emotion / voice_cloning / warmup
+    Features       []Feature // streaming / ssml / emotion / voice:cloning / warmup
 }
 
 type Constructor func(cfg Config) (Synthesizer, error)

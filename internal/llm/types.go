@@ -22,8 +22,8 @@ type BlockType string
 
 const (
 	BlockTypeText       BlockType = "text"
-	BlockTypeToolCall   BlockType = "tool_call"
-	BlockTypeToolResult BlockType = "tool_result"
+	BlockTypeToolCall   BlockType = "tool:call"
+	BlockTypeToolResult BlockType = "tool:result"
 	BlockTypeRefusal    BlockType = "refusal"
 )
 
@@ -137,7 +137,7 @@ func (c ToolCall) ArgumentsJSON() json.RawMessage { return json.RawMessage(c.Arg
 type SchemaMode string
 
 const (
-	SchemaModeBestEffort SchemaMode = "best_effort"
+	SchemaModeBestEffort SchemaMode = "best:effort"
 	SchemaModeStrict     SchemaMode = "strict"
 )
 
@@ -259,9 +259,9 @@ type StopReason string
 
 const (
 	StopReasonStop          StopReason = "stop"
-	StopReasonToolCalls     StopReason = "tool_calls"
+	StopReasonToolCalls     StopReason = "tool:calls"
 	StopReasonLength        StopReason = "length"
-	StopReasonContentFilter StopReason = "content_filter"
+	StopReasonContentFilter StopReason = "content:filter"
 	StopReasonPause         StopReason = "pause"
 	StopReasonError         StopReason = "error"
 	StopReasonUnknown       StopReason = "unknown"
@@ -290,13 +290,13 @@ type Response struct {
 type EventType string
 
 const (
-	EventResponseStart         EventType = "response_start"
-	EventTextDelta             EventType = "text_delta"
-	EventToolCallStart         EventType = "tool_call_start"
-	EventToolCallDelta         EventType = "tool_call_delta"
-	EventToolCallDone          EventType = "tool_call_done"
-	EventReasoningSummaryDelta EventType = "reasoning_summary_delta"
-	EventResponseDone          EventType = "response_done"
+	EventResponseStart         EventType = "response:start"
+	EventTextDelta             EventType = "text:delta"
+	EventToolCallStart         EventType = "tool:call:start"
+	EventToolCallDelta         EventType = "tool:call:delta"
+	EventToolCallDone          EventType = "tool:call:done"
+	EventReasoningSummaryDelta EventType = "reasoning:summary:delta"
+	EventResponseDone          EventType = "response:done"
 )
 
 type ToolCallDelta struct {

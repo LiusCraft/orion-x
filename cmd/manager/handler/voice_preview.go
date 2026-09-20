@@ -18,7 +18,7 @@ type voiceAssetStore interface {
 }
 
 // voicePreviewURLs 给复刻音色补上试听地址：直接复用上传的参考音频
-// （source_asset_id 指向的 voice_sample 资源）现算预签名 URL。
+// （source_asset_id 指向的 voice:sample 资源）现算预签名 URL。
 //
 // 预签名是本地计算且 URL 会过期，因此只在响应时计算、不写回数据库；
 // 单个音色取件失败只跳过该条，不影响整个列表。

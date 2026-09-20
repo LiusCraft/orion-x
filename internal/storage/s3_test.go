@@ -102,7 +102,7 @@ func TestGetOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	rc, err := backend.Get(context.Background(), "kb_document/u/a1.md")
+	rc, err := backend.Get(context.Background(), "kb:document/u/a1.md")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}

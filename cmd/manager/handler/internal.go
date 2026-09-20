@@ -252,11 +252,11 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 
 func llmAdapterFromSlug(slug string) string {
 	switch strings.ToLower(strings.TrimSpace(slug)) {
-	case "llm/openai-responses", "openai-responses":
+	case "llm:openai-responses", "openai-responses":
 		return "openai-responses"
-	case "llm/anthropic-messages", "anthropic-messages":
+	case "llm:anthropic-messages", "anthropic-messages":
 		return "anthropic-messages"
-	case "llm/openai-completions", "openai-completions":
+	case "llm:openai-completions", "openai-completions":
 		return "openai-completions"
 	default:
 		return "openai-completions"

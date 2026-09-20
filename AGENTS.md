@@ -56,6 +56,21 @@ Two entry points:
 
 Design docs in `docs/` -- read before modifying major modules.
 
+## Naming conventions
+
+我们自己定义的**标识值**（资源 ID、计费项 code、枚举值、命名空间、幂等键）用 `:` 拼接分段，不用 `.` / `_` / `/`：
+
+- 计费项：`llm:tokens:input`、`tts:characters`、`voice:clone`
+- 枚举值：`voice:clone`（meter source）、`half:up`（rounding）、`usage:event`（ref type）
+- 幂等键：`settle:<event_id>`、`voice:clone:<voice_id>`
+
+不适用，保持原样：
+
+- 数据库表名/列名（`billing_prices`、`item_code`）、Go / JSON 字段名
+- 文件路径、URL 路径、环境变量、HTTP header
+- 镜像第三方协议或标准的值：厂商 wire 值（`content_block_delta`、`tool_calls`）、设备协议字段（`sentence_start`）、语言码（`zh-CN`）、厂商 model id（`qwen-plus`）
+- 受外部格式约束的值：LLM function name 只允许 `[a-zA-Z0-9_-]`
+
 ## Quirks
 
 - **Mock convention**: inline mock structs in `*_test.go` files, no mock generator.

@@ -36,6 +36,6 @@ const (
 	FeatureStreaming    Feature = "streaming"
 	FeatureSSML         Feature = "ssml"
 	FeatureEmotion      Feature = "emotion"
-	FeatureVoiceCloning Feature = "voice_cloning"
+	FeatureVoiceCloning Feature = "voice:cloning"
 	FeatureWarmup       Feature = "warmup"
 )

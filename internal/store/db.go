@@ -27,10 +27,49 @@ func Open(dsn string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("store: fts index: %w", err)
 	}
 
+	// 必须在 SyncSystemProviders 之前：sync 按 slug 匹配系统 provider，
+	// 旧格式 slug 会被当成过期记录删除并重建（连带 models 换 ID）。
+	if err := migrateLegacyIdentifiers(db); err != nil {
+		return nil, fmt.Errorf("store: migrate legacy identifiers: %w", err)
+	}
+
 	return db, nil
 }
 
 func ensureTurnFTSIndex(db *gorm.DB) error {
 	return db.Exec(`CREATE INDEX IF NOT EXISTS idx_turns_fts ON session_turns
 		USING gin(to_tsvector('simple', coalesce(user_text,'') || ' ' || coalesce(assistant_text,'')))`).Error
+}
+
+// migrateLegacyIdentifiers 把历史标识值迁移到命名约定（`:` 分段，见 AGENTS.md）。
+// 一次性、幂等：迁移后再执行不会匹配到任何行。
+func migrateLegacyIdentifiers(db *gorm.DB) error {
+	migrations := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "assets.purpose",
+			sql: `UPDATE assets SET purpose = CASE purpose
+				WHEN 'voice_sample' THEN 'voice:sample'
+				WHEN 'kb_document' THEN 'kb:document'
+			END
+			WHERE purpose IN ('voice_sample', 'kb_document')`,
+		},
+		{
+			name: "providers.slug",
+			sql:  `UPDATE providers SET slug = replace(slug, '/', ':') WHERE slug ~ '^(asr|tts|llm)/'`,
+		},
+	}
+
+	for _, m := range migrations {
+		res := db.Exec(m.sql)
+		if res.Error != nil {
+			return fmt.Errorf("%s: %w", m.name, res.Error)
+		}
+		if res.RowsAffected > 0 {
+			logging.Infof("store: migrated %d %s row(s) to the `:` identifier convention", res.RowsAffected, m.name)
+		}
+	}
+	return nil
 }

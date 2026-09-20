@@ -32,7 +32,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by purpose (image | voice_sample | kb_document)",
+                        "description": "Filter by purpose (image | voice:sample | kb:document)",
                         "name": "purpose",
                         "in": "query"
                     },
@@ -108,7 +108,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Purpose: image | voice_sample | kb_document",
+                        "description": "Purpose: image | voice:sample | kb:document",
                         "name": "purpose",
                         "in": "formData",
                         "required": true
@@ -2468,7 +2468,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "The path model determines the provider and target model. The request body must include name and either source_asset_id (a voice_sample resource from POST /api/assets) or source_audio_url with format; prefix is optional and generated when omitted. The reference audio is signed on demand and only source_asset_id is persisted.",
+                "description": "The path model determines the provider and target model. The request body must include name and either source_asset_id (a voice:sample resource from POST /api/assets) or source_audio_url with format; prefix is optional and generated when omitted. The reference audio is signed on demand and only source_asset_id is persisted.",
                 "consumes": [
                     "application/json"
                 ],
