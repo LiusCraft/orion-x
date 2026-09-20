@@ -388,6 +388,85 @@ export function refTypeLabel(refType: string): string {
 	return REF_TYPE_LABELS[refType] ?? refType;
 }
 
+// ---------------------------------------------------------------- 充值 / 支付订单
+
+const PAYMENT_STATUS_LABELS: Record<string, string> = {
+	"order:pending": "待支付",
+	"order:paid": "支付成功",
+	"order:credited": "已到账",
+	"order:closed": "已关闭",
+	"order:refunded": "已退款",
+};
+
+export function paymentStatusLabel(status: string): string {
+	return PAYMENT_STATUS_LABELS[status] ?? status;
+}
+
+export type PaymentTone = "zinc" | "emerald" | "amber" | "red" | "violet";
+
+export function paymentStatusTone(status: string): PaymentTone {
+	switch (status) {
+		case "order:pending":
+			return "amber";
+		case "order:credited":
+			return "emerald";
+		case "order:refunded":
+			return "violet";
+		case "order:closed":
+			return "zinc";
+		default:
+			return "red";
+	}
+}
+
+const PAYMENT_CHANNEL_LABELS: Record<string, string> = {
+	"epay:alipay": "支付宝",
+	"epay:wxpay": "微信支付",
+	"epay:qqpay": "QQ 钱包",
+};
+
+export function paymentChannelLabel(channel: string): string {
+	return PAYMENT_CHANNEL_LABELS[channel] ?? channel;
+}
+
+/**
+ * 待支付的订单只应该由二维码/收银台推着走；其余三个状态都是终点（closed 也算：
+ * 晚到的回调会把它拉回 paid，但那是服务端的事，页面不用等）。
+ */
+export function isPaymentPending(status: string): boolean {
+	return status === "order:pending";
+}
+
+/** 这笔订单的钱到底落到余额里没有——只有 credited 是“到了”。 */
+export function isPaymentCredited(status: string): boolean {
+	return status === "order:credited";
+}
+
+/**
+ * 订单倒计时文案。返回 null 表示已经过期（或时间戳解析不了）——过期的 pending
+ * 订单不算失败：网关那边可能还能付，Sweep 会先查单再决定关不关。
+ */
+export function paymentExpiryHint(
+	expiresAt: string,
+	now = new Date(),
+): string | null {
+	const target = new Date(expiresAt);
+	if (Number.isNaN(target.getTime())) return null;
+	const rest = target.getTime() - now.getTime();
+	if (rest <= 0) return null;
+
+	const minutes = Math.floor(rest / 60000);
+	if (minutes >= 60) {
+		const hours = Math.floor(minutes / 60);
+		return `剩 ${hours} 小时 ${minutes % 60} 分`;
+	}
+	if (minutes >= 1) return `剩 ${minutes} 分钟`;
+	return `剩 ${Math.max(1, Math.floor(rest / 1000))} 秒`;
+}
+
+/** 充值金额的快捷档位（元）——只是减少输入，不是限额；限额在服务端。 */
+export const RECHARGE_PRESETS = [10, 50, 100, 500] as const;
+
 /** 价格版本的状态由 effective_from / effective_to 决定，没有独立的开关（§3.2）。 */
 export function isPriceEffective(price: Pick<BillingPrice, "effective_from" | "effective_to">, now = new Date()): boolean {
 	const from = new Date(price.effective_from);
@@ -665,6 +744,25 @@ export function billingErrorStatus(err: unknown): number | undefined {
 export function isBillingDisabled(err: unknown): boolean {
 	return billingErrorStatus(err) === 503;
 }
+
+/**
+ * 给客户看的错误文案。
+ *
+ * 服务端的 `{error}` 是给我们自己排障用的（"billing: amount must be between 1 and
+ * 10000"、"epay: create payment: ..."），原样贴到界面上就是让客户读我们的代码。
+ * 规则：带着内部前缀的一律换成人话，其余（本来就是给人看的提示）原样用。
+ */
+export function userFacingError(err: unknown, fallback: string): string {
+	const text = billingErrorMessage(err, "");
+	if (text === "") return fallback;
+	for (const prefix of INTERNAL_ERROR_PREFIXES) {
+		if (text.startsWith(prefix)) return fallback;
+	}
+	return text;
+}
+
+/** 服务端错误的命名空间前缀（与 Go 侧的包名前缀一致）。 */
+const INTERNAL_ERROR_PREFIXES = ["billing:", "epay:", "store:", "payment:"];
 
 /** 取服务端的 `{error}` 文案，拿不到就用兜底文案。 */
 export function billingErrorMessage(err: unknown, fallback: string): string {

@@ -970,6 +970,72 @@ export interface BillingAdjustRequest {
 	ref_id?: string;
 }
 
+/** 支付订单状态。paid（网关已收款）与 credited（余额已加）是两步，别合并看。 */
+export type BillingPaymentStatus =
+	| "order:pending"
+	| "order:paid"
+	| "order:credited"
+	| "order:closed"
+	| "order:refunded";
+
+/** 一笔充值订单。金额是微元；channel 是我们自己的渠道标识（epay:alipay 等）。 */
+export interface BillingPaymentOrder {
+	out_trade_no: string;
+	subject_type: BillingSubjectType;
+	subject_id: string;
+	channel: string;
+	amount_micro: number;
+	currency: string;
+	title: string;
+	status: BillingPaymentStatus;
+	gateway_trade_no?: string;
+	client_ip?: string;
+	expires_at: string;
+	paid_at?: string | null;
+	credited_at?: string | null;
+	refunded_at?: string | null;
+	created_at: string;
+	updated_at: string;
+	creator: string;
+}
+
+export interface BillingRechargeRequest {
+	channel: string;
+	/** 微元。客户端只说“要充多少”，付多少由服务端算。 */
+	amount_micro: number;
+}
+
+/** 充值页可用的额度与支付方式。渠道清单由服务端给，前端不写死。 */
+export interface BillingRechargeConfig {
+	currency: string;
+	min_amount_micro: number;
+	max_amount_micro: number;
+	channels: string[];
+}
+
+/** 下单结果：pay_url（跳收银台）与 qrcode（扫码）取决于网关返回什么，两个都为空才算失败。 */
+export interface BillingRechargeResult {
+	out_trade_no: string;
+	amount_micro: number;
+	currency: string;
+	channel: string;
+	status: BillingPaymentStatus;
+	expires_at: string;
+	pay_url?: string;
+	qrcode?: string;
+	url_scheme?: string;
+}
+
+export interface BillingPaymentQueryParams {
+	status?: string;
+	channel?: string;
+	keyword?: string;
+	subject_type?: string;
+	subject_id?: string;
+	page?: number;
+	page_size?: number;
+}
+
 export interface BillingSummaryParams {
 	/** RFC3339；都省略 = 本账期到现在 */
 	from?: string;
@@ -1018,6 +1084,19 @@ export const billingApi = {
 	modelUsage: (params?: BillingSummaryParams) =>
 		http.get<BillingModelUsage>("/billing/usage-by-model", { params }),
 	prices: () => http.get<BillingPriceList>("/billing/prices"),
+	// 充值（支付渠道 → 余额）。没接支付渠道时回 503，和计费未启用同一个处理。
+	recharge: (data: BillingRechargeRequest) =>
+		http.post<BillingRechargeResult>("/billing/recharge", data),
+	rechargeConfig: () =>
+		http.get<BillingRechargeConfig>("/billing/recharge/config"),
+	rechargeOrders: (params?: BillingPaymentQueryParams) =>
+		http.get<BillingPageList<BillingPaymentOrder>>("/billing/recharge", {
+			params,
+		}),
+	rechargeOrder: (outTradeNo: string) =>
+		http.get<BillingPaymentOrder>(
+			`/billing/recharge/${encodeURIComponent(outTradeNo)}`,
+		),
 };
 
 // 管理端：定价、账户、流水、报表（middleware.RequireAdmin）。
@@ -1046,4 +1125,15 @@ export const billingAdminApi = {
 		http.get<BillingPageList<BillingLedger>>("/billing/ledger", { params }),
 	stats: (params: { account_id: string } & BillingSummaryParams) =>
 		http.get<BillingStats>("/billing/stats", { params }),
+	// 充值订单列表与用户端是同一条路径，服务端按 is_admin 分流：
+	// admin 能看全部并可按主体/状态/渠道过滤，普通用户只能看自己的。
+	rechargeOrders: (params?: BillingPaymentQueryParams) =>
+		http.get<BillingPageList<BillingPaymentOrder>>("/billing/recharge", {
+			params,
+		}),
+	refundRecharge: (outTradeNo: string, note: string) =>
+		http.post<BillingPaymentOrder>(
+			`/billing/recharge/${encodeURIComponent(outTradeNo)}/refund`,
+			{ note },
+		),
 };

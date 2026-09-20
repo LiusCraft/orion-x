@@ -23,6 +23,7 @@ import ProvidersPage from "@/pages/models/ProvidersPage";
 
 import UsagePage from "@/pages/billing/UsagePage";
 import PricesPage from "@/pages/billing/PricesPage";
+import RechargePage from "@/pages/billing/RechargePage";
 import AdminBillingPage from "@/pages/billing/AdminBillingPage";
 
 import AccountPage from "@/pages/AccountPage";
@@ -91,6 +92,7 @@ export default function App() {
 
 					{/* Billing */}
 					<Route path="/billing/usage" element={<UsagePage />} />
+					<Route path="/billing/recharge" element={<RechargePage />} />
 					<Route path="/billing/prices" element={<PricesPage />} />
 					<Route
 						path="/billing/admin"
