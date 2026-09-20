@@ -502,7 +502,7 @@ func (h *BillingAdminHandler) Stats(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	from, to = h.defaultRange(from, to)
+	from, to = defaultBillingRange(h.svc, from, to)
 
 	summary, err := h.svc.Summary(c.Request.Context(), account.SubjectType, account.SubjectID, from, to)
 	if err != nil {
@@ -603,6 +603,60 @@ func (h *BillingUserHandler) Usage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": list, "total": total, "page": page, "page_size": pageSize})
 }
 
+// modelUsageRowLimit 是 /usage-by-model 一次返回的行数上限。聚合结果没有分页（行数 =
+// 模型数 × 计费项数，正常远小于它），上限只是防呆。
+const modelUsageRowLimit = 500
+
+// GET /api/billing/usage-by-model?from=&to= — 自己的按模型聚合用量（模型监控页）。
+//
+// 一行 = 模型 × 计费项：数量是这段时间上报的原始量（含还没结算的），金额只算已结算的
+// charged 事件，所以“金额 / 数量”天然会偏低一截——页面上要把这件事讲清楚，别让人以为
+// 账单少算了。按模型汇总、算占比是展示层的事，服务端只给事实（§19）。
+//
+// 和 /usage 一样，账户查不到不是错误：还没产生过任何用量的人就是没有账户。
+func (h *BillingUserHandler) ModelUsage(c *gin.Context) {
+	if !billingReady(c, h.svc) {
+		return
+	}
+	from, to, err := billingTimeRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	from, to = defaultBillingRange(h.svc, from, to)
+
+	rows := []store.UsageByModelRow{}
+	currency := h.svc.Config().Currency
+	account, err := h.svc.Store().GetAccountBySubject(billing.SubjectTypeUser, middleware.UserID(c))
+	switch {
+	case err == nil:
+		currency = account.Currency
+		rows, err = h.svc.Store().SumUsageByModel(store.UsageByModelQuery{
+			AccountID: account.ID,
+			From:      &from,
+			To:        &to,
+			Limit:     modelUsageRowLimit,
+		})
+		if err != nil {
+			writeBillingError(c, err)
+			return
+		}
+		if rows == nil {
+			rows = []store.UsageByModelRow{}
+		}
+	case !errors.Is(err, store.ErrNotFound):
+		writeBillingError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"currency":       currency,
+		"from":           from,
+		"to":             to,
+		"usage_by_model": rows,
+	})
+}
+
 // GET /api/billing/prices — 当前生效的平台标准价（价格公示）。
 // 账户协议价不外露：那是别人和平台的约定。
 func (h *BillingUserHandler) Prices(c *gin.Context) {
@@ -655,10 +709,10 @@ func optionalTime(t time.Time) *time.Time {
 	return &t
 }
 
-// defaultRange 把缺省的 from/to 补成“本账期到现在”。Summary 内部也会补，但 store
-// 的聚合查询要具体时刻，所以聚合类接口统一在这里补一次。
-func (h *BillingAdminHandler) defaultRange(from, to time.Time) (time.Time, time.Time) {
-	cfg := h.svc.Config()
+// defaultBillingRange 把缺省的 from/to 补成“本账期到现在”。Summary 内部也会补，但
+// store 的聚合查询要具体时刻，所以聚合类接口统一在这里补一次。
+func defaultBillingRange(svc *service.Service, from, to time.Time) (time.Time, time.Time) {
+	cfg := svc.Config()
 	now := cfg.Now()
 	if from.IsZero() {
 		local := now.In(cfg.PeriodLocation)

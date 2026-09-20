@@ -295,3 +295,36 @@ func TestBillingModelSchema(t *testing.T) {
 		})
 	}
 }
+
+// TestUsageByModelRowSchema 钉住模型用量聚合行的字段 → 列别名映射。
+//
+// 这些列名来自 SumUsageByModel 的 SELECT 别名，Scan 是按它对应的：字段名与列名不一致的
+// （AIModelID → aimodel_id，而 GORM 从字段名推的是 ai_model_id）少一个 gorm tag 就会**静默**
+// 扫回空值——报表不会报错，只会少数据。
+func TestUsageByModelRowSchema(t *testing.T) {
+	want := map[string]string{
+		"AIModelID": "aimodel_id", "ModelName": "model_name", "ModelType": "model_type",
+		"ProviderID": "provider_id", "ProviderName": "provider_name", "ItemCode": "item_code",
+		"Quantity": "quantity", "AmountMicro": "amount_micro", "EventCount": "event_count",
+		"PendingEvents": "pending_events", "UnpaidEvents": "unpaid_events",
+		"SkippedEvents": "skipped_events",
+	}
+
+	s, err := schema.Parse(&UsageByModelRow{}, &sync.Map{}, schema.NamingStrategy{})
+	if err != nil {
+		t.Fatalf("parse schema: %v", err)
+	}
+	for name, column := range want {
+		field := s.LookUpField(name)
+		if field == nil {
+			t.Errorf("field %s not found", name)
+			continue
+		}
+		if field.DBName != column {
+			t.Errorf("field %s: column = %q, want %q", name, field.DBName, column)
+		}
+	}
+	if len(s.Fields) != len(want) {
+		t.Errorf("row has %d fields, this test covers %d of them (new column? add it here)", len(s.Fields), len(want))
+	}
+}

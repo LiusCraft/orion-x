@@ -453,6 +453,7 @@ type ChargeRequest struct {
 | --- | --- | --- |
 | GET | `/api/billing/summary` | 余额 + 本月消耗 + 按计费项 Top |
 | GET | `/api/billing/usage` | 用量明细（分页，可按 item_code / 时间段过滤） |
+| GET | `/api/billing/usage-by-model` | 按模型 × 计费项聚合的用量与已计费金额（控制台「模型监控」页） |
 | GET | `/api/billing/prices` | 当前生效价格公示 |
 
 内部（数据面）：见 §6.1 和 §14，**必须加内部鉴权**——`Authorization: Bearer`，且未配置 token 时拒绝（§14.1）。现有 `/internal/*` 无鉴权，对读接口尚可接受，对写账单不可接受。

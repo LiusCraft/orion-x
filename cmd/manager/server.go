@@ -238,6 +238,8 @@ func newRouter(
 		billingUser := api.Group("/billing", jwtMw)
 		billingUser.GET("/summary", billingUserH.Summary)
 		billingUser.GET("/usage", billingUserH.Usage)
+		// 模型监控页的数据源：按模型 × 计费项聚合的用量，账户由控制面自己推。
+		billingUser.GET("/usage-by-model", billingUserH.ModelUsage)
 		api.GET("/billing/prices", jwtMw, func(c *gin.Context) {
 			if middleware.IsAdmin(c) {
 				billingAdminH.ListPrices(c)

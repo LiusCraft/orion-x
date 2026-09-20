@@ -21,6 +21,14 @@ import (
 const (
 	usageStatusPending = "pending"
 	usageStatusCharged = "charged"
+	// usageStatusSkipped 是结算过、但本来就不该产生金额的事件（BYOK / 计费项未启用 / 量为 0）。
+	usageStatusSkipped = "skipped"
+	// usageStatusUnpaid 是没算成钱的事件：没命中价格、或者扣款时撞上透支策略。
+	// 它需要人工处理（补价格 / 重放），报表里必须能看见。
+	usageStatusUnpaid = "unpaid"
+	// usageStatusRejected 是控制面拒绝掉的上报（账户被停用之类）：它既不是用量也不是
+	// 待结算的账，聚合报表里不出现。
+	usageStatusRejected = "rejected"
 )
 
 // usageEventInsertBatch 是批量插入的分批大小。
@@ -127,6 +135,103 @@ func (s *BillingStore) SumUsageByItem(accountID string, from, to time.Time, limi
 		Scan(&out).Error
 	if err != nil {
 		return nil, fmt.Errorf("billing store: sum usage by item: %w", err)
+	}
+	return out, nil
+}
+
+// UsageByModelQuery 是「模型 × 计费项」聚合的过滤条件。
+// AccountID 为空表示不限账户（平台级报表）；From/To 作用在 occurred_at 上，左闭右开。
+type UsageByModelQuery struct {
+	AccountID string
+	From      *time.Time
+	To        *time.Time
+	Limit     int
+}
+
+// UsageByModelRow 是（模型 × 计费项）粒度的一行用量。
+//
+//   - Quantity 是这段时间上报的全部原始量，**含还没结算的**；单位随 ItemCode 走（§13），
+//     跨计费项不可加；
+//   - AmountMicro 只累计已计费（charged）事件，所以它和 Quantity 不是同一批事件的产物；
+//   - 后面三个计数器是事件的状态分布：Pending 还在结算队列里（秒级）、Unpaid 没算成钱
+//     （没配价格 / 透支被拒，需要人工处理）、Skipped 本来就不计费（BYOK / 未启用 / 量为 0）。
+//     剩下的就是已计费（charged）——四个状态加起来 = EventCount。缺失的那部分金额不是 0，
+//     是“还没算”，报表要能把这件事说出来。
+//
+// 模型名 / 类型 / 厂商名是 join 出来的展示信息，不是事实的一部分：模型行被删掉时它们是
+// 空串，调用方按 aimodel_id 显示即可。
+//
+// AIModelID 的 column tag 不能省：列名是 aimodel_id（历史拼写，见 BillingUsageEvent），
+// 而 GORM 从字段名推出的是 ai_model_id——少了这个 tag，Scan 会静默扫回空串。
+type UsageByModelRow struct {
+	AIModelID     string `gorm:"column:aimodel_id" json:"aimodel_id"`
+	ModelName     string `json:"model_name"`
+	ModelType     string `json:"model_type"`
+	ProviderID    string `json:"provider_id"`
+	ProviderName  string `json:"provider_name"`
+	ItemCode      string `json:"item_code"`
+	Quantity      int64  `json:"quantity"`
+	AmountMicro   int64  `json:"amount_micro"`
+	EventCount    int64  `json:"event_count"`
+	PendingEvents int64  `json:"pending_events"`
+	UnpaidEvents  int64  `json:"unpaid_events"`
+	SkippedEvents int64  `json:"skipped_events"`
+}
+
+// usageByModelSelect 是聚合的列。状态字面量由常量拼进来（不是另抄一份），拼出来的是
+// 编译期常量，没有注入面。
+var usageByModelSelect = `billing_usage_events.aimodel_id AS aimodel_id,` +
+	` COALESCE(ai_models.name, '') AS model_name,` +
+	` COALESCE(ai_models.type, '') AS model_type,` +
+	` COALESCE(ai_models.provider_id, billing_usage_events.provider_id) AS provider_id,` +
+	` COALESCE(providers.name, '') AS provider_name,` +
+	` billing_usage_events.item_code AS item_code,` +
+	` SUM(billing_usage_events.quantity) AS quantity,` +
+	` SUM(CASE WHEN billing_usage_events.status = '` + usageStatusCharged + `' THEN billing_usage_events.amount_micro ELSE 0 END) AS amount_micro,` +
+	` COUNT(*) AS event_count` +
+	usageStatusCountSelect(usageStatusPending, "pending_events") +
+	usageStatusCountSelect(usageStatusUnpaid, "unpaid_events") +
+	usageStatusCountSelect(usageStatusSkipped, "skipped_events")
+
+// usageStatusCountSelect 拼一个“数某个状态的事件条数”的聚合列。status 与 alias 都是
+// 调用方给的常量（见 usageByModelSelect），不来自请求。
+func usageStatusCountSelect(status, alias string) string {
+	return `, SUM(CASE WHEN billing_usage_events.status = '` + status + `' THEN 1 ELSE 0 END) AS ` + alias
+}
+
+// SumUsageByModel 按（模型 × 计费项）汇总一段时间内的用量与已计费金额。
+//
+// rejected 事件不算用量（那是控制面拒绝的上报），其余状态全部计入——排查时正需要看到
+// 「量到了但没算成钱」的那些（skipped / unpaid / pending），所以这里不按状态过滤。
+//
+// join ai_models / providers 只为了报表演示，两个都是 LEFT JOIN：模型或厂商行被删掉了，
+// 那段用量也不该从报表里消失。表名是 GORM 从 AIModel 推出来的 ai_models（没有 TableName
+// 方法），别按结构体名写成 aimodels。
+func (s *BillingStore) SumUsageByModel(q UsageByModelQuery) ([]UsageByModelRow, error) {
+	db := s.db.Model(&BillingUsageEvent{}).
+		Select(usageByModelSelect).
+		Joins("LEFT JOIN ai_models ON ai_models.id = billing_usage_events.aimodel_id").
+		Joins("LEFT JOIN providers ON providers.id = COALESCE(ai_models.provider_id, billing_usage_events.provider_id)").
+		Where("billing_usage_events.status <> ?", usageStatusRejected).
+		Group("billing_usage_events.aimodel_id, billing_usage_events.item_code, ai_models.name, ai_models.type, " +
+			"COALESCE(ai_models.provider_id, billing_usage_events.provider_id), providers.name").
+		Order("billing_usage_events.aimodel_id ASC").
+		Order("billing_usage_events.item_code ASC").
+		Limit(normalizeLimit(q.Limit))
+
+	if q.AccountID != "" {
+		db = db.Where("billing_usage_events.account_id = ?", q.AccountID)
+	}
+	if q.From != nil {
+		db = db.Where("billing_usage_events.occurred_at >= ?", *q.From)
+	}
+	if q.To != nil {
+		db = db.Where("billing_usage_events.occurred_at < ?", *q.To)
+	}
+
+	var out []UsageByModelRow
+	if err := db.Scan(&out).Error; err != nil {
+		return nil, fmt.Errorf("billing store: sum usage by model: %w", err)
 	}
 	return out, nil
 }

@@ -470,12 +470,14 @@ export function PriceCreateDialog({
 								placeholder={
 									resourceType === "item"
 										? "item 级价格不带 resource_id"
-										: "provider / model / voice 的 ID"
+										: "库里的记录 ID（不是厂商的模型名 / 音色名）"
 								}
 								className="text-sm font-mono disabled:opacity-40"
 							/>
 							<p className="text-[11px] text-zinc-600">
-								item 级留空；停在某一级就必填（层级链：voice → model → provider）
+								item 级留空；停在某一级就必填（层级链：voice → model → provider）。
+								填的是库里的记录 ID（ai_models.id / providers.id / model_voices.id），
+								不是厂商侧的模型名或音色名——写错不会报错，只是永远匹配不上。
 							</p>
 						</div>
 					</div>
@@ -607,7 +609,7 @@ function IdHint({ resourceType }: { resourceType: BillingResourceType }) {
 	}
 	return (
 		<span className="ml-1 text-zinc-600 normal-case">
-			（{resourceTypeLabel(resourceType)} 级必填）
+			（{resourceTypeLabel(resourceType)} 级必填，填内部记录 ID）
 		</span>
 	);
 }

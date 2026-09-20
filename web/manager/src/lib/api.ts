@@ -908,6 +908,40 @@ export interface BillingStats {
 	to: string;
 }
 
+/**
+ * 模型监控的数据源（GET /api/billing/usage-by-model）：一行 = 模型 × 计费项。
+ *
+ * `quantity` 含还在 pending 等结算的量，`amount_micro` 只含已结算（charged）的事件
+ * ——两者不是同一批事件的产物。三个状态计数器把差额说清楚：pending 只是慢一拍，
+ * unpaid（没配价格 / 透支被拒）是真正需要处理的那部分，skipped 是本来就不计费的
+ * （BYOK / 计费项未启用 / 量为 0）；剩下的就是 charged。
+ */
+export interface BillingModelUsageRow {
+	aimodel_id: string;
+	/** 模型行被删掉时为空，按 aimodel_id 显示 */
+	model_name: string;
+	model_type: string;
+	provider_id: string;
+	provider_name: string;
+	item_code: string;
+	quantity: number;
+	amount_micro: number;
+	event_count: number;
+	/** 还在结算队列里（秒级） */
+	pending_events: number;
+	/** 没算成钱：没命中价格 / 透支被拒，需要人工处理 */
+	unpaid_events: number;
+	/** 本来就不计费：BYOK / 计费项未启用 / 量为 0 */
+	skipped_events: number;
+}
+
+export interface BillingModelUsage {
+	currency: string;
+	from: string;
+	to: string;
+	usage_by_model: BillingModelUsageRow[];
+}
+
 export interface BillingPageList<T> {
 	items: T[];
 	total: number;
@@ -980,6 +1014,9 @@ export const billingApi = {
 		http.get<BillingSummary>("/billing/summary", { params }),
 	usage: (params?: BillingUsageParams) =>
 		http.get<BillingPageList<BillingUsageEvent>>("/billing/usage", { params }),
+	/** 按模型 × 计费项聚合的用量（模型监控页） */
+	modelUsage: (params?: BillingSummaryParams) =>
+		http.get<BillingModelUsage>("/billing/usage-by-model", { params }),
 	prices: () => http.get<BillingPriceList>("/billing/prices"),
 };
 
