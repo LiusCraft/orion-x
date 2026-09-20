@@ -255,13 +255,13 @@ export default function MyModelsPage() {
                               {model.type === "speech" &&
                                 (() => {
                                   const slug = model.provider?.slug ?? "";
-                                  if (slug.startsWith("tts/"))
+                                  if (slug.startsWith("tts:"))
                                     return (
                                       <span className="text-[10px] px-1.5 py-0.5 rounded border bg-pink-400/10 text-pink-400 border-pink-400/20">
                                         TTS
                                       </span>
                                     );
-                                  if (slug.startsWith("asr/"))
+                                  if (slug.startsWith("asr:"))
                                     return (
                                       <span className="text-[10px] px-1.5 py-0.5 rounded border bg-sky-400/10 text-sky-400 border-sky-400/20">
                                         ASR
@@ -386,7 +386,7 @@ export default function MyModelsPage() {
                 options={providers
                   .filter((p) => {
                     const isVoice =
-                      p.slug.startsWith("tts/") || p.slug.startsWith("asr/");
+                      p.slug.startsWith("tts:") || p.slug.startsWith("asr:");
                     return form.type === "speech" ? isVoice : !isVoice;
                   })
                   .map((provider) => ({

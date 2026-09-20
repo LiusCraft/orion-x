@@ -176,7 +176,7 @@ export default function ProvidersPage() {
                     </div>
                     <div className="flex items-center gap-1.5 mt-1">
                       {(() => {
-                        const [cat, vendor] = p.slug.split("/");
+                        const [cat, vendor] = p.slug.split(":");
                         const catColor: Record<string, string> = {
                           llm: "bg-violet-600/15 text-violet-400 border-violet-500/20",
                           tts: "bg-pink-400/10 text-pink-400 border-pink-400/20",

@@ -14,7 +14,7 @@ LLM 层不应该继续以 OpenAI Chat Completions 的 `message + tool_calls` 作
 
 三个 adapter 内部必须直接使用对应的官方 Go SDK：两个 OpenAI adapter 统一使用 `github.com/openai/openai-go/v3`，Anthropic adapter 使用 `github.com/anthropics/anthropic-sdk-go`。adapter 不自行实现 HTTP client、SSE parser、重试器或 wire protocol。
 
-推荐的核心调用接口是 `Generate + Stream`，而不是当前的 `Chat + ChatSync`。流式响应必须输出 typed events，最终以一个完整 `Response` 收口。Agent 只消费 `text_delta` 和最终结果，provider adapter 负责把 SDK 类型转换为公共领域类型、聚合工具参数、保留原生上下文并归一化错误。
+推荐的核心调用接口是 `Generate + Stream`，而不是当前的 `Chat + ChatSync`。流式响应必须输出 typed events，最终以一个完整 `Response` 收口。Agent 只消费 `text:delta` 和最终结果，provider adapter 负责把 SDK 类型转换为公共领域类型、聚合工具参数、保留原生上下文并归一化错误。
 
 首期支持边界：文本、客户端函数工具、并行工具调用、流式输出、JSON Schema 结构化输出、usage、stop reason、取消和可诊断错误。OpenAI hosted tools、Anthropic server tools、图像、文件、音频、batch、background mode 暂不纳入公共能力。
 
@@ -133,9 +133,9 @@ type Stream interface {
 
 `Generate` 和 `Stream` 必须产生同构的最终 `Response`。`Stream` 的固定契约：
 
-1. 恰好一个 `response_start`；
+1. 恰好一个 `response:start`；
 2. 零到多个内容 delta 事件；
-3. 恰好一个 `response_done`，其中携带完整 `Response`；
+3. 恰好一个 `response:done`，其中携带完整 `Response`；
 4. 随后 `Recv` 返回 `io.EOF`。
 
 SDK 建立流之前返回的错误由 `Stream` 直接返回；SDK 流迭代过程中返回的错误由 `Recv` 映射为 typed `*APIError`，不会伪装为 EOF。
@@ -244,9 +244,9 @@ type Usage struct {
 公共 `StopReason` 建议限定为：
 
 - `stop`：自然完成；
-- `tool_calls`：需要客户端执行工具；
+- `tool:calls`：需要客户端执行工具；
 - `length`：达到输出或上下文限制；
-- `content_filter`：拒绝或安全拦截；
+- `content:filter`：拒绝或安全拦截；
 - `pause`：provider 要求继续同一 turn；
 - `error`：生成失败；
 - `unknown`：新值尚未映射。
@@ -262,7 +262,7 @@ type Event struct {
 	TextDelta  string
 	ToolCall   *ToolCallDelta
 	Reasoning  *ReasoningSummaryDelta
-	Response   *Response // only response_done
+	Response   *Response // only response:done
 }
 
 type ToolCallDelta struct {
@@ -275,13 +275,13 @@ type ToolCallDelta struct {
 
 首期事件集合：
 
-- `response_start`
-- `text_delta`
-- `tool_call_start`
-- `tool_call_delta`
-- `tool_call_done`
-- `reasoning_summary_delta`
-- `response_done`
+- `response:start`
+- `text:delta`
+- `tool:call:start`
+- `tool:call:delta`
+- `tool:call:done`
+- `reasoning:summary:delta`
+- `response:done`
 
 原生 ping、keepalive 和没有公共语义的中间事件不向上冒泡。未知事件记录 debug 日志后跳过；未知的终止状态必须映射为 `unknown` 并保留原值。
 
@@ -296,7 +296,7 @@ type ToolDefinition struct {
 }
 ```
 
-`SchemaMode` 首期提供 `best_effort` 和 `strict`。迁移默认使用 `best_effort`，以保持现有 MCP tool schema 的兼容性；不能依赖 Responses 与 Chat Completions 不同的隐式 strict 默认值。
+`SchemaMode` 首期提供 `best:effort` 和 `strict`。迁移默认使用 `best:effort`，以保持现有 MCP tool schema 的兼容性；不能依赖 Responses 与 Chat Completions 不同的隐式 strict 默认值。
 
 启用 `strict` 前统一校验 schema：对象应设置 `additionalProperties: false`，属性 required/nullable 规则满足目标 API 的严格模式约束。adapter 不应静默降级用户明确要求的 `strict`。
 
@@ -385,7 +385,7 @@ adapter 必须在发送前执行 `ValidateRequest`。UI 中的 capabilities 是�
 - assistant tool call blocks 合并为 assistant `tool_calls`。
 - user tool result blocks 展开为 `tool` role messages。
 - streaming 使用 accumulator 按 tool call index 聚合 ID、name 和 arguments。
-- 请求流式 usage 时显式启用对应 stream option；最终 usage 只写入 `response_done`。
+- 请求流式 usage 时显式启用对应 stream option；最终 usage 只写入 `response:done`。
 - 只接受第一个 choice。公共 API 不支持 `n > 1`；用户若需要多候选应发多个请求。
 - `finish_reason` 映射为公共 stop reason，并保留原值。
 

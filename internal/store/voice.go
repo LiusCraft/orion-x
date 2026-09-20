@@ -150,7 +150,7 @@ type CloneVoiceParams struct {
 	VoiceID        string // 复刻后厂商返回的音色 ID
 	Name           string
 	Description    string
-	SourceAssetID  string // 参考音频资源 ID（voice_sample）；legacy URL 调用方留空
+	SourceAssetID  string // 参考音频资源 ID（voice:sample）；legacy URL 调用方留空
 	SourceAudioURL string // legacy：外部音频 URL，不写预签名 URL
 	Langs          pq.StringArray
 	Creator        string

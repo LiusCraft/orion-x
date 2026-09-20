@@ -23,8 +23,8 @@ type Capability string
 
 const (
 	CapText        Capability = "text"         // 文本消息
-	CapVoiceFile   Capability = "voice_file"   // 语音文件（离线 ASR）
-	CapAudioStream Capability = "audio_stream" // 实时音频流
+	CapVoiceFile   Capability = "voice:file"   // 语音文件（离线 ASR）
+	CapAudioStream Capability = "audio:stream" // 实时音频流
 )
 
 // Channel 是平台通道的通用接口。每个平台（TG/Discord/Xiaozhi WS 等）
@@ -45,10 +45,10 @@ type Channel interface {
 
 // ChannelInfo 通道元信息。
 type ChannelInfo struct {
-	Name         string         // 标识符
-	DisplayName  string         // 展示名
-	Type         ChannelType    // 连接方式
-	Capabilities []Capability   // 能力列表
+	Name         string       // 标识符
+	DisplayName  string       // 展示名
+	Type         ChannelType  // 连接方式
+	Capabilities []Capability // 能力列表
 }
 
 // NewChannelInfo 构建通道元信息。

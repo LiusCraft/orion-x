@@ -10,9 +10,9 @@
 
 | 资源 | purpose | 产生入口 | 消费方 |
 | --- | --- | --- | --- |
-| 音色复刻参考音频 | `voice_sample` | 语音复刻流程 | 厂商复刻 API（需要可访问的 URL） |
+| 音色复刻参考音频 | `voice:sample` | 语音复刻流程 | 厂商复刻 API（需要可访问的 URL） |
 | 图片（logo / 封面 / 头像） | `image` | 资源库页面 | 控制台 UI（后续：智能体 logo） |
-| 被向量化的文档 | `kb_document` | 知识库上传 | 解析/向量化；用户下载原件 |
+| 被向量化的文档 | `kb:document` | 知识库上传 | 解析/向量化；用户下载原件 |
 
 三个技术目标：
 
@@ -126,8 +126,8 @@
 | purpose | 创建 | 删除 | 资源库页面 |
 | --- | --- | --- | --- |
 | `image` | 资源库上传 | 资源库删除 | 可上传 / 可删除 |
-| `voice_sample` | 语音复刻流程 | 音色删除时级联 | 只读（标「来源：音色复刻」） |
-| `kb_document` | 知识库上传 | 文档删除时级联 | 只读（标「来源：知识库」） |
+| `voice:sample` | 语音复刻流程 | 音色删除时级联 | 只读（标「来源：音色复刻」） |
+| `kb:document` | 知识库上传 | 文档删除时级联 | 只读（标「来源：知识库」） |
 
 规则：**资源由使用它的领域创建与销毁，资源库负责统一浏览**。避免「在资源库删掉一个文档资源、知识库那边悄悄坏掉」的隐式级联。
 
@@ -187,8 +187,8 @@ type Purpose string
 
 const (
 	PurposeImage       Purpose = "image"
-	PurposeVoiceSample Purpose = "voice_sample"
-	PurposeKBDocument  Purpose = "kb_document"
+	PurposeVoiceSample Purpose = "voice:sample"
+	PurposeKBDocument  Purpose = "kb:document"
 )
 
 type Service struct {
@@ -224,7 +224,7 @@ type Upload struct {
 type Asset struct {
 	ID        string `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	OwnerID   string `gorm:"not null;index;type:varchar(36)" json:"owner_id"`
-	Purpose   string `gorm:"not null;index;type:varchar(32)" json:"purpose"`    // image|voice_sample|kb_document
+	Purpose   string `gorm:"not null;index;type:varchar(32)" json:"purpose"`    // image|voice:sample|kb:document
 	Name      string `gorm:"not null;type:varchar(256)" json:"name"`            // 原始文件名，仅展示
 	ObjectKey string `gorm:"not null;uniqueIndex;type:varchar(512)" json:"-"`   // 存储键
 	MimeType  string `gorm:"type:varchar(128)" json:"mime_type"`                // 探测结果
@@ -237,7 +237,7 @@ func (Asset) TableName() string { return "assets" }
 
 JSON 响应额外带 `url`（预签名，运行时计算、不入库）。
 
-存储键规则：`{prefix/}{purpose}/{ownerID}/{assetID}{ext}`，例如 `kb_document/6f9c…/b21d….md`。
+存储键规则：`{prefix/}{purpose}/{ownerID}/{assetID}{ext}`，例如 `kb:document/6f9c…/b21d….md`。
 
 - `assetID` 全局唯一 → 不会撞键；**键里不含用户输入的文件名**（避免路径穿越与怪字符），原始名只留在 `name` 列。
 - `prefix` 用于多环境共用一个桶（`dev` / `prod`）。
@@ -286,19 +286,19 @@ JSON 响应额外带 `url`（预签名，运行时计算、不入库）。
 | purpose | 扩展名白名单 | 大小上限 | 魔数校验（`http.DetectContentType`） |
 | --- | --- | --- | --- |
 | `image` | .png .jpg .jpeg .webp .gif | 5MB | 必须 `image/*` |
-| `voice_sample` | .wav .mp3 .m4a .flac | 20MB | 必须 `audio/*` 或 `video/mp4`（m4a 是 MP4 容器） |
-| `kb_document` | 文本类扩展名 = 解析器注册表（`internal/knowledge/parser/text.go:16`：.txt .md .markdown .json .csv .log .yaml .go .py …） | 50MB | 必须 `text/*` |
+| `voice:sample` | .wav .mp3 .m4a .flac | 20MB | 必须 `audio/*` 或 `video/mp4`（m4a 是 MP4 容器） |
+| `kb:document` | 文本类扩展名 = 解析器注册表（`internal/knowledge/parser/text.go:16`：.txt .md .markdown .json .csv .log .yaml .go .py …） | 50MB | 必须 `text/*` |
 
 - 扩展名是权威判定（决定 key 后缀与后续解析）；魔数只拦「改名伪装」（.png 实为 HTML/二进制），不匹配直接 400。
 - 不支持 `.svg`（脚本执行风险）与二进制格式（PDF/DOCX 目前没有解析器，上传即无意义，等解析器接入后放开）。
-- `kb_document` 白名单由 `parser.DefaultRegistry()` 支持的扩展名派生，避免「上传成功但解析不出文本」。
+- `kb:document` 白名单由 `parser.DefaultRegistry()` 支持的扩展名派生，避免「上传成功但解析不出文本」。
 
 ## 8. 业务接入
 
 ### 8.1 知识库（HTTP 契约不变，内部落对象存储）
 
 - `POST /api/data/knowledge/knowledge_bases/:kb_id/documents` 的 multipart 契约**不变**（前端 `KnowledgePage.tsx` 零改动）。
-- 流程：multipart → `assets.Create(purpose=kb_document)` → 写 `Document.AssetID` → 异步 `ingestAsync` 从对象存储 `Open` 原件解析，不再依赖请求内存。
+- 流程：multipart → `assets.Create(purpose=kb:document)` → 写 `Document.AssetID` → 异步 `ingestAsync` 从对象存储 `Open` 原件解析，不再依赖请求内存。
 - `RetryDocument`：文件类型文档也能重试（从对象存储重读），删掉 `internal/knowledge/service.go:245` 的「请重新上传」；仅当历史文档没有 `asset_id` 时保留旧提示。
 - `DELETE /api/data/knowledge/documents/:doc_id`：删向量 → 删资源（对象 + 行）→ 删文档行。
 - 顺带修既有问题：`DeleteKB`（`internal/knowledge/service.go:124`）目前只删向量与知识库行，文档行会残留；改为级联删除该 KB 下所有文档及其资源。
@@ -312,7 +312,7 @@ POST /api/models/:id/voices/clone
 { "voice_id": "vendor-voice-id", "name": "温柔女声", "source_asset_id": "0a4f…", "langs": ["zh"] }
 ```
 
-- 校验：资源存在 → 归属为当前用户 → `purpose == voice_sample`，否则 400 / 403。
+- 校验：资源存在 → 归属为当前用户 → `purpose == voice:sample`，否则 400 / 403。
 - 落库：写 `model_voices.source_asset_id`；`source_audio_url` 仅作为 legacy 字段保留（**不把预签名 URL 写进库里**，它会过期）。
 - 厂商需要 URL 时**现算**：`assets.PresignURL(asset, false)`。若厂商是异步拉取（提交后过一段时间才下载），预签名 TTL 要单独放大——等复刻 provider 落地时确认（§11-2）。
 
@@ -378,7 +378,7 @@ storage:
 ## 11. 决策记录（2026-09-19）
 
 1. **统一管理页面（§8.4）：暂不做。** 本轮先交付后端的「上传 + 签名访问」能力，作为其它模块的统一资源入口；是否需要统一浏览页面后续再定，页面定义保留在 §8.4 作为备选方案。
-2. **语音复刻页：随 Phase 5 接入（已完成）。** `clone` 接口接受 `source_asset_id`；`web/manager` 的 `VoiceClonePage` 改为真实上传（`purpose=voice_sample`）→ 选模型 → 复刻，`VoiceListPage` 与智能体 TTS 音色列表改用真实数据（含复刻音色）。
+2. **语音复刻页：随 Phase 5 接入（已完成）。** `clone` 接口接受 `source_asset_id`；`web/manager` 的 `VoiceClonePage` 改为真实上传（`purpose=voice:sample`）→ 选模型 → 复刻，`VoiceListPage` 与智能体 TTS 音色列表改用真实数据（含复刻音色）。
 3. **智能体 logo 字段：不做。**
 
 ## 12. 验证与测试
@@ -441,15 +441,15 @@ storage:
 后端：
 
 - `model_voices.source_asset_id`（AutoMigrate 自动加列）+ `source_audio_url` 保留为 legacy 字段；资源来源时**不把预签名 URL 写进库里**。
-- `POST /api/models/:id/voices/clone` 新增 `source_asset_id`（与 `source_audio_url` 二选一，同时传 400）：资源存在 → 归属当前用户 → `purpose == voice_sample`，否则 404 / 403 / 400；`format` 由资源文件名推导，调用方无需传。
+- `POST /api/models/:id/voices/clone` 新增 `source_asset_id`（与 `source_audio_url` 二选一，同时传 400）：资源存在 → 归属当前用户 → `purpose == voice:sample`，否则 404 / 403 / 400；`format` 由资源文件名推导，调用方无需传。
 - 传给厂商的 URL 在请求时现算，TTL 用 `voiceSamplePresignTTL = 2h`（厂商可能排队后才下载），不复用资源库默认 `presign_ttl`。
-- 删除音色时级联删除 `voice_sample` 资源（`assets.DeleteCascade`：先删对象再删记录，记录不存在视为成功，存储失败则保留音色供重试）。
+- 删除音色时级联删除 `voice:sample` 资源（`assets.DeleteCascade`：先删对象再删记录，记录不存在视为成功，存储失败则保留音色供重试）。
 - 新增 `GET /api/voices/mine`；`GET /api/available-resources` 现在包含用户自建 / 复刻音色，智能体 TTS 音色列表可直接选用。
 - 测试：`voice_clone_test.go`（资源路径 / 用途不符 / 越权 / 不存在 / 未配置存储 / 预签名失败 / 二选一校验）、`assets/service_test.go`（`DeleteCascade`、`PresignURLWithTTL`）。
 
 前端：
 
-- `VoiceClonePage` 真实上传（`POST /api/assets`，`purpose=voice_sample`，带上传进度）→ 选复刻模型 / 填名称描述 / 选语言 → `POST …/voices/clone`，失败回退到表单并展示服务端错误。
+- `VoiceClonePage` 真实上传（`POST /api/assets`，`purpose=voice:sample`，带上传进度）→ 选复刻模型 / 填名称描述 / 选语言 → `POST …/voices/clone`，失败回退到表单并展示服务端错误。
 - `VoiceListPage` 改用 `GET /api/voices/system` + `GET /api/voices/mine`，可试听与删除（`DELETE /api/models/{id}/voices/{vid}`）；`lib/api.ts` 新增 `assetsApi` / `voiceCloneApi` 与 `voiceApi.listMine` / `remove`。
 
 复刻音色的试听音频直接复用参考音频：`GET /api/voices/mine` 与 `GET /api/available-resources` 在响应时按 `source_asset_id` 现算预签名 URL（`voicePreviewTTL = 2h`，不入库），前端两个消费点（音色列表、智能体音色卡片）已有播放逻辑，无需改动。

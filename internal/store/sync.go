@@ -53,7 +53,7 @@ func SyncSystemProviders(db *gorm.DB) error {
 	// TTS providers
 	for key, meta := range ttsprovider.ListRegistered() {
 		cp := codeProvider{
-			slug:        "tts/" + key,
+			slug:        "tts:" + key,
 			name:        meta.Name,
 			baseURL:     meta.DefaultBaseURL,
 			description: meta.Description,
@@ -79,7 +79,7 @@ func SyncSystemProviders(db *gorm.DB) error {
 	// LLM providers
 	for key, meta := range llmprovider.DefaultRegistry().ListRegistered() {
 		cp := codeProvider{
-			slug:     "llm/" + key,
+			slug:     "llm:" + key,
 			name:     meta.Name,
 			baseURL:  meta.DefaultBaseURL,
 			metaHash: meta.ContentHash,
@@ -103,7 +103,7 @@ func SyncSystemProviders(db *gorm.DB) error {
 	// ASR providers
 	for key, meta := range asrprovider.ListRegistered() {
 		cp := codeProvider{
-			slug:     "asr/" + key,
+			slug:     "asr:" + key,
 			name:     meta.Name,
 			baseURL:  meta.DefaultBaseURL,
 			metaHash: meta.ContentHash,

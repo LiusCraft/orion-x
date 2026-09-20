@@ -367,7 +367,7 @@ func swaggerCreateVoice() {}
 
 // swaggerCloneVoice clones a voice with the selected TTS model.
 // @Summary Clone voice
-// @Description The path model determines the provider and target model. The request body must include name and either source_asset_id (a voice_sample resource from POST /api/assets) or source_audio_url with format; prefix is optional and generated when omitted. The reference audio is signed on demand and only source_asset_id is persisted.
+// @Description The path model determines the provider and target model. The request body must include name and either source_asset_id (a voice:sample resource from POST /api/assets) or source_audio_url with format; prefix is optional and generated when omitted. The reference audio is signed on demand and only source_asset_id is persisted.
 // @Tags Voices
 // @Accept json
 // @Produce json
@@ -936,7 +936,7 @@ func swaggerInternalTelegramBots() {}
 // @Produce json
 // @Security BearerAuth
 // @Param file formData file true "Resource file"
-// @Param purpose formData string true "Purpose: image | voice_sample | kb_document"
+// @Param purpose formData string true "Purpose: image | voice:sample | kb:document"
 // @Success 201 {object} object
 // @Failure 400,401,413,502,503 {object} errorResponse
 // @Router /api/assets [post]
@@ -947,7 +947,7 @@ func swaggerUploadAsset() {}
 // @Tags Assets
 // @Produce json
 // @Security BearerAuth
-// @Param purpose query string false "Filter by purpose (image | voice_sample | kb_document)"
+// @Param purpose query string false "Filter by purpose (image | voice:sample | kb:document)"
 // @Param q query string false "Filter by file name"
 // @Param page query int false "Page number, starting at 1"
 // @Param page_size query int false "Page size (default 20, max 100)"

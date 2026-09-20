@@ -236,7 +236,7 @@ func (s *providerVoiceCloneService) Clone(ctx context.Context, modelID, userID s
 	return voice, nil
 }
 
-// voiceCloneSource 是一次复刻的参考音频来源：要么是资源库里的 voice_sample 资源，
+// voiceCloneSource 是一次复刻的参考音频来源：要么是资源库里的 voice:sample 资源，
 // 要么是调用方直传的外部 URL（legacy）。
 type voiceCloneSource struct {
 	url       string // 传给厂商的可访问 URL
@@ -296,7 +296,7 @@ func cloneableTTSProvider(model store.AIModel, registered map[string]ttsprovider
 
 func ttsProviderTypeForSlug(slug string, registered map[string]ttsprovider.ProviderMeta) (string, bool) {
 	slug = strings.ToLower(strings.TrimSpace(slug))
-	if category, providerType, hasCategory := strings.Cut(slug, "/"); hasCategory {
+	if category, providerType, hasCategory := strings.Cut(slug, ":"); hasCategory {
 		if category != "tts" {
 			return "", false
 		}
@@ -362,7 +362,7 @@ func normalizeVoiceCloneRequest(req cloneVoiceRequest) (cloneVoiceRequest, error
 }
 
 // voiceCloneFormatForAsset 从参考音频文件名推导厂商侧音频格式。
-// 可接受的扩展名由 assets 的 voice_sample 白名单保证。
+// 可接受的扩展名由 assets 的 voice:sample 白名单保证。
 func voiceCloneFormatForAsset(fileName string) (ttsprovider.AudioFormat, error) {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
 	format, err := normalizeVoiceCloneFormat(ttsprovider.AudioFormat(ext))

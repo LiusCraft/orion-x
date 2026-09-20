@@ -172,7 +172,7 @@ func TestCreateValidWavVoiceSample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create wav: %v", err)
 	}
-	if !strings.HasPrefix(asset.ObjectKey, "test/voice_sample/user-1/") {
+	if !strings.HasPrefix(asset.ObjectKey, "test/voice:sample/user-1/") {
 		t.Fatalf("key = %q", asset.ObjectKey)
 	}
 }
@@ -509,7 +509,7 @@ func TestPresignURLAndView(t *testing.T) {
 func TestPresignURLWithTTL(t *testing.T) {
 	st, be := newFakeStore(), newFakeStorage()
 	svc := newTestService(st, be)
-	asset := &store.Asset{ID: "a1", OwnerID: "u", Purpose: string(PurposeVoiceSample), ObjectKey: "test/voice_sample/u/a1.wav"}
+	asset := &store.Asset{ID: "a1", OwnerID: "u", Purpose: string(PurposeVoiceSample), ObjectKey: "test/voice:sample/u/a1.wav"}
 
 	url, err := svc.PresignURLWithTTL(context.Background(), asset, 2*time.Hour, false)
 	if err != nil {
@@ -569,14 +569,14 @@ func TestHumanSize(t *testing.T) {
 func TestDocumentExtensionsMatchParser(t *testing.T) {
 	sp, ok := purposeSpecs[PurposeKBDocument]
 	if !ok {
-		t.Fatal("kb_document spec missing")
+		t.Fatal("kb:document spec missing")
 	}
 	if _, ok := sp.exts[".url"]; ok {
 		t.Fatal(".url is a virtual extension and must not be uploadable")
 	}
 	for _, ext := range []string{".txt", ".md", ".json", ".csv"} {
 		if _, ok := sp.exts[ext]; !ok {
-			t.Fatalf("%s must be allowed for kb_document", ext)
+			t.Fatalf("%s must be allowed for kb:document", ext)
 		}
 	}
 }

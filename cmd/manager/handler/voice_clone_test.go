@@ -137,7 +137,7 @@ func testVoiceCloneModel(id, name, owner, apiKey string) store.AIModel {
 		Provider: &store.Provider{
 			ID:        "provider-1",
 			Name:      "Test TTS",
-			Slug:      "tts/" + testVoiceCloneProviderType,
+			Slug:      "tts:" + testVoiceCloneProviderType,
 			BaseURL:   "wss://provider.example.test/api-ws/v1/inference",
 			APIKeyEnc: apiKey,
 			Extra: map[string]any{
@@ -159,7 +159,7 @@ func TestProviderVoiceCloneServiceListModels(t *testing.T) {
 	configured := testVoiceCloneModel("model-configured", "Configured", "user-1", "api-key")
 	unconfigured := testVoiceCloneModel("model-unconfigured", "Unconfigured", "user-1", "")
 	wrongCategory := testVoiceCloneModel("model-asr", "ASR", "user-1", "api-key")
-	wrongCategory.Provider.Slug = "asr/" + testVoiceCloneProviderType
+	wrongCategory.Provider.Slug = "asr:" + testVoiceCloneProviderType
 	unknownTarget := testVoiceCloneModel("model-unknown", "Unknown", "user-1", "api-key")
 	unknownTarget.ModelID = "unknown-model"
 
@@ -182,7 +182,7 @@ func TestProviderVoiceCloneServiceListModels(t *testing.T) {
 	if got[1].ID != unconfigured.ID || got[1].Configured {
 		t.Fatalf("second model = %#v, want unconfigured cloneable model", got[1])
 	}
-	if got[0].ProviderSlug != "tts/"+testVoiceCloneProviderType {
+	if got[0].ProviderSlug != "tts:"+testVoiceCloneProviderType {
 		t.Errorf("provider slug = %q", got[0].ProviderSlug)
 	}
 }

@@ -13,7 +13,7 @@ import (
 type Asset struct {
 	ID        string `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	OwnerID   string `gorm:"not null;index;type:varchar(36)" json:"owner_id"`
-	Purpose   string `gorm:"not null;index;type:varchar(32)" json:"purpose"`  // image | voice_sample | kb_document
+	Purpose   string `gorm:"not null;index;type:varchar(32)" json:"purpose"`  // image | voice:sample | kb:document
 	Name      string `gorm:"not null;type:varchar(256)" json:"name"`          // 原始文件名，仅展示
 	ObjectKey string `gorm:"not null;uniqueIndex;type:varchar(512)" json:"-"` // 对象存储键
 	MimeType  string `gorm:"type:varchar(128)" json:"mime_type"`

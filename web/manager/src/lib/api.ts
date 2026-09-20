@@ -266,7 +266,7 @@ export const voiceApi = {
 		http.delete(`/models/${modelId}/voices/${voiceId}`),
 };
 
-export type AssetPurpose = "image" | "voice_sample" | "kb_document";
+export type AssetPurpose = "image" | "voice:sample" | "kb:document";
 
 export interface Asset {
 	id: string;

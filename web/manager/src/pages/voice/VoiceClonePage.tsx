@@ -103,7 +103,7 @@ export default function VoiceClonePage() {
     try {
       const { data } = await assetsApi.upload(
         picked,
-        "voice_sample",
+        "voice:sample",
         setUploadPercent,
       );
       setAsset(data);
