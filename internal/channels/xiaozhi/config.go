@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,6 +17,7 @@ type Config struct {
 	Server  ServerConfig  `yaml:"server"`
 	Health  HealthConfig  `yaml:"health"`
 	Manager ManagerConfig `yaml:"manager"`
+	Billing BillingConfig `yaml:"billing"`
 	Logging LoggingConfig `yaml:"logging"`
 }
 
@@ -30,9 +32,26 @@ type HealthConfig struct {
 	Addr string `yaml:"addr"`
 }
 
-// ManagerConfig holds the manager service URL.
+// ManagerConfig holds the manager service URL and the internal service token.
 type ManagerConfig struct {
 	URL string `yaml:"url"`
+	// Token 是访问 /internal/billing/* 的 Bearer token，必须与 manager 的
+	// internal.token 一致。没配的话控制面会拒掉所有计费请求（§14.1）。
+	Token string `yaml:"token"`
+}
+
+// BillingConfig 是数据面计费的本地开关。
+type BillingConfig struct {
+	// Enabled 为 false 时整个计费链路关闭（等价于给通道传 nil sink）。
+	Enabled *bool `yaml:"enabled"`
+	// SuspensionTTL 是“已被停服”标记的本地 TTL：控制面不可达时，上次明确
+	// 拒绝过 account_suspended 的设备仍然拒（§14.3）。
+	SuspensionTTL time.Duration `yaml:"suspension_ttl"`
+}
+
+// BillingEnabled 返回计费是否开启（默认开启）。
+func (c BillingConfig) BillingEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
 }
 
 // LoggingConfig holds logging level/format.
@@ -75,6 +94,9 @@ func LoadConfig(path string) (*Config, error) {
 func applyEnv(cfg *Config) {
 	if v := strings.TrimSpace(os.Getenv("MANAGER_URL")); v != "" {
 		cfg.Manager.URL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("MANAGER_TOKEN")); v != "" {
+		cfg.Manager.Token = v
 	}
 	if v := strings.TrimSpace(os.Getenv("LOG_LEVEL")); v != "" {
 		cfg.Logging.Level = v

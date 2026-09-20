@@ -90,7 +90,13 @@ func (c *chatAdapter) Generate(ctx context.Context, req llm.Request) (llm.Respon
 		Message:    message,
 		StopReason: mapFinishReason(choice.FinishReason),
 		StopDetail: string(choice.FinishReason),
-		Usage:      llm.Usage{InputTokens: int64(completion.Usage.PromptTokens), OutputTokens: int64(completion.Usage.CompletionTokens), TotalTokens: int64(completion.Usage.TotalTokens)},
+		Usage: provider.NormalizeUsage(provider.UsageParts{
+			InputTokens:     int64(completion.Usage.PromptTokens),
+			OutputTokens:    int64(completion.Usage.CompletionTokens),
+			TotalTokens:     int64(completion.Usage.TotalTokens),
+			CacheReadTokens: int64(completion.Usage.PromptTokensDetails.CachedTokens),
+			ReasoningTokens: int64(completion.Usage.CompletionTokensDetails.ReasoningTokens),
+		}),
 	}, nil
 }
 
@@ -144,6 +150,16 @@ func (c *chatAdapter) Stream(ctx context.Context, req llm.Request) (llm.Stream, 
 			Message:    message,
 			StopReason: mapFinishReason(choice.FinishReason),
 			StopDetail: string(choice.FinishReason),
+			// acc.Usage 只在厂商在流里带了 usage 时非零（OpenAI 需要
+			// stream_options.include_usage，可通过 provider options 打开）；
+			// 厂商没带就是零值，不猜、不算。
+			Usage: provider.NormalizeUsage(provider.UsageParts{
+				InputTokens:     int64(acc.Usage.PromptTokens),
+				OutputTokens:    int64(acc.Usage.CompletionTokens),
+				TotalTokens:     int64(acc.Usage.TotalTokens),
+				CacheReadTokens: int64(acc.Usage.PromptTokensDetails.CachedTokens),
+				ReasoningTokens: int64(acc.Usage.CompletionTokensDetails.ReasoningTokens),
+			}),
 		}
 		out.Send(llm.Event{Type: llm.EventResponseDone, Response: &resp})
 	}()

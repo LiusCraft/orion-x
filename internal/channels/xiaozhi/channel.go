@@ -3,6 +3,7 @@ package xiaozhi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -223,6 +224,11 @@ func (s *XiaozhiWSChannel) handleConnection(rawConn *websocket.Conn) {
 
 	c, err := s.newConnection(rawConn, hello)
 	if err != nil {
+		var rejected *sessionRejectedError
+		if errors.As(err, &rejected) {
+			s.rejectConnection(rawConn, hello, rejected)
+			return
+		}
 		logging.Errorf("xiaozhi-channel: connection setup failed: %v", err)
 		return
 	}
@@ -236,6 +242,74 @@ func (s *XiaozhiWSChannel) handleConnection(rawConn *websocket.Conn) {
 	logging.Infof("xiaozhi-channel[%s]: connection established (device_id=%q, mode=%s)", c.sessionID, hello.DeviceID, c.mode)
 	c.readLoop()
 	logging.Infof("xiaozhi-channel[%s]: connection closed", c.sessionID)
+}
+
+// sessionRejectedError 表示计费准入拒绝了这次会话。它要走一条特殊路径。
+type sessionRejectedError struct {
+	SessionID string
+	DeviceID  string
+	Reason    string
+}
+
+func (e *sessionRejectedError) Error() string {
+	return fmt.Sprintf("session %s rejected: %s", e.SessionID, e.Reason)
+}
+
+// rejectConnection 干净地拒绝一次连接（§15.2）。
+//
+// wsproto 的 hello 里没有 error 字段，所以只能：先照常回一条 hello（不回的话设备
+// 会一直卡在等 hello 的状态），紧接着发一个 Close 帧，code 1008（policy violation），
+// reason 用稳定的机器可读串。同时不建 session、不建 pipeline、不写 reservation。
+func (s *XiaozhiWSChannel) rejectConnection(rawConn *websocket.Conn, hello *wsproto.HelloMessage, rejected *sessionRejectedError) {
+	safeConn := NewSafeConn(rawConn)
+	if err := writeHelloResponse(safeConn, rejected.SessionID, hello.Mode, hello); err != nil {
+		logging.Warnf("xiaozhi-channel[%s]: send hello before rejection failed: %v", rejected.SessionID, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	_ = rawConn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.ClosePolicyViolation, rejected.Reason),
+		deadline,
+	)
+	logging.Warnf("xiaozhi-channel[%s]: connection rejected (device_id=%q, reason=%s)",
+		rejected.SessionID, rejected.DeviceID, rejected.Reason)
+}
+
+// authorizeBilling 做会话准入校验。返回 (nil, nil) 表示这个会话不计费。
+func (s *XiaozhiWSChannel) authorizeBilling(sessionID string, hello *wsproto.HelloMessage) (channels.BillingSession, error) {
+	if s.deps == nil || s.deps.Billing == nil {
+		return nil, nil // 计费关闭
+	}
+	// Start 之前 rootCtx 还是 nil（单测里直接建连接就是这个情形），给个兵底上下文，
+	// 别把 nil ctx 交给 HTTP 客户端。
+	ctx := s.rootCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	billSess := s.deps.Billing(ctx, channels.BillingSessionMeta{
+		DeviceID:  hello.DeviceID,
+		SessionID: sessionID,
+		Channel:   "xiaozhi",
+	})
+	if billSess == nil {
+		return nil, nil
+	}
+	resp, err := billSess.Authorize(ctx)
+	if err != nil {
+		// 数据面不该因为计费请求失败而拒绝服务，client 层已经按 fail open 处理；
+		// 这里只是兵底记一笔，继续把会话跑起来。
+		logging.Errorf("xiaozhi-channel[%s]: billing authorize error: %v", sessionID, err)
+		return billSess, nil
+	}
+	if !resp.Allowed {
+		billSess.Close()
+		return nil, &sessionRejectedError{
+			SessionID: sessionID,
+			DeviceID:  hello.DeviceID,
+			Reason:    string(resp.RejectReason),
+		}
+	}
+	return billSess, nil
 }
 
 // newConnection builds all per-connection resources and the DAG pipeline.
@@ -306,6 +380,14 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		}
 	}()
 
+	// 计费准入：会话建立时就校验余额与价格，拒绝就干净地关掉连接，不建 pipeline、
+	// 不写 reservation（§14.3 / §15.2）。
+	billSess, err := s.authorizeBilling(sessionID, hello)
+	if err != nil {
+		return nil, err
+	}
+	billEnv := newConnectionBilling(billSess)
+
 	// Recognizer
 	recognizer, err := s.providers.GetOrCreateASR(connCfg.Provider.ASR.Type, connCfg.Provider.ASR.Aliyun)
 	if err != nil {
@@ -345,6 +427,12 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		return nil, err
 	}
 
+	// TTS 计量点在 dispatcher 出队处（分句已定稿、合成必然发生）：已发给厂商的
+	// 那部分就算数，用户打断的是播放（§13 打断怎么算账）。
+	ttsProc.OnSynthesis(func(fact audio.Synthesis) {
+		channels.RecordTTSSynthesis(billSess, int64(fact.Runes), nil)
+	})
+
 	audioSrc := NewWSAudioSource(inputCodec, clientSampleRate)
 	safeConn := NewSafeConn(rawConn)
 
@@ -367,6 +455,8 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		<-ctx.Done()
 		_ = rawConn.Close()
 	}()
+	// 计费的兌底 flush（每 30 秒一次，防止超长会话一直在内存里堆）。
+	billEnv.start(ctx)
 
 	// Load MCP servers from device config
 	mcpCfgs := connCfg.Tools.MCP
@@ -519,6 +609,21 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 			if msg.IsError() {
 				logging.Warnf("xiaozhi-channel[%s]: pipeline error: %v", sessionID, msg.Metadata.Error)
 			}
+			if billEnv.observe(msg) {
+				// 本地预算撞到 100%：已经发生的用量照常计费，熔断只拦后续 turn
+				// （§13 / §15.4）。中断 TTS 播放与 agent，然后走 flush → settle → close。
+				logging.Errorf("xiaozhi-channel[%s]: billing budget exhausted, interrupting session", sessionID)
+				_ = ttsProc.Interrupt()
+				select {
+				case pl.Input() <- pipeline.Message{
+					Type:     pipeline.MessageTypeInterrupt,
+					Metadata: pipeline.Metadata{Timestamp: time.Now()},
+				}:
+				default:
+				}
+				cancel()
+				return
+			}
 		}
 	}()
 
@@ -547,6 +652,7 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		deviceMCP: devMCP,
 		sessions:  s.sessions,
 		output:    outputGateway,
+		billing:   billEnv,
 		ctx:       ctx,
 		cancel:    cancel,
 	}, nil
@@ -619,11 +725,20 @@ type wsConnection struct {
 	sessions  *session.Manager
 	output    *WSOutputStage
 
+	// billing 是这次会话的计费接线（nil = 本次会话不计费）。
+	billing *connectionBilling
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 func (c *wsConnection) sendHelloResponse(hello *wsproto.HelloMessage) error {
+	return writeHelloResponse(c.safeConn, c.sessionID, c.mode, hello)
+}
+
+// writeHelloResponse 回一条 hello。它被两处用到：正常建连接，以及计费拒绝时的
+// “先回 hello 再关连接”（§15.2）。后者手里还没有 wsConnection，所以拆成包级函数。
+func writeHelloResponse(conn *SafeConn, sessionID string, mode wsproto.Mode, hello *wsproto.HelloMessage) error {
 	format := hello.AudioParams.Format
 	if format == "" {
 		format = string(defaultAudioFormat)
@@ -636,14 +751,17 @@ func (c *wsConnection) sendHelloResponse(hello *wsproto.HelloMessage) error {
 	if frameDurationMs <= 0 {
 		frameDurationMs = defaultFrameDurationMs
 	}
-	resp := wsproto.NewHelloResponse(c.sessionID, wsproto.AudioParams{
+	if mode == "" {
+		mode = wsproto.ModeAuto
+	}
+	resp := wsproto.NewHelloResponse(sessionID, wsproto.AudioParams{
 		Format:        format,
 		SampleRate:    ttsSampleRate,
 		Channels:      ch,
 		FrameDuration: frameDurationMs,
 		BitsPerSample: supportedBitsPerSample,
-	}, c.mode, "")
-	return c.safeConn.WriteJSON(resp)
+	}, mode, "")
+	return conn.WriteJSON(resp)
 }
 
 func (c *wsConnection) close() {
@@ -666,6 +784,8 @@ func (c *wsConnection) close() {
 	if c.audioSrc != nil {
 		_ = c.audioSrc.Close()
 	}
+	// 交账：先 flush 再 settle。放在最后一步，确保这一轮的事实都已经进缓冲了。
+	c.billing.close("client_close")
 	if c.memSvc != nil {
 		_ = c.memSvc.Close()
 	}
@@ -728,6 +848,11 @@ func (c *wsConnection) handleTextMessage(data []byte) {
 func (c *wsConnection) handleListen(m *wsproto.ListenMessage) {
 	switch m.State {
 	case wsproto.ListenStart:
+		// 本地估算到 90% 就不再接受新的 listen 窗口，当前这个 turn 让它走完（§15.4）。
+		if c.billing.nearLimit() {
+			logging.Warnf("xiaozhi-channel[%s]: billing budget near limit, refusing listen start", c.sessionID)
+			return
+		}
 		if c.mode == wsproto.ModeManual {
 			if err := c.asrProc.BeginTurn(c.ctx); err != nil {
 				logging.Warnf("xiaozhi-channel[%s]: BeginTurn failed: %v", c.sessionID, err)
@@ -741,6 +866,10 @@ func (c *wsConnection) handleListen(m *wsproto.ListenMessage) {
 		}
 	case wsproto.ListenDetect:
 		if m.Text == "" {
+			return
+		}
+		if c.billing.nearLimit() {
+			logging.Warnf("xiaozhi-channel[%s]: billing budget near limit, dropping injected text", c.sessionID)
 			return
 		}
 		select {

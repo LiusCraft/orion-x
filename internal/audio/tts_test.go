@@ -302,6 +302,74 @@ func TestTTSProcessorFlush(t *testing.T) {
 	}
 }
 
+// TestTTSProcessorOnSynthesis 验证“已经发给厂商合成”这个计量点：每个出队的句子
+// 恰好回调一次（Runes 是文本的 rune 数），而 Flush 信号本身不产生合成事实。
+func TestTTSProcessorOnSynthesis(t *testing.T) {
+	proc := newTestTTSProcessor(newMockTTSProvider())
+
+	var mu sync.Mutex
+	var syntheses []Synthesis
+	proc.OnSynthesis(func(s Synthesis) {
+		mu.Lock()
+		syntheses = append(syntheses, s)
+		mu.Unlock()
+	})
+
+	chunkCh := make(chan TTSChunk, 5)
+	proc.OnChunk(func(c TTSChunk) { chunkCh <- c })
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	waitFinal := func() bool {
+		deadline := time.After(time.Second)
+		for {
+			select {
+			case c := <-chunkCh:
+				if c.Final {
+					return true
+				}
+			case <-deadline:
+				return false
+			}
+		}
+	}
+
+	_ = proc.Write("你好世界。", defaultOpts)
+
+	select {
+	case <-chunkCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for synthesized chunk")
+	}
+
+	mu.Lock()
+	got := append([]Synthesis(nil), syntheses...)
+	mu.Unlock()
+
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 Synthesis, got %d (%+v)", len(got), got)
+	}
+	if got[0].Text != "你好世界。" || got[0].Runes != 5 {
+		t.Errorf("unexpected synthesis: %+v", got[0])
+	}
+
+	if err := proc.Flush(defaultOpts); err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+	if !waitFinal() {
+		t.Fatal("timeout waiting for Final chunk")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(syntheses) != 1 {
+		t.Errorf("Flush must not report a synthesis, got %d (%+v)", len(syntheses), syntheses)
+	}
+}
+
 // TestTTSProcessorInterrupt 验证 Interrupt 清空队列并重置状态。
 func TestTTSProcessorInterrupt(t *testing.T) {
 	provider := newMockTTSProvider()

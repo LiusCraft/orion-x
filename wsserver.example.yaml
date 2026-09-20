@@ -7,6 +7,13 @@ health:
 
 manager:
   url: "http://localhost:9090"   # manager 服务地址，用于查询设备配置
+  token: ""                      # 服务间调用凭据，必须与 manager 的 internal.token 一致
+                                # 建议只走环境变量 MANAGER_TOKEN；留空则控制面会拒掉所有计费请求
+
+# 计费（数据面）。整段可以删掉：不写就是启用。
+# billing:
+#   enabled: true            # 显式 false 时整条计费链路关闭（等价于不给通道传 sink）
+#   suspension_ttl: 5m       # “已被停服”标记的本地 TTL：manager 不可达时仍拒（Go duration）
 
 logging:
   level: "info"
