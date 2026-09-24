@@ -1137,3 +1137,96 @@ export const billingAdminApi = {
 			{ note },
 		),
 };
+
+// ---------------------------------------------------------------- API Key
+
+/**
+ * 目录项：一条可授予的权限。标题 / 说明 / 分组都由服务端下发（FR-10），
+ * 前端只负责渲染，加权限不用重新构建控制台。
+ */
+export interface ApiKeyScopeInfo {
+	value: string;
+	group: string;
+	title: string;
+	/** 授权后会发生什么（要提示会扣费就写在这里）。线上字段名就是 `desc`。 */
+	desc: string;
+	/** 创建时的初始勾选。 */
+	default: boolean;
+	/** 已废弃：不再授予新 Key，但历史 Key 仍可能持有。 */
+	deprecated: boolean;
+}
+
+/** 分组的展示名与展示顺序。 */
+export interface ApiKeyScopeGroup {
+	value: string;
+	title: string;
+}
+
+/** 权限组合：一组权限的快捷勾选；展开在服务端完成，前端只回传勾选结果。 */
+export interface ApiKeyPreset {
+	/** 线上字段名是 `name`，不是 `value`。 */
+	name: string;
+	title: string;
+	description: string;
+	scopes: string[];
+}
+
+/** GET /api/api-keys/scopes：渲染创建表单要的全部事实。 */
+export interface ApiKeyCatalog {
+	scopes: ApiKeyScopeInfo[];
+	groups: ApiKeyScopeGroup[];
+	presets: ApiKeyPreset[];
+	/** false = 当前账号暂时不能创建（灰度期只允许管理员），创建入口要置灰。 */
+	can_create: boolean;
+}
+
+/** 列表与创建响应共用的元数据视图；完整串不在这里。 */
+export interface ApiKeyView {
+	id: string;
+	name: string;
+	/** 掩码，如 "ox_sk_7Qm2Vx4bTk••••"。 */
+	masked_key: string;
+	scopes: string[];
+	expires_at: string | null;
+	revoked_at: string | null;
+	last_used_at: string | null;
+	call_count: number;
+	created_at: string;
+}
+
+/** 创建响应：`key` 是完整明文，只此一次（丢了只能重建）；元数据在 `api_key` 里。 */
+export interface ApiKeyCreated {
+	key: string;
+	api_key: ApiKeyView;
+}
+
+/** GET /api/api-keys 的一页，仓库里所有列表都是 `{data,total,page}` 这个形状。 */
+export interface ApiKeyList {
+	data: ApiKeyView[];
+	total: number;
+	page: number;
+}
+
+export interface ApiKeyListParams {
+	/** 从 1 起。 */
+	page?: number;
+	/** 默认 20，最大 100。 */
+	page_size?: number;
+}
+
+export interface ApiKeyCreate {
+	name: string;
+	/** 勾选后的显式权限列表；快捷组合只是帮用户勾选，提交的永远是这一份。 */
+	scopes: string[];
+}
+
+// 自助管理自己的 Key：四条路由都只接浏览器 JWT（凭证不能给自己签发凭证），
+// 参数一律取自 token，没有"代管别人的 Key"这一说。
+// 503 = 这个部署没开凭证功能，页面走空态而不是报错。
+export const apiKeyApi = {
+	catalog: () => http.get<ApiKeyCatalog>("/api-keys/scopes"),
+	list: (params?: ApiKeyListParams) =>
+		http.get<ApiKeyList>("/api-keys", { params }),
+	create: (data: ApiKeyCreate) => http.post<ApiKeyCreated>("/api-keys", data),
+	revoke: (id: string) => http.delete(`/api-keys/${encodeURIComponent(id)}`),
+};

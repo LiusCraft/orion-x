@@ -762,7 +762,7 @@ export function userFacingError(err: unknown, fallback: string): string {
 }
 
 /** 服务端错误的命名空间前缀（与 Go 侧的包名前缀一致）。 */
-const INTERNAL_ERROR_PREFIXES = ["billing:", "epay:", "store:", "payment:"];
+const INTERNAL_ERROR_PREFIXES = ["billing:", "epay:", "store:", "payment:", "apikey:"];
 
 /** 取服务端的 `{error}` 文案，拿不到就用兜底文案。 */
 export function billingErrorMessage(err: unknown, fallback: string): string {

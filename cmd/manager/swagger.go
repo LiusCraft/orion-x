@@ -988,3 +988,50 @@ func swaggerAssetURL() {}
 // @Failure 401,403,404,502,503 {object} errorResponse
 // @Router /api/assets/{id} [delete]
 func swaggerDeleteAsset() {}
+
+// swaggerCreateAPIKey documents API key creation.
+// @Summary Create an API key
+// @Description Returns the plaintext key exactly once; it cannot be retrieved later.
+// @Tags API Keys
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body object true "name, optional expires_at, and either scopes or preset"
+// @Success 201 {object} object
+// @Failure 400,401,503 {object} errorResponse
+// @Router /api/api-keys [post]
+func swaggerCreateAPIKey() {}
+
+// swaggerListAPIKeys documents listing the caller's API keys.
+// @Summary List API keys
+// @Description Only masked keys are returned, never the plaintext.
+// @Tags API Keys
+// @Produce json
+// @Security BearerAuth
+// @Param page query int false "Page number (default 1)"
+// @Param page_size query int false "Page size (default 20, max 100)"
+// @Success 200 {object} object
+// @Failure 401,503 {object} errorResponse
+// @Router /api/api-keys [get]
+func swaggerListAPIKeys() {}
+
+// swaggerRevokeAPIKey documents API key revocation.
+// @Summary Revoke an API key
+// @Description Soft delete; idempotent. Revocation is effective immediately.
+// @Tags API Keys
+// @Security BearerAuth
+// @Param id path string true "API key ID"
+// @Success 204
+// @Failure 401,404,503 {object} errorResponse
+// @Router /api/api-keys/{id} [delete]
+func swaggerRevokeAPIKey() {}
+
+// swaggerAPIKeyScopes documents the scope catalog and presets.
+// @Summary List API key scopes and presets
+// @Tags API Keys
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} object
+// @Failure 401,503 {object} errorResponse
+// @Router /api/api-keys/scopes [get]
+func swaggerAPIKeyScopes() {}

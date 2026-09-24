@@ -17,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"github.com/liuscraft/orion-x/internal/apikey"
 	"github.com/liuscraft/orion-x/internal/assets"
 	"github.com/liuscraft/orion-x/internal/billing"
 	"github.com/liuscraft/orion-x/internal/billing/gateway/epay"
@@ -187,6 +188,17 @@ func main() {
 	// 充值通道（支付渠道 → 余额）。
 	paymentSvc := initPaymentService(cfg.Payment, db, billingSvc, timeNow)
 
+	// API Key（docs/api-key-design.md）：默认关闭（apikey.enabled: true 才开）。
+	// 关掉时不建 service：管理面回 503，key 请求 401。
+	var apikeySvc *apikey.Service
+	if !cfg.APIKey.Disabled() {
+		apikeyCfg := cfg.APIKey.ServiceConfig()
+		apikeySvc = apikey.New(store.NewAPIKeyStore(db), apikeyCfg)
+		logging.Infof("apikey ready: rps=%v burst=%d counter_flush=%s max_per_account=%d admin_only=%v",
+			apikeyCfg.RateLimitRPS, apikeyCfg.RateLimitBurst, apikeyCfg.CounterFlush,
+			apikeyCfg.MaxKeysPerAccount, cfg.APIKey.AdminOnly)
+	}
+
 	// 结算 worker（tick 结算 + 预冻结回收）跟 HTTP 服务同进程，退出靠 cancel（§16.4）。
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
@@ -202,8 +214,16 @@ func main() {
 	if paymentSvc != nil {
 		paymentSvc.StartSweeper(workerCtx, time.Minute)
 	}
+	// 凭证用量的刷库 goroutine：每 CounterFlush 一次，退出时最多丢一个窗口（§3.2）。
+	if apikeySvc != nil {
+		workerWG.Add(1)
+		go func() {
+			defer workerWG.Done()
+			apikeySvc.RunCounter(workerCtx)
+		}()
+	}
 
-	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc, paymentSvc)
+	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc, paymentSvc, apikeySvc, cfg.APIKey.AdminOnly)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {

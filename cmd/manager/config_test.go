@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liuscraft/orion-x/internal/apikey"
 	"github.com/liuscraft/orion-x/internal/billing"
 	"github.com/liuscraft/orion-x/internal/billing/service"
 )
@@ -130,6 +131,79 @@ func TestBillingConfigServiceConfig(t *testing.T) {
 			}
 			if tc.want != nil {
 				tc.want(t, got)
+			}
+		})
+	}
+}
+
+func TestAPIKeyConfigDisabled(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  APIKeyConfig
+		want bool
+	}{
+		// 与 payment 相反、与 billing 也不同：凭证默认关闭，写这一段才是显式决定。
+		{name: "missing section means disabled", cfg: APIKeyConfig{}, want: true},
+		{name: "enabled true", cfg: APIKeyConfig{Enabled: boolPtr(true)}, want: false},
+		{name: "enabled false", cfg: APIKeyConfig{Enabled: boolPtr(false)}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.Disabled(); got != tc.want {
+				t.Fatalf("Disabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAPIKeyConfigServiceConfig(t *testing.T) {
+	def := apikey.DefaultConfig()
+
+	cases := []struct {
+		name string
+		cfg  APIKeyConfig
+		want apikey.Config
+	}{
+		{name: "empty section keeps defaults", cfg: APIKeyConfig{}, want: def},
+		{
+			name: "explicit values win",
+			cfg: APIKeyConfig{
+				RateLimit:     APIKeyRateLimitConfig{RPS: 5, Burst: 10},
+				CounterFlush:  "45s",
+				MaxPerAccount: 7,
+			},
+			want: apikey.Config{RateLimitRPS: 5, RateLimitBurst: 10, CounterFlush: 45 * time.Second, MaxKeysPerAccount: 7},
+		},
+		{
+			name: "zeros and blanks fall back to defaults",
+			cfg: APIKeyConfig{
+				RateLimit:     APIKeyRateLimitConfig{RPS: 0, Burst: 0},
+				CounterFlush:  "0s",
+				MaxPerAccount: 0,
+			},
+			want: def,
+		},
+		{
+			// 写错的窗口最危险：负值会让每次 touch 都刷一次库，解析不了就回默认。
+			name: "broken durations fall back to defaults",
+			cfg:  APIKeyConfig{CounterFlush: "-30s"},
+			want: def,
+		},
+		{
+			name: "unknown duration falls back to defaults",
+			cfg:  APIKeyConfig{CounterFlush: "soon"},
+			want: def,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.cfg.ServiceConfig()
+			if got.RateLimitRPS != tc.want.RateLimitRPS ||
+				got.RateLimitBurst != tc.want.RateLimitBurst ||
+				got.CounterFlush != tc.want.CounterFlush ||
+				got.MaxKeysPerAccount != tc.want.MaxKeysPerAccount {
+				t.Fatalf("ServiceConfig() = %+v, want %+v", got, tc.want)
 			}
 		})
 	}

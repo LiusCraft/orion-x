@@ -83,3 +83,22 @@ payment:
   subject_prefix: "余额充值 "        # 订单标题前缀（收银台上显示）
   timeout: 30                       # 请求网关的超时秒数
   debug: false                      # 打印 SDK 请求日志（含签名），生产别开
+
+# API Key（凭证）：让脚本、CI 与第三方集成用一把自助创建的 key 调 /api/*，
+# 不必再借用人格化的 JWT（登录态 token 存 localStorage、无法按集成收窄权限）。
+#
+# 整段可以删掉：不写就是**关闭**（与 payment 段同一个约定）——带 ox_sk_ 前缀的请求
+# 一律 401、控制台的凭证页显示「暂未开放」，与没有这个功能时完全一样。
+#
+# 开启后：
+#   - 权限在创建时勾选（不可通配，缺权限回 403，并在响应里给出 required/granted）；
+#   - 每把 key 一个独立的限流桶；撤销立即生效（每次校验都查库，没有缓存可以变旧）；
+#   - 调用次数与最后使用时间是内存聚合、定时刷库的**非精确**计数，不能用来对账。
+apikey:
+  enabled: false                    # nil 或 false = 关闭；显式 true 才启用
+  rate_limit:
+    rps: 20                         # 每把 key 每秒补充的令牌数（0 = 用默认值 20）
+    burst: 40                       # 每把 key 的桶容量，即瞬时突发上限（0 = 默认 40）
+  counter_flush: "30s"              # 调用次数 / 最后使用的刷库窗口
+  max_per_account: 100              # 单个账号可持有的 key 上限
+  admin_only: false                 # 灰度开关：true 时只有管理员能创建新 key

@@ -41,6 +41,8 @@ func JWT(secret []byte) gin.HandlerFunc {
 			return
 		}
 		c.Set(userIDKey, sub)
+		// 身份来源放在上下文里：RequireScopes 只对 API key 生效，靠它分流（middleware/apikey.go）。
+		c.Set(principalKey, PrincipalJWT)
 		if isAdmin, ok := tok.Claims.(jwt.MapClaims)["is_admin"].(bool); ok {
 			c.Set(adminKey, isAdmin)
 		}

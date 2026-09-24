@@ -58,6 +58,8 @@ Two entry points:
 | `internal/billing/client/` | 数据面：HTTP client + `Sink`（缓冲/重试/本地熔断）；唯一 import `net/http` 的计费包 |
 | `internal/billing/gateway/epay/` | 出站支付网关适配器（易支付 SDK），实现 `billing.PaymentGateway`；唯一 import 支付 SDK 的地方 |
 | `internal/store/billing_*.go` | 计费与充值共 11 张表的 GORM 模型与仓储，只被 `billing/service` 使用 |
+| `internal/apikey/` | 凭证领域层：key 串生成/解析/摘要、scope 目录与预设、限流桶与用量聚合；只认 `user_id`，不 import gin / `internal/billing` |
+| `internal/store/api_key.go` | `api_keys` 表的模型与仓储；明文不落库，只存 `hash` + `lookup` |
 
 ### 计费（`docs/billing-design.md`）
 
@@ -80,6 +82,17 @@ Two entry points:
 - 网关的 `money` 只有两位小数 → 下单金额必须是整分（`amount_micro % billing.MicroPerCent == 0`），不整分直接拒。
 - `paid` 与 `credited` 分开落库；manager 里有个每分钟的 sweeper 扫 `paid` 未入账补账、扫过期未付主动查单。改动这两段时记得它们要幂等。
 - 退款（`POST /api/billing/recharge/:out_trade_no/refund`，仅 admin）是**先让网关退钱、再改自己的账**：顺序反了的话，网关调用挂了而账已经退了，钱就凭空多出来。整单退，不支持部分退款（那需要一张单独退款单表），幂等键 `refund:order:<out_trade_no>`（`billing.RefundIdempotencyKey`），出账走 `service.Service.Refund`（`kind = refund`）。
+
+### 凭证（`apikey` 段配置，API Key）
+
+给 `/api/*` 加第二种凭证，让脚本/CI 不必借用人格化的 JWT（`docs/api-key-design.md`）。默认关闭：
+
+- **key 串格式是冻结的**：`ox_sk_<lookup:10>_<secret:32>_<crc:6>`，base58 字母表，CRC 只盖 `lookup + "_" + secret`。改它 = 换一代凭证（只能靠新前缀 `ox_sk2_` 版本化）。
+- **只存摘要**：`hash = sha256(完整串)`、`lookup` 明文建唯一索引。明文只在创建响应里出现一次，**任何日志/错误里都不许出现完整串**（日志里只能用 `apikey.LookupOf` 得到的公开段）。
+- **授权是精确匹配**：scope 目录与预设的唯一事实源在 `internal/apikey/scope.go`，deny-by-default、不支持通配、预设只在创建时展开成显式列表落库。路由↔scope 的中央表在 `cmd/manager/middleware/scope_table.go`。
+- **新增一条 `/api/*` 路由必须同步 scope 表**，否则 `middleware.ValidateCoverage` 的双向覆盖测试（`cmd/manager/server_test.go`）会红——先看到测试红，而不是先被人用一把只读 key 调了写接口。
+- **管理面（`/api/api-keys*`）只接 JWT**，key 结构上到不了：机器凭证不能签发凭证（否则撤销原 key 挡不住持久化后门）。同理 `/api/auth/*`、`RequireAdmin` 的管理端、充值/退款。
+- 计数与最后使用时间是**内存聚合 + 定时刷库的非精确值**，不得用作计费或对账依据；撤销无缓存，下一个请求即失效。
 
 Design docs in `docs/` -- read before modifying major modules.
 

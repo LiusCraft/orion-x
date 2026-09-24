@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/liuscraft/orion-x/internal/apikey"
 	"github.com/liuscraft/orion-x/internal/billing"
 	"github.com/liuscraft/orion-x/internal/billing/service"
 	"github.com/liuscraft/orion-x/internal/storage"
@@ -25,6 +26,7 @@ type ManagerConfig struct {
 	Internal    InternalConfig    `yaml:"internal"`
 	Billing     BillingConfig     `yaml:"billing"`
 	Payment     PaymentConfig     `yaml:"payment"`
+	APIKey      APIKeyConfig      `yaml:"apikey"`
 }
 
 type ServerConfig struct {
@@ -171,6 +173,66 @@ func (c PaymentConfig) PaymentServiceConfig(channels []billing.PayChannel) servi
 		// 原样保留（包括尾部空格）：这是收银台上给用户看的文案，
 		// 「余额充值 9.99」和「余额充值9.99」是两个不同的东西。
 		cfg.SubjectPrefix = v
+	}
+	return cfg
+}
+
+// APIKeyConfig 是 API Key（凭证）功能的接入参数（docs/api-key-design.md §7.3）。
+//
+// 与 payment 一样是**默认关闭**：不写这一段的部署行为与以前完全一样——带
+// ox_sk_ 前缀的请求 401，管理面 503。
+type APIKeyConfig struct {
+	Enabled *bool `yaml:"enabled"` // nil = 关闭；显式 true 才启用
+
+	RateLimit APIKeyRateLimitConfig `yaml:"rate_limit"`
+	// CounterFlush 是用量计数（last_used_at / call_count）的刷库窗口，如 "30s"。
+	// 计数是非精确口径，不得用于计费或对账。
+	CounterFlush string `yaml:"counter_flush"`
+	// MaxPerAccount 是单账号的 key 上限（§3.2 的容量假设）。
+	MaxPerAccount int `yaml:"max_per_account"`
+	// AdminOnly 是灰度期的收口：true 时只有管理员能在控制台创建新 Key（§7.3）。
+	AdminOnly bool `yaml:"admin_only"`
+}
+
+// APIKeyRateLimitConfig 是每 key 的令牌桶参数（§1 D8）。
+type APIKeyRateLimitConfig struct {
+	RPS   float64 `yaml:"rps"`   // 每秒补充的令牌数
+	Burst int     `yaml:"burst"` // 桶容量（瞬时突发）
+}
+
+// Disabled 判断凭证功能是否关闭。没写这一段就是关闭：给用户签发长期凭证这件事
+// 应该是一次显式的决定，而不是升级镜像时顺手打开的。
+func (c APIKeyConfig) Disabled() bool {
+	return c.Enabled == nil || !*c.Enabled
+}
+
+// CounterFlushDuration 解析刷库窗口；空值、写错、非正值都回落到 0（= 用 domain 默认值）。
+// 负的窗口最危险：它会让每次 touch 都触发一次刷库。
+func (c APIKeyConfig) CounterFlushDuration() time.Duration {
+	if strings.TrimSpace(c.CounterFlush) == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(c.CounterFlush))
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
+}
+
+// ServiceConfig 把 yaml 里的配置翻译成 apikey.Config：0 / 空 = 用默认值。
+func (c APIKeyConfig) ServiceConfig() apikey.Config {
+	cfg := apikey.DefaultConfig()
+	if c.RateLimit.RPS > 0 {
+		cfg.RateLimitRPS = c.RateLimit.RPS
+	}
+	if c.RateLimit.Burst > 0 {
+		cfg.RateLimitBurst = c.RateLimit.Burst
+	}
+	if d := c.CounterFlushDuration(); d > 0 {
+		cfg.CounterFlush = d
+	}
+	if c.MaxPerAccount > 0 {
+		cfg.MaxKeysPerAccount = c.MaxPerAccount
 	}
 	return cfg
 }
