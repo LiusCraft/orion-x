@@ -12,8 +12,7 @@ type usageDelta struct {
 }
 
 // usageCounter 聚合 last_used_at / call_count（§1 D7）：热路径只在内存里加一，
-// 刷库交给进程级单个 goroutine。与 internal/billing/client 的 Sink 同一哲学——
-// 非关键路径不阻塞请求；代价是进程重启会丢一个窗口（§3.2 已认账，且禁止用于对账）。
+// 刷库交给进程级单个 goroutine。代价是进程重启丢一个窗口（§3.2），且禁止用于对账。
 type usageCounter struct {
 	mu      sync.Mutex
 	pending map[string]usageDelta
@@ -23,7 +22,7 @@ func newUsageCounter() *usageCounter {
 	return &usageCounter{pending: make(map[string]usageDelta)}
 }
 
-// Touch 记一次成功走到业务层的调用。被限流拦下的请求不该经过这里（§5.2 路径 A）。
+// Touch 记一次成功走到业务层的调用；被限流拦下的不该经过这里（§5.2 路径 A）。
 func (c *usageCounter) Touch(keyID string, at time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

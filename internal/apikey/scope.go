@@ -6,10 +6,8 @@ import (
 )
 
 // scope 是授权单位：`resource:action`，deny-by-default，不支持通配（§1 D5）。
-//
-// 值一经发布不得改变含义，只能废弃（Deprecated）：否则历史 key 的授权面会静默变化。
-// 命名深度默认两段；只有当一个资源家族的动作超过约 15 个、或需要把有副作用的动作
-// 拆出来时才允许第三段，且不允许超过三段（§5.3 兼容规则）。
+// 值一经发布不得改变含义，只能标 Deprecated，否则历史 key 的授权面会静默变化；
+// 命名默认两段，最多三段（§5.3）。
 const (
 	ScopeAgentRead   = "agent:read"
 	ScopeAgentWrite  = "agent:write"
@@ -25,7 +23,7 @@ const (
 	ScopeBillingRead = "billing:read"
 )
 
-// 创建时的校验错误。HTTP 层按它们回 400（§5.3 的"管理面还有三类 400"）。
+// 创建时的校验错误，HTTP 层按它们回 400（§5.3）。
 var (
 	ErrNameRequired    = errors.New("apikey: name is required")
 	ErrNameTooLong     = errors.New("apikey: name is too long")
@@ -35,9 +33,8 @@ var (
 	ErrKeyLimitReached = errors.New("apikey: too many keys for this account")
 )
 
-// UnknownScopeError 带上被拒的 scope 名单：**不静默丢弃**，否则用户会以为自己
-// 授了权（§5.3 的 400 表）。Deprecated 与 Unknown 分开列：前者是"曾经存在、
-// 不再可授"，后者是"根本不认识"。
+// UnknownScopeError 带上被拒的 scope 名单：不静默丢弃，否则用户会以为自己授了权
+// （§5.3）。Deprecated 与 Unknown 分开列：前者"曾经存在、不再可授"，后者"不认识"。
 type UnknownScopeError struct {
 	Unknown    []string
 	Deprecated []string
@@ -50,27 +47,24 @@ func (e *UnknownScopeError) Unwrap() error { return ErrUnknownScope }
 
 // ScopeInfo 是目录项。目录是服务端单一事实源：路由与前端都从它取（§5.3）。
 type ScopeInfo struct {
-	Value string `json:"value"` // "agent:write"，唯一标识，一经发布不变
+	Value string `json:"value"` // 唯一标识，一经发布不变
 	Group string `json:"group"` // 分组，只用于展示与批量选择，不参与授权判定
-	Title string `json:"title"` // 中文短标题，控制台展示
-	// Description 是"授予后会发生什么"的人话（要提示会扣费就写在这里，§5.3）。
-	// 线上的字段名是 desc——契约以 §5.3 的 curl 示例为准。
+	Title string `json:"title"` // 中文短标题
+	// Description 是"授予后会发生什么"的人话（要提示会扣费就写在这里）。
 	Description string `json:"desc"`
 	Default     bool   `json:"default"`    // 是否进默认预设
 	Deprecated  bool   `json:"deprecated"` // 不再挂新路由，但历史 key 仍可持有
 }
 
-// GroupInfo 是分组的展示名。分组本身不参与授权判定，但组名也该由服务端给，
-// 否则前端要为每一个新组发版（FR-10 的同一条理由）。
+// GroupInfo 是分组的展示名。分组不参与授权判定，但组名也由服务端下发，
+// 免得前端为每个新组发版。
 type GroupInfo struct {
 	Value string `json:"value"`
 	Title string `json:"title"`
 }
 
-// PresetInfo 是创建 Key 时的预设组合（§1 N8）：只是 scope 列表的快捷方式，
-// 不引入新的授权语义。落库只存展开后的显式列表，所以改预设不影响历史 key。
-// 字段名对齐 §5.3 的 curl 示例（name/title/scopes）；description 是增量字段，
-// 供控制台做"描述提示"。
+// PresetInfo 是创建 Key 时的预设组合（§1 N8）：只是 scope 列表的快捷方式，不引入
+// 新的授权语义。落库只存展开后的显式列表，所以改预设不影响历史 key。
 type PresetInfo struct {
 	Name        string   `json:"name"`
 	Title       string   `json:"title"`
@@ -78,9 +72,8 @@ type PresetInfo struct {
 	Scopes      []string `json:"scopes"`
 }
 
-// catalog 是 P1 全量 scope（§5.3 的 scope 表）。只增不改：改分组/标题/描述随时可以，
-// 改 Value 或它的含义不行。财务口径与"会不会扣费"不进这里——那是计费侧的事实，
-// 计费可以整个关掉、价格会变，写进凭证目录就等于写下一份注定过期的东西。
+// catalog 是 P1 全量 scope（§5.3 的 scope 表）。只增不改：分组 / 标题 / 描述随便改，
+// Value 及其含义不行。财务口径不进这里——计费可以整个关掉，写进来注定过期。
 var catalog = []ScopeInfo{
 	{
 		Value: ScopeAgentRead, Group: "agent", Title: "查看智能体", Default: true,
@@ -142,8 +135,8 @@ var groups = []GroupInfo{
 	{Value: "billing", Title: "计费"},
 }
 
-// presets 是内置预设。"只读"的集合刻意等于目录里 Default 标记的那批（有测试钉住），
-// 这样"默认勾选什么"和"只读预设给什么"不会漂移成两套说法。
+// presets 是内置预设。"只读"刻意等于目录里 Default 标记的那批（有测试钉住），
+// 免得"默认勾选什么"和"只读预设给什么"漂移成两套说法。
 var presets = []PresetInfo{
 	{
 		Name: "readonly", Title: "只读",
@@ -189,7 +182,7 @@ func Presets() []PresetInfo {
 }
 
 // Missing 返回 required 里未被 granted 覆盖的 scope（AND 语义，deny-by-default）。
-// 空 required 表示"这条路由没声明要求"——那不是放行，调用方必须自己决定（见 §7 V3）。
+// 空 required 表示"这条路由没声明要求"，那不是放行，调用方得自己决定（§7 V3）。
 func Missing(granted, required []string) []string {
 	have := make(map[string]struct{}, len(granted))
 	for _, s := range granted {
@@ -210,8 +203,7 @@ func HasAll(granted, required []string) bool {
 }
 
 // NormalizeScopes 校验并归一化创建时的显式 scope 列表：去空、去重、按目录顺序排列。
-// 未知或已废弃的 scope 一律拒绝——废弃的意思是"不再授予新 key"；被拒的值全部
-// 收集进 UnknownScopeError，让调用方能一次告诉用户改哪几个。
+// 未知与已废弃的一律拒绝，被拒的值全部收进 UnknownScopeError，一次报清。
 func NormalizeScopes(scopes []string) ([]string, error) {
 	idx := make(map[string]ScopeInfo, len(catalog))
 	for _, s := range catalog {
@@ -244,7 +236,7 @@ func NormalizeScopes(scopes []string) ([]string, error) {
 	}
 
 	out := make([]string, 0, len(seen))
-	for _, info := range catalog { // 目录顺序：列表与创建响应的展示顺序稳定
+	for _, info := range catalog { // 按目录顺序，展示顺序才稳定
 		if _, ok := seen[info.Value]; ok {
 			out = append(out, info.Value)
 		}
@@ -252,8 +244,8 @@ func NormalizeScopes(scopes []string) ([]string, error) {
 	return out, nil
 }
 
-// ExpandPreset 把预设名展开成显式 scope 列表。展开在服务端完成、落库只存展开结果：
-// 存"预设名"的话，预设定义一改，历史 key 的权限就会静默变化（§5.3）。
+// ExpandPreset 把预设名展开成显式 scope 列表。落库只存展开结果：存预设名的话，
+// 预设定义一改，历史 key 的权限就静默变了（§5.3）。
 func ExpandPreset(name string) ([]string, bool) {
 	for _, p := range presets {
 		if p.Name == strings.TrimSpace(name) {
