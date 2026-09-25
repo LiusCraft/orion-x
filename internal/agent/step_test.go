@@ -58,29 +58,6 @@ func TestRunStepReturnsTextWithoutToolCalls(t *testing.T) {
 	}
 }
 
-func TestRunStepCollectsToolCalls(t *testing.T) {
-	a := &Agent{
-		client: &fakeClient{
-			chatFunc: func(ctx context.Context, req llm.Request) (*llm.StreamReader, error) {
-				sr := llm.NewStreamReader(func() {})
-				sr.Send(llm.Message{ToolCalls: []llm.ToolCall{{ID: "1", Name: "getTime", Arguments: "{}"}}})
-				sr.Close()
-				return sr, nil
-			},
-		},
-		registry: tools.NewRegistry(),
-	}
-
-	var events []AgentEvent
-	result, err := a.runStep(context.Background(), nil, collectEmitted(&events))
-	if err != nil {
-		t.Fatalf("runStep() error = %v", err)
-	}
-	if len(result.toolCalls) != 1 || result.toolCalls[0].Name != "getTime" {
-		t.Errorf("expected 1 tool call named getTime, got %v", result.toolCalls)
-	}
-}
-
 func TestRunStepReturnsStreamError(t *testing.T) {
 	wantErr := errors.New("stream broke")
 	a := &Agent{

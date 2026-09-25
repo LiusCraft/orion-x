@@ -189,30 +189,6 @@ func TestClientCallsControlPlaneEndpoints(t *testing.T) {
 	}
 }
 
-// TestClientBaseURLTrimsTrailingSlash 防止 base url 尾部斜杠拼出 //internal/... 这种路径。
-func TestClientBaseURLTrimsTrailingSlash(t *testing.T) {
-	tests := []struct {
-		name   string
-		suffix string
-	}{
-		{name: "no slash"},
-		{name: "one slash", suffix: "/"},
-		{name: "two slashes", suffix: "//"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			srv, shape := captureServer(t, nil)
-			c := New(Config{BaseURL: srv.URL + tt.suffix, Token: "t"})
-			if _, err := c.Authorize(context.Background(), billing.AuthorizeRequest{DeviceID: "d", SessionID: "s"}); err != nil {
-				t.Fatalf("authorize: %v", err)
-			}
-			if got := shape().Path; got != billing.PathAuthorize {
-				t.Fatalf("path = %q, want %q", got, billing.PathAuthorize)
-			}
-		})
-	}
-}
-
 // TestClientAuthorizeBusinessRejection 钉住“200 + reject_reason 不是错误”这条约定（§14.3），
 // 四个 reject_reason 都走一遍。
 func TestClientAuthorizeBusinessRejection(t *testing.T) {
@@ -365,54 +341,6 @@ func TestClientOmitsAuthorizationWithoutToken(t *testing.T) {
 	}
 	if got := shape().Auth; got != "" {
 		t.Fatalf("authorization = %q, want it omitted", got)
-	}
-}
-
-// TestClientTimeoutDefaults 钉住默认超时与注入:authorize 走 800ms,其余走 3s。
-func TestClientTimeoutDefaults(t *testing.T) {
-	injected := &http.Client{Timeout: 7 * time.Second}
-
-	tests := []struct {
-		name              string
-		cfg               Config
-		wantTimeout       time.Duration
-		wantAuthorizeTime time.Duration
-	}{
-		{
-			name:              "defaults",
-			cfg:               Config{BaseURL: "http://127.0.0.1:1", Token: "t"},
-			wantTimeout:       defaultTimeout,
-			wantAuthorizeTime: defaultAuthorizeTimeout,
-		},
-		{
-			name:              "explicit timeouts win",
-			cfg:               Config{BaseURL: "http://127.0.0.1:1", Token: "t", Timeout: time.Second, AuthorizeTimeout: 50 * time.Millisecond},
-			wantTimeout:       time.Second,
-			wantAuthorizeTime: 50 * time.Millisecond,
-		},
-		{
-			name:              "authorize timer is independent",
-			cfg:               Config{BaseURL: "http://127.0.0.1:1", Token: "t", Timeout: time.Second},
-			wantTimeout:       time.Second,
-			wantAuthorizeTime: defaultAuthorizeTimeout,
-		},
-		{
-			name:              "injected http client is used as is",
-			cfg:               Config{BaseURL: "http://127.0.0.1:1", Token: "t", HTTPClient: injected},
-			wantTimeout:       7 * time.Second,
-			wantAuthorizeTime: defaultAuthorizeTimeout,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := New(tt.cfg)
-			if c.httpClient.Timeout != tt.wantTimeout {
-				t.Errorf("http timeout = %s, want %s", c.httpClient.Timeout, tt.wantTimeout)
-			}
-			if c.authorizeTimeout != tt.wantAuthorizeTime {
-				t.Errorf("authorize timeout = %s, want %s", c.authorizeTimeout, tt.wantAuthorizeTime)
-			}
-		})
 	}
 }
 

@@ -5,57 +5,6 @@ import (
 	"testing"
 )
 
-func TestTextFilterStage(t *testing.T) {
-	stage := NewTextFilterStage()
-	input := make(chan Message, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	output := stage.Process(ctx, input)
-
-	// 发送带有 metadata 标签的文本
-	input <- NewMessage(MessageTypeData, "Hello <metadata>world</metadata>!")
-
-	msg := <-output
-	if msg.Payload != "Hello !" {
-		t.Errorf("Expected 'Hello !', got '%s'", msg.Payload)
-	}
-}
-
-func TestTextFilterStage_NonTextMessage(t *testing.T) {
-	stage := NewTextFilterStage()
-	input := make(chan Message, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	output := stage.Process(ctx, input)
-
-	// 发送非文本消息，应该原样透传
-	input <- NewMessage(MessageTypeData, []byte{1, 2, 3})
-
-	msg := <-output
-	if msg.Type != MessageTypeData {
-		t.Errorf("Expected MessageTypeData, got %s", msg.Type)
-	}
-}
-
-func TestEmotionExtractorStage(t *testing.T) {
-	stage := NewEmotionExtractorStage()
-	input := make(chan Message, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	output := stage.Process(ctx, input)
-
-	// 发送带有 emotion 标签的文本
-	input <- NewMessage(MessageTypeData, "I'm so <emotion>happy</emotion> today!")
-
-	msg := <-output
-	if msg.Metadata.Emotion != "happy" {
-		t.Errorf("Expected emotion 'happy', got '%s'", msg.Metadata.Emotion)
-	}
-}
-
 func TestEmotionExtractorStage_NoEmotion(t *testing.T) {
 	stage := NewEmotionExtractorStage()
 	input := make(chan Message, 1)

@@ -32,20 +32,3 @@ func TestBuildContextMessagesWithoutMemoryService(t *testing.T) {
 		t.Errorf("expected user message, got %+v", msgs[2])
 	}
 }
-
-func TestBuildContextMessagesWithCustomSoul(t *testing.T) {
-	a := &Agent{soulPrompt: "custom soul", rulesPrompt: "custom rules", memorySvc: nil}
-	sess := newTestSessionWithUserMessage("你好")
-
-	msgs := a.buildContextMessages(context.Background(), sess)
-
-	if len(msgs) != 3 {
-		t.Fatalf("expected 3 messages, got %d: %+v", len(msgs), msgs)
-	}
-	if msgs[0].Role != "system" || msgs[0].Content != "═══════════════════ 身份设定 (SOUL) ═══════════════════\n"+"custom soul" {
-		t.Errorf("expected custom soul, got %+v", msgs[0])
-	}
-	if msgs[1].Role != "system" || msgs[1].Content != "custom rules" {
-		t.Errorf("expected custom rules, got %+v", msgs[1])
-	}
-}

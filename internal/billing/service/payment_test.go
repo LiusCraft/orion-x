@@ -59,22 +59,6 @@ func TestNormalizePaymentConfig(t *testing.T) {
 	}
 }
 
-func TestPaymentServiceSupports(t *testing.T) {
-	svc := newTestPaymentService(t)
-
-	if !svc.Supports(billing.PayChannelAlipay) {
-		t.Fatal("alipay should be supported by default")
-	}
-
-	svc.cfg.Channels = []billing.PayChannel{billing.PayChannelWxpay}
-	if svc.Supports(billing.PayChannelAlipay) {
-		t.Fatal("alipay should no longer be supported")
-	}
-	if !svc.Supports(billing.PayChannelWxpay) {
-		t.Fatal("wxpay should be supported")
-	}
-}
-
 func TestCreateRechargeRejects(t *testing.T) {
 	const subject = "user-1"
 

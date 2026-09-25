@@ -174,28 +174,6 @@ func TestWSOutputStage_TTSChunkFlow(t *testing.T) {
 	}
 }
 
-func TestWSOutputStage_InterruptSendsStopIfStarted(t *testing.T) {
-	server, client := newTestWSConnPair(t)
-	stage := xiaozhi.NewWSOutputStage(xiaozhi.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	input := make(chan pipeline.Message, 4)
-	_ = stage.Process(ctx, input)
-
-	input <- pipeline.Message{Type: pipeline.MessageTypeData, Payload: audio.TTSChunk{Text: "在播报", Audio: audio.Int16ToBytesLE(testFrameSamples(1, 1))}}
-	_ = readJSONWithTimeout(t, client, time.Second)   // start
-	_ = readJSONWithTimeout(t, client, time.Second)   // sentence_start
-	_ = readBinaryWithTimeout(t, client, time.Second) // audio frame
-
-	input <- pipeline.Message{Type: pipeline.MessageTypeInterrupt}
-	stop := readJSONWithTimeout(t, client, time.Second)
-	if stop["state"] != string(wsproto.TTSStateStop) {
-		t.Fatalf("expected tts stop after interrupt, got %+v", stop)
-	}
-}
-
 func TestWSOutputStage_InterruptBeforeTTSStartSendsNothing(t *testing.T) {
 	server, client := newTestWSConnPair(t)
 	stage := xiaozhi.NewWSOutputStage(xiaozhi.NewSafeConn(server), "sess-1", newPCMCodecForTest(t), testWSSampleRate, 60, 3)

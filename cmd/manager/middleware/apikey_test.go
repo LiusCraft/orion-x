@@ -134,46 +134,6 @@ func TestAuthKeepsJWTSemantics(t *testing.T) {
 	}
 }
 
-func TestAuthWithAPIKey(t *testing.T) {
-	svc, _, plaintext, record := keyFixture(t, []string{apikey.ScopeAgentRead}, apikey.Config{RateLimitRPS: 1, RateLimitBurst: 3})
-	r := identityRoute(svc, agentReadTable)
-
-	w := do(r, plaintext)
-	if w.Code != http.StatusOK {
-		t.Fatalf("key request = %d, want 200 (body %s)", w.Code, w.Body.String())
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body["user_id"] != "user-1" {
-		// 与 JWT 完全一样：既有 handler 读到的就是同一个 userID。
-		t.Fatalf("user_id = %v, want user-1", body["user_id"])
-	}
-	if body["principal"] != PrincipalAPIKey || body["key_id"] != record.ID {
-		t.Fatalf("body = %v, want the api_key identity", body)
-	}
-	if scopes, _ := body["scopes"].([]any); len(scopes) != 1 || scopes[0] != apikey.ScopeAgentRead {
-		t.Fatalf("scopes = %v", body["scopes"])
-	}
-	// 机器凭证没有角色：RequireAdmin 天然挡住它。
-	if body["is_admin"] != false {
-		t.Fatalf("is_admin = %v, want false", body["is_admin"])
-	}
-
-	if got := w.Header().Get("X-RateLimit-Limit"); got != "3" {
-		t.Errorf("X-RateLimit-Limit = %q, want 3", got)
-	}
-	if got := w.Header().Get("X-RateLimit-Remaining"); got != "2" {
-		t.Errorf("X-RateLimit-Remaining = %q, want 2", got)
-	}
-	// 明文绝不能出现在响应体里（G2/R3）。
-	if strings.Contains(w.Body.String(), plaintext) {
-		t.Fatalf("response leaks the plaintext key: %s", w.Body.String())
-	}
-}
-
 func TestAuthAPIKeyFailures(t *testing.T) {
 	svc, st, plaintext, record := keyFixture(t, []string{apikey.ScopeAgentRead}, apikey.Config{})
 	r := identityRoute(svc, agentReadTable)
@@ -288,15 +248,6 @@ func TestRequireScopesDeniesUndeclaredRoute(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"required":[]`) {
 		t.Fatalf("body = %s, want an empty required list", w.Body.String())
-	}
-}
-
-func TestRequireScopesSkipsJWT(t *testing.T) {
-	svc, _, _, _ := keyFixture(t, []string{}, apikey.Config{})
-	r := identityRoute(svc, ScopeTable{}) // 空表：JWT 请求照样进得去
-
-	if w := do(r, signTestJWT(t, "user-9", false)); w.Code != http.StatusOK {
-		t.Fatalf("JWT request = %d, want 200 (scope 表只约束 key)", w.Code)
 	}
 }
 

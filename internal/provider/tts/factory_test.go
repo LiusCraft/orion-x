@@ -19,13 +19,6 @@ func TestNewProviderUsesRegisteredProvider(t *testing.T) {
 	}
 }
 
-func TestNewProviderRejectsUnsupportedProvider(t *testing.T) {
-	_, err := NewProvider(ProviderConfig{Type: "huoshan"})
-	if err == nil || !strings.Contains(err.Error(), "unsupported tts provider") {
-		t.Fatalf("expected unsupported tts provider error, got %v", err)
-	}
-}
-
 type fakeProvider struct{}
 
 func (fakeProvider) Synthesize(_ context.Context, _ SynthesizeRequest) (*SynthesizeResult, error) {

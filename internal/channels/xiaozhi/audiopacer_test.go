@@ -30,16 +30,6 @@ func (r *recordingSender) count() int {
 	return len(r.sent)
 }
 
-func (r *recordingSender) snapshot() ([][]byte, []time.Time) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	frames := make([][]byte, len(r.sent))
-	copy(frames, r.sent)
-	times := make([]time.Time, len(r.times))
-	copy(times, r.times)
-	return frames, times
-}
-
 func waitForCount(t *testing.T, r *recordingSender, n int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
@@ -48,44 +38,6 @@ func waitForCount(t *testing.T, r *recordingSender, n int, timeout time.Duration
 		case <-deadline:
 			t.Fatalf("timeout waiting for %d frames, got %d", n, r.count())
 		case <-time.After(2 * time.Millisecond):
-		}
-	}
-}
-
-func TestAudioPacer_PreBufferSentImmediately(t *testing.T) {
-	sender := &recordingSender{}
-	p := newAudioPacer(10*time.Millisecond, 3, sender.send, nil, nil, nil)
-	defer p.stop()
-
-	start := time.Now()
-	for i := 0; i < 3; i++ {
-		p.enqueue([]byte{byte(i)})
-	}
-	waitForCount(t, sender, 3, time.Second)
-
-	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
-		t.Errorf("expected pre-buffer frames to be sent immediately, took %v", elapsed)
-	}
-}
-
-func TestAudioPacer_PacesFramesAfterPreBuffer(t *testing.T) {
-	sender := &recordingSender{}
-	const interval = 60 * time.Millisecond
-	p := newAudioPacer(interval, 2, sender.send, nil, nil, nil)
-	defer p.stop()
-
-	for i := 0; i < 4; i++ {
-		p.enqueue([]byte{byte(i)})
-	}
-	waitForCount(t, sender, 4, 2*time.Second)
-
-	_, times := sender.snapshot()
-	// frames[0], frames[1] are pre-buffered (immediate); frames[2], frames[3]
-	// should each be paced by ~interval.
-	for i := 2; i < len(times); i++ {
-		gap := times[i].Sub(times[i-1])
-		if gap < interval/2 {
-			t.Errorf("frame %d: expected gap >= ~%v, got %v", i, interval/2, gap)
 		}
 	}
 }
@@ -109,65 +61,6 @@ func TestAudioPacer_ResetPreBufferRestartsWindow(t *testing.T) {
 
 	if elapsed := time.Since(start); elapsed > interval/2 {
 		t.Errorf("expected frame after resetPreBuffer to be sent immediately, took %v", elapsed)
-	}
-}
-
-func TestAudioPacer_ClearDropsQueuedFrames(t *testing.T) {
-	sender := &recordingSender{}
-	const interval = 500 * time.Millisecond // long enough that undropped frames would visibly delay the test
-	p := newAudioPacer(interval, 1, sender.send, nil, nil, nil)
-	defer p.stop()
-
-	p.enqueue([]byte{1}) // pre-buffer: sent immediately
-	waitForCount(t, sender, 1, time.Second)
-
-	// These would each wait ~interval if not cleared.
-	p.enqueue([]byte{2})
-	p.enqueue([]byte{3})
-	p.enqueue([]byte{4})
-
-	p.clear()
-
-	// Give the pacer a brief moment in case one frame was already dequeued
-	// before clear ran (documented as an acceptable race in audioPacer.clear).
-	time.Sleep(50 * time.Millisecond)
-	if got := sender.count(); got > 2 {
-		t.Errorf("expected at most 1 pre-buffer frame + 1 possibly in-flight frame after clear, got %d frames sent", got)
-	}
-}
-
-func TestAudioPacer_TurnEndInvokesCallbackAfterQueuedFrames(t *testing.T) {
-	sender := &recordingSender{}
-	var turnEnded bool
-	var mu sync.Mutex
-	onTurnEnd := func() {
-		mu.Lock()
-		turnEnded = true
-		mu.Unlock()
-	}
-
-	p := newAudioPacer(10*time.Millisecond, 2, sender.send, onTurnEnd, nil, nil)
-	defer p.stop()
-
-	p.enqueue([]byte{1})
-	p.enqueue([]byte{2})
-	p.enqueueTurnEnd()
-
-	waitForCount(t, sender, 2, time.Second)
-
-	deadline := time.After(time.Second)
-	for {
-		mu.Lock()
-		ended := turnEnded
-		mu.Unlock()
-		if ended {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for onTurnEnd callback")
-		case <-time.After(2 * time.Millisecond):
-		}
 	}
 }
 

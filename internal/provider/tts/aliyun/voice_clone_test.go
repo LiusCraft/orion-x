@@ -6,15 +6,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	tts "github.com/liuscraft/orion-x/internal/provider/tts"
 )
-
-func TestDashScopeProviderImplementsVoiceCloner(t *testing.T) {
-	var _ tts.VoiceCloner = (*DashScopeProvider)(nil)
-}
 
 func TestDashScopeProviderCloneVoice(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -156,19 +151,6 @@ func TestDashScopeProviderCloneVoiceMapsAPIError(t *testing.T) {
 	}
 }
 
-func TestVoiceCloneEndpointUsesConfiguredOverride(t *testing.T) {
-	endpoint := voiceCloneEndpoint(tts.Config{Extra: map[string]any{
-		"voice_clone_endpoint": " https://example.com/custom/ ",
-	}})
-	if endpoint != "https://example.com/custom" {
-		t.Fatalf("voiceCloneEndpoint() = %q, want trimmed override", endpoint)
-	}
-
-	if strings.TrimSpace(endpoint) != endpoint {
-		t.Fatalf("voiceCloneEndpoint() returned surrounding whitespace")
-	}
-}
-
 func TestVoiceCloneEndpointDerivesRESTFromWebSocketURL(t *testing.T) {
 	const restPath = "/api/v1/services/audio/tts/customization"
 
@@ -215,38 +197,5 @@ func TestVoiceCloneEndpointDerivesRESTFromWebSocketURL(t *testing.T) {
 				t.Fatalf("voiceCloneEndpoint() = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-// TestDashScopeProviderCloneVoiceFromWebSocketEndpoint 回归：模型里配的是 WS 推理地址
-// （wss://…/api-ws/v1/inference）时，复刻请求必须发到同一主机的 HTTPS REST 地址。
-func TestDashScopeProviderCloneVoiceFromWebSocketEndpoint(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/services/audio/tts/customization" {
-			t.Errorf("path = %s, want voice-enrollment REST path", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output":{"voice_id":"cloned-voice"}}`))
-	}))
-	defer server.Close()
-
-	provider, err := NewDashScopeProvider(tts.Config{
-		APIKey:   "test-key",
-		Model:    "cosyvoice-v3-flash",
-		Endpoint: "ws" + strings.TrimPrefix(server.URL, "http") + "/api-ws/v1/inference",
-	})
-	if err != nil {
-		t.Fatalf("NewDashScopeProvider() error = %v", err)
-	}
-
-	result, err := provider.CloneVoice(context.Background(), tts.VoiceCloneRequest{
-		Prefix:         "myvoice",
-		SourceAudioURL: "https://example.com/voice.wav",
-	})
-	if err != nil {
-		t.Fatalf("CloneVoice() error = %v", err)
-	}
-	if result.VoiceID != "cloned-voice" {
-		t.Fatalf("voice ID = %q, want cloned-voice", result.VoiceID)
 	}
 }

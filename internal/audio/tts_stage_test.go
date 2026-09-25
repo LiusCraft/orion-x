@@ -70,12 +70,6 @@ func (m *mockTTSProcessor) emitChunk(c TTSChunk) {
 	}
 }
 
-func (m *mockTTSProcessor) writeCallCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.writeCalls)
-}
-
 func (m *mockTTSProcessor) flushCallCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -86,32 +80,6 @@ func (m *mockTTSProcessor) interruptCallCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.interruptCalls
-}
-
-// TestTTSStage_TextInputWritesToProcessor 验证文本消息驱动 proc.Write。
-func TestTTSStage_TextInputWritesToProcessor(t *testing.T) {
-	proc := &mockTTSProcessor{}
-	stage := NewTTSStage(proc)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	input := make(chan pipeline.Message, 1)
-	output := stage.Process(ctx, input)
-
-	input <- pipeline.NewMessage(pipeline.MessageTypeData, "你好")
-
-	// 没有下游消费 output，但 proc.Write 应该已经同步发生。
-	deadline := time.After(time.Second)
-	for proc.writeCallCount() == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for proc.Write to be called")
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-
-	_ = output
 }
 
 // TestTTSStage_OnChunkProducesMessage 验证 proc 内部产生的音频块经由

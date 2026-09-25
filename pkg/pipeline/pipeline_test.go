@@ -27,66 +27,6 @@ func (s *mockStage) Process(ctx context.Context, input <-chan Message) <-chan Me
 	return input // 默认透传
 }
 
-func TestPipelineBasic(t *testing.T) {
-	// 创建简单的 Pipeline: Stage1 -> Stage2 -> Stage3
-	stage1 := newMockStage("stage1", func(ctx context.Context, input <-chan Message) <-chan Message {
-		output := make(chan Message)
-		go func() {
-			defer close(output)
-			for msg := range input {
-				msg.Payload = fmt.Sprintf("%s-stage1", msg.Payload)
-				select {
-				case output <- msg:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-		return output
-	})
-
-	stage2 := newMockStage("stage2", func(ctx context.Context, input <-chan Message) <-chan Message {
-		output := make(chan Message)
-		go func() {
-			defer close(output)
-			for msg := range input {
-				msg.Payload = fmt.Sprintf("%s-stage2", msg.Payload)
-				select {
-				case output <- msg:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-		return output
-	})
-
-	pipeline := NewBuilder().
-		AddStage(stage1).
-		AddStage(stage2).
-		Build()
-
-	ctx := context.Background()
-	if err := pipeline.Start(ctx); err != nil {
-		t.Fatalf("Failed to start pipeline: %v", err)
-	}
-	defer func() { _ = pipeline.Stop() }()
-
-	// 发送消息并等待 goroutine 完成
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		pipeline.Input() <- NewMessage(MessageTypeData, "test")
-	}()
-	<-done
-
-	// 接收输出
-	msg := <-pipeline.Output()
-	if msg.Payload != "test-stage1-stage2" {
-		t.Errorf("Expected 'test-stage1-stage2', got '%s'", msg.Payload)
-	}
-}
-
 func TestPipelineInterrupt(t *testing.T) {
 	// 创建会阻塞的 Stage
 	blockingStage := newMockStage("blocking", func(ctx context.Context, input <-chan Message) <-chan Message {

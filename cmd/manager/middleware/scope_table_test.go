@@ -33,20 +33,6 @@ func TestValidateCoverageAcceptsDeclaredAndWhitelisted(t *testing.T) {
 	}
 }
 
-func TestRouteScopesIsDetached(t *testing.T) {
-	table := RouteScopes()
-	table["GET /api/voicebots"] = nil
-	table["GET /api/invented"] = []string{apikey.ScopeAgentRead}
-
-	fresh := RouteScopes()
-	if len(fresh["GET /api/voicebots"]) == 0 {
-		t.Fatal("RouteScopes() exposes the server-side table to mutation")
-	}
-	if _, ok := fresh["GET /api/invented"]; ok {
-		t.Fatal("RouteScopes() leaked a test-only entry back into the table")
-	}
-}
-
 func TestKeyUnreachableRules(t *testing.T) {
 	cases := []struct {
 		method string

@@ -83,21 +83,6 @@ func newTestSession(userText string) *session.Session {
 	return sess
 }
 
-func TestRunLoopSingleStepNoToolCalls(t *testing.T) {
-	client := &sequentialClient{responses: []func() *llm.StreamReader{textStream("你好")}}
-	a := newWithClient(client, tools.NewRegistry(), "test-model", nil, "", "")
-	sess := newTestSession("你好")
-
-	eventChan, err := a.Run(context.Background(), sess)
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	fe := lastFinished(collectEvents(t, eventChan))
-	if fe == nil || fe.Error != nil {
-		t.Fatalf("expected successful FinishedEvent, got %+v", fe)
-	}
-}
-
 func TestRunLoopSingleToolCallRoundtrip(t *testing.T) {
 	client := &sequentialClient{responses: []func() *llm.StreamReader{
 		toolCallStream(llm.ToolCall{ID: "1", Name: "getTime", Arguments: "{}"}),

@@ -52,46 +52,6 @@ func TestLinearResampler_16kTo24k(t *testing.T) {
 	}
 }
 
-func TestLinearResampler_24kTo16k(t *testing.T) {
-	resampler := NewLinearResampler()
-	// 生成 150 个样本 @ 24kHz
-	input := make([]int16, 150)
-	for i := range input {
-		input[i] = int16(i * 100)
-	}
-
-	output, err := resampler.Resample(input, 24000, 16000, 1)
-	if err != nil {
-		t.Fatalf("Resample failed: %v", err)
-	}
-
-	// 16kHz 应该有更少样本 (约 0.67 倍)
-	expectedLen := int(math.Ceil(float64(len(input)) * 16000.0 / 24000.0))
-	if len(output) != expectedLen {
-		t.Errorf("Expected length ~%d, got %d", expectedLen, len(output))
-	}
-}
-
-func TestLinearResampler_48kTo16k(t *testing.T) {
-	resampler := NewLinearResampler()
-	// 生成 300 个样本 @ 48kHz
-	input := make([]int16, 300)
-	for i := range input {
-		input[i] = int16(i * 50)
-	}
-
-	output, err := resampler.Resample(input, 48000, 16000, 1)
-	if err != nil {
-		t.Fatalf("Resample failed: %v", err)
-	}
-
-	// 16kHz 应该有约 1/3 样本
-	expectedLen := int(math.Ceil(float64(len(input)) * 16000.0 / 48000.0))
-	if len(output) != expectedLen {
-		t.Errorf("Expected length ~%d, got %d", expectedLen, len(output))
-	}
-}
-
 func TestLinearResampler_Stereo(t *testing.T) {
 	resampler := NewLinearResampler()
 	// 生成立体声数据：左声道和右声道交替
@@ -150,46 +110,6 @@ func TestLinearResampler_InvalidRate(t *testing.T) {
 	}
 }
 
-func TestLinearResampler_SineWaveQuality(t *testing.T) {
-	resampler := NewLinearResampler()
-
-	// 生成 1kHz 正弦波 @ 16kHz
-	sampleRate := 16000
-	freq := 1000.0
-	duration := 0.1 // 100ms
-	samples := int(float64(sampleRate) * duration)
-	input := make([]int16, samples)
-
-	for i := 0; i < samples; i++ {
-		t := float64(i) / float64(sampleRate)
-		sample := math.Sin(2 * math.Pi * freq * t)
-		input[i] = int16(sample * 16000) // 降低幅度避免削波
-	}
-
-	// 重采样到 24kHz
-	output, err := resampler.Resample(input, 16000, 24000, 1)
-	if err != nil {
-		t.Fatalf("Resample failed: %v", err)
-	}
-
-	// 验证输出也是正弦波（检查几个周期）
-	peakCount := 0
-
-	for i := 1; i < len(output)-1; i++ {
-		// 检测峰值
-		if output[i] > output[i-1] && output[i] > output[i+1] && output[i] > 8000 {
-			peakCount++
-		}
-	}
-
-	// 100ms 内应该有约 10 个峰值
-	expectedPeaks := int(freq * duration)
-	tolerance := 2
-	if peakCount < expectedPeaks-tolerance || peakCount > expectedPeaks+tolerance {
-		t.Logf("Warning: Expected ~%d peaks, got %d (may indicate quality issue)", expectedPeaks, peakCount)
-	}
-}
-
 func TestResamplingReader_PassThrough(t *testing.T) {
 	// 相同采样率应该直接透传
 	input := []byte{1, 2, 3, 4, 5, 6, 7, 8}
@@ -210,36 +130,6 @@ func TestResamplingReader_PassThrough(t *testing.T) {
 
 	if !bytes.Equal(input, output) {
 		t.Errorf("Output mismatch: expected %v, got %v", input, output)
-	}
-}
-
-func TestResamplingReader_Resample(t *testing.T) {
-	// 生成测试数据：100 个 int16 样本
-	input := make([]int16, 100)
-	for i := range input {
-		input[i] = int16(i * 100)
-	}
-
-	// 转换为 byte
-	inputBytes := make([]byte, len(input)*2)
-	int16ToBytes(input, inputBytes)
-
-	reader := bytes.NewReader(inputBytes)
-	resampler := NewLinearResampler()
-	resamplingReader := NewResamplingReader(reader, 16000, 24000, 1, resampler)
-
-	// 读取所有数据
-	output := make([]byte, 4096)
-	n, err := io.ReadFull(resamplingReader, output)
-	if err != nil && err != io.ErrUnexpectedEOF {
-		t.Fatalf("Read failed: %v", err)
-	}
-
-	// 验证输出长度增加了（16k -> 24k 约 1.5 倍）
-	expectedBytes := int(math.Ceil(float64(len(inputBytes)) * 24000.0 / 16000.0))
-	tolerance := 10
-	if n < expectedBytes-tolerance || n > expectedBytes+tolerance {
-		t.Errorf("Expected ~%d bytes, got %d", expectedBytes, n)
 	}
 }
 

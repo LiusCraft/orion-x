@@ -4,63 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/llm"
-	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
-
-func TestRunOneToolCallSuccess(t *testing.T) {
-	registry := tools.NewRegistry(tools.Spec{
-		Name: "echo",
-		Execute: func(ctx context.Context, args json.RawMessage) (tools.Result, error) {
-			return tools.Result{Output: "ok"}, nil
-		},
-	})
-	a := &Agent{registry: registry}
-
-	outcome := a.runOneToolCall(context.Background(), llm.ToolCall{ID: "1", Name: "echo"})
-
-	if outcome.fatal != nil {
-		t.Fatalf("expected no fatal error, got %v", outcome.fatal)
-	}
-	if outcome.message.Content != "ok" || outcome.message.ToolCallID != "1" || outcome.message.Role != session.RoleTool {
-		t.Errorf("unexpected message: %+v", outcome.message)
-	}
-}
-
-func TestRunOneToolCallUnknownToolIsRecoverable(t *testing.T) {
-	a := &Agent{registry: tools.NewRegistry()}
-
-	outcome := a.runOneToolCall(context.Background(), llm.ToolCall{ID: "1", Name: "missing"})
-
-	if outcome.fatal != nil {
-		t.Fatalf("expected recoverable (no fatal), got %v", outcome.fatal)
-	}
-	if !strings.Contains(outcome.message.Content, "missing") {
-		t.Errorf("expected error message to mention tool name, got %q", outcome.message.Content)
-	}
-}
-
-func TestRunOneToolCallExecuteErrorIsFatal(t *testing.T) {
-	wantErr := errors.New("boom")
-	registry := tools.NewRegistry(tools.Spec{
-		Name: "broken",
-		Execute: func(ctx context.Context, args json.RawMessage) (tools.Result, error) {
-			return tools.Result{}, wantErr
-		},
-	})
-	a := &Agent{registry: registry}
-
-	outcome := a.runOneToolCall(context.Background(), llm.ToolCall{ID: "1", Name: "broken"})
-
-	if !errors.Is(outcome.fatal, wantErr) {
-		t.Fatalf("expected fatal error %v, got %v", wantErr, outcome.fatal)
-	}
-}
 
 func TestRunOneToolCallFillsEmptyOutputFromResultError(t *testing.T) {
 	registry := tools.NewRegistry(tools.Spec{

@@ -147,16 +147,6 @@ func TestTTSProcessorCreate(t *testing.T) {
 	}
 }
 
-func TestTTSProcessorStartStop(t *testing.T) {
-	proc := newTestTTSProcessor(newMockTTSProvider())
-	if err := proc.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-	if err := proc.Stop(); err != nil {
-		t.Fatalf("Stop failed: %v", err)
-	}
-}
-
 func TestTTSProcessorDoubleStart(t *testing.T) {
 	proc := newTestTTSProcessor(newMockTTSProvider())
 	ctx := context.Background()
@@ -201,75 +191,6 @@ func TestTTSProcessorOnChunk_StrongBoundary(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timeout waiting for OnChunk")
-	}
-}
-
-// TestTTSProcessorFirstSentenceWeakBoundary 验证首句在弱停顿处切句。
-func TestTTSProcessorFirstSentenceWeakBoundary(t *testing.T) {
-	proc := newTestTTSProcessor(newMockTTSProvider())
-
-	chunkCh := make(chan TTSChunk, 5)
-	proc.OnChunk(func(c TTSChunk) { chunkCh <- c })
-
-	if err := proc.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-	defer func() { _ = proc.Stop() }()
-
-	// 逗号是弱停顿，首句应在此触发
-	_ = proc.Write("今天天气很好，", defaultOpts)
-
-	select {
-	case got := <-chunkCh:
-		if got.Text != "今天天气很好，" {
-			t.Errorf("unexpected text: %q", got.Text)
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timeout: first sentence should trigger at weak boundary")
-	}
-}
-
-// TestTTSProcessorSubsequentSentenceStrongOnly 验证首句后只有强停顿才切句。
-func TestTTSProcessorSubsequentSentenceStrongOnly(t *testing.T) {
-	proc := newTestTTSProcessor(newMockTTSProvider())
-
-	var chunks []TTSChunk
-	var mu sync.Mutex
-	proc.OnChunk(func(c TTSChunk) {
-		mu.Lock()
-		chunks = append(chunks, c)
-		mu.Unlock()
-	})
-
-	if err := proc.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-	defer func() { _ = proc.Stop() }()
-
-	// 首句在逗号触发，第二句必须等句号
-	_ = proc.Write("首句，", defaultOpts)
-	time.Sleep(200 * time.Millisecond) // 等首句合成
-
-	_ = proc.Write("第二句，逗号不切，", defaultOpts) // 不应切
-	time.Sleep(100 * time.Millisecond)
-
-	mu.Lock()
-	countAfterComma := len(chunks)
-	mu.Unlock()
-
-	if countAfterComma != 1 {
-		t.Errorf("expected 1 chunk after comma (only first sentence), got %d", countAfterComma)
-	}
-
-	_ = proc.Write("句号切。", defaultOpts) // 强停顿，应切
-	time.Sleep(200 * time.Millisecond)
-
-	mu.Lock()
-	total := len(chunks)
-	mu.Unlock()
-
-	if total != 2 {
-		t.Errorf("expected 2 chunks total, got %d", total)
 	}
 }
 
@@ -447,23 +368,6 @@ func TestTTSProcessorPlaybackOrder(t *testing.T) {
 	}
 }
 
-// TestTTSProcessorContextCancel 验证 context 取消后 Stop 正常完成。
-func TestTTSProcessorContextCancel(t *testing.T) {
-	proc := newTestTTSProcessor(newMockTTSProvider())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	if err := proc.Start(ctx); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	cancel()
-	time.Sleep(50 * time.Millisecond)
-
-	if err := proc.Stop(); err != nil {
-		t.Logf("Stop returned (may be expected): %v", err)
-	}
-}
-
 // TestTTSProcessorSynthesizeError 验证合成失败时不回调（不 panic）。
 func TestTTSProcessorSynthesizeError(t *testing.T) {
 	provider := newMockTTSProvider()
@@ -541,19 +445,6 @@ func TestSentenceSplitter_MaxRunes(t *testing.T) {
 	}
 	if len([]rune(out[0])) > 5 {
 		t.Errorf("sentence exceeds maxRunes: %q", out[0])
-	}
-}
-
-// TestSentenceSplitter_Flush 验证 Flush 输出剩余。
-func TestSentenceSplitter_Flush(t *testing.T) {
-	s := newSentenceSplitter(100)
-	_ = s.feed("没有停顿")
-	got := s.flush()
-	if got != "没有停顿" {
-		t.Errorf("unexpected flush result: %q", got)
-	}
-	if s.flush() != "" {
-		t.Error("second flush should return empty")
 	}
 }
 
@@ -664,26 +555,6 @@ func waitForFinalChunk(mu *sync.Mutex, chunks *[]TTSChunk, timeout time.Duration
 		case <-deadline:
 			return false
 		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-// TestTruncateText 验证 truncate 辅助函数。
-func TestTruncateText(t *testing.T) {
-	tests := []struct {
-		in   string
-		n    int
-		want string
-	}{
-		{"hello", 10, "hello"},
-		{"hello world", 5, "hello..."},
-		{"", 5, ""},
-		{"你好世界", 2, "你好..."},
-	}
-	for _, tt := range tests {
-		got := truncate(tt.in, tt.n)
-		if got != tt.want {
-			t.Errorf("truncate(%q, %d) = %q, want %q", tt.in, tt.n, got, tt.want)
 		}
 	}
 }

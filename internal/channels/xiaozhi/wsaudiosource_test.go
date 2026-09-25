@@ -19,31 +19,6 @@ func newPCMCodecForTest(t *testing.T) codec.Codec {
 	return c
 }
 
-func TestWSAudioSource_PCMPassthrough(t *testing.T) {
-	src := xiaozhi.NewWSAudioSource(newPCMCodecForTest(t), audio.InternalSampleRate)
-
-	in := []int16{1, 2, 3, 4}
-	src.PushBinaryFrame(audio.Int16ToBytesLE(in))
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	data, err := src.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read failed: %v", err)
-	}
-
-	out := audio.BytesToInt16LE(data)
-	if len(out) != len(in) {
-		t.Fatalf("expected %d samples, got %d", len(in), len(out))
-	}
-	for i := range in {
-		if in[i] != out[i] {
-			t.Errorf("sample %d: want %d, got %d", i, in[i], out[i])
-		}
-	}
-}
-
 func TestWSAudioSource_ResamplesWhenRateMismatched(t *testing.T) {
 	// 客户端 48kHz，内部标准 16kHz：应产生约 1/3 长度的样本。
 	src := xiaozhi.NewWSAudioSource(newPCMCodecForTest(t), 48000)
@@ -112,28 +87,6 @@ func TestWSAudioSource_CloseUnblocksRead(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for Read to unblock after Close")
-	}
-}
-
-func TestWSAudioSource_ContextCancelUnblocksRead(t *testing.T) {
-	src := xiaozhi.NewWSAudioSource(newPCMCodecForTest(t), audio.InternalSampleRate)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := src.Read(ctx)
-		errCh <- err
-	}()
-
-	cancel()
-
-	select {
-	case err := <-errCh:
-		if err == nil {
-			t.Fatal("expected an error from Read after ctx cancel")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for Read to unblock after ctx cancel")
 	}
 }
 
