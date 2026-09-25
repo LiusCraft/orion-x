@@ -40,6 +40,8 @@ interface NavItem {
 	end?: boolean;
 	/** 只给 admin 看的入口（路由层也会拦一道） */
 	adminOnly?: boolean;
+	/** 功能还没实现，先不上菜单；页面和路由都留着，做完删掉这个标记即可 */
+	hidden?: boolean;
 }
 
 interface NavGroup {
@@ -64,7 +66,13 @@ const NAV_GROUPS: NavGroup[] = [
 		items: [
 			{ to: "/data/memory", icon: Brain, label: "记忆库", end: false },
 			{ to: "/data/knowledge", icon: BookOpen, label: "知识库", end: false },
-			{ to: "/data/sources", icon: Database, label: "数据源", end: false },
+			{
+				to: "/data/sources",
+				icon: Database,
+				label: "数据源",
+				end: false,
+				hidden: true,
+			},
 		],
 	},
 	{
@@ -379,7 +387,7 @@ export default function Layout() {
 									{group.label}
 								</p>
 								{group.items
-									.filter((item) => !item.adminOnly || isAdmin)
+									.filter((item) => !item.hidden && (!item.adminOnly || isAdmin))
 									.map(({ to, icon: Icon, label, end }) => (
 										<NavLink
 											key={to}
