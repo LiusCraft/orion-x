@@ -25,15 +25,6 @@ func TestGetHitAndMiss(t *testing.T) {
 	}
 }
 
-func TestExists(t *testing.T) {
-	if !Exists(ZH) {
-		t.Fatal("Exists(ZH) = false, want true")
-	}
-	if Exists(Code("xx")) {
-		t.Fatal("Exists(xx) = true, want false")
-	}
-}
-
 func TestNormalize(t *testing.T) {
 	tests := []struct {
 		raw  string

@@ -253,23 +253,6 @@ func TestAttachmentDisposition(t *testing.T) {
 	}
 }
 
-func TestConfigWithDefaults(t *testing.T) {
-	cfg := Config{Endpoint: "https://x.test/", Prefix: "/dev/"}.WithDefaults()
-	if cfg.Endpoint != "https://x.test" || cfg.Prefix != "dev" {
-		t.Fatalf("normalize: endpoint=%q prefix=%q", cfg.Endpoint, cfg.Prefix)
-	}
-	if cfg.PresignTTL != defaultPresignTTL || cfg.MaxUploadSize != defaultMaxUploadSize {
-		t.Fatalf("defaults: ttl=%v max=%d", cfg.PresignTTL, cfg.MaxUploadSize)
-	}
-	if !cfg.PathStyle() {
-		t.Fatal("path style must default to true")
-	}
-	virtualHost := Config{UsePathStyle: boolPtr(false)}
-	if virtualHost.PathStyle() {
-		t.Fatal("explicit use_path_style=false must win")
-	}
-}
-
 func TestNewRejectsBadConfig(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {

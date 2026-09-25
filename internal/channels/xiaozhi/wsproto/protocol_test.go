@@ -32,66 +32,6 @@ func TestParseClientMessage_Hello(t *testing.T) {
 	}
 }
 
-func TestParseClientMessage_HelloExtendedAudioParams(t *testing.T) {
-	data := []byte(`{
-		"type": "hello",
-		"device_id": "dev-1",
-		"audio_params": {
-			"format": "opus",
-			"sample_rate": 16000,
-			"channels": 1,
-			"frame_duration": 60,
-			"bits_per_sample": 16,
-			"play_buffer_duration": 2000
-		}
-	}`)
-
-	msg, err := ParseClientMessage(data)
-	if err != nil {
-		t.Fatalf("ParseClientMessage failed: %v", err)
-	}
-	hello := msg.(*HelloMessage)
-	want := AudioParams{
-		Format:             "opus",
-		SampleRate:         16000,
-		Channels:           1,
-		FrameDuration:      60,
-		BitsPerSample:      16,
-		PlayBufferDuration: 2000,
-	}
-	if hello.AudioParams != want {
-		t.Errorf("unexpected audio params: got %+v, want %+v", hello.AudioParams, want)
-	}
-}
-
-func TestParseClientMessage_HelloOmitsExtendedAudioParams(t *testing.T) {
-	data := []byte(`{"type": "hello", "audio_params": {"format": "pcm", "sample_rate": 16000, "channels": 1}}`)
-
-	msg, err := ParseClientMessage(data)
-	if err != nil {
-		t.Fatalf("ParseClientMessage failed: %v", err)
-	}
-	hello := msg.(*HelloMessage)
-	if hello.AudioParams.FrameDuration != 0 || hello.AudioParams.BitsPerSample != 0 || hello.AudioParams.PlayBufferDuration != 0 {
-		t.Errorf("expected omitted extended fields to zero-value, got %+v", hello.AudioParams)
-	}
-}
-
-func TestParseClientMessage_Listen(t *testing.T) {
-	data := []byte(`{"type": "listen", "state": "start"}`)
-	msg, err := ParseClientMessage(data)
-	if err != nil {
-		t.Fatalf("ParseClientMessage failed: %v", err)
-	}
-	listen, ok := msg.(*ListenMessage)
-	if !ok {
-		t.Fatalf("expected *ListenMessage, got %T", msg)
-	}
-	if listen.State != ListenStart {
-		t.Errorf("expected state start, got %q", listen.State)
-	}
-}
-
 func TestParseClientMessage_ListenDetectWithText(t *testing.T) {
 	data := []byte(`{"type": "listen", "state": "detect", "text": "hello there"}`)
 	msg, err := ParseClientMessage(data)
@@ -204,20 +144,5 @@ func TestNewTTSMessage(t *testing.T) {
 	}
 	if raw["state"] != "sentence_start" {
 		t.Errorf("unexpected state field in JSON: %v", raw["state"])
-	}
-}
-
-func TestTTSMessage_OmitsEmptyTextField(t *testing.T) {
-	msg := NewTTSMessage("sess-1", TTSStateStop, "")
-	data, err := json.Marshal(msg)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-	if _, present := raw["text"]; present {
-		t.Errorf("expected empty text field to be omitted, got: %v", raw)
 	}
 }

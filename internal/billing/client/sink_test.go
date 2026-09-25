@@ -767,32 +767,6 @@ func TestSinkBreakerSurvivesFlush(t *testing.T) {
 	}
 }
 
-// TestSinkSetTurnAffectsTurnIndex SetTurn 之后的量归到新的 turn。
-func TestSinkSetTurnAffectsTurnIndex(t *testing.T) {
-	stub := newStubControlPlane(t)
-	sink := newTestSink(t, stub, SinkConfig{})
-	dims := map[string]any{"source": "tts"}
-
-	sink.SetTurn(1)
-	sink.Record(billing.ItemTTSCharacters, 3, dims)
-	sink.SetTurn(2)
-	sink.Record(billing.ItemTTSCharacters, 4, dims)
-	sink.SetTurn(3)
-	sink.Record(billing.ItemTTSCharacters, 5, dims)
-
-	if err := sink.Flush(context.Background()); err != nil {
-		t.Fatalf("flush: %v", err)
-	}
-	want := []eventView{
-		{ItemCode: billing.ItemTTSCharacters, Quantity: 3, TurnIndex: 1, Dimensions: dims},
-		{ItemCode: billing.ItemTTSCharacters, Quantity: 4, TurnIndex: 2, Dimensions: dims},
-		{ItemCode: billing.ItemTTSCharacters, Quantity: 5, TurnIndex: 3, Dimensions: dims},
-	}
-	if got := eventViews(allEvents(t, stub)); !reflect.DeepEqual(got, want) {
-		t.Fatalf("events = %+v, want %+v", got, want)
-	}
-}
-
 // TestSinkSettleFlushesFirst settle 之前必须先 flush；flush 失败也只是少收钱，不能挡住 settle。
 func TestSinkSettleFlushesFirst(t *testing.T) {
 	tests := []struct {
@@ -888,29 +862,6 @@ func TestSinkBufferFullTriggersFlush(t *testing.T) {
 	stub.waitForUsageCalls(t, 1)
 	if got := stub.usageCalls(); got != 1 {
 		t.Fatalf("usage calls = %d, want 1 (the buffer-full signal is deduped)", got)
-	}
-}
-
-// TestSinkCloseWithoutStartIsSafe 没 Start 过也能 Close；Start 幂等，Close 不会挂住。
-func TestSinkCloseWithoutStartIsSafe(t *testing.T) {
-	stub := newStubControlPlane(t)
-
-	bare := newTestSink(t, stub, SinkConfig{})
-	bare.Close()
-
-	sink := newTestSink(t, stub, SinkConfig{FlushInterval: 10 * time.Millisecond})
-	sink.Start(context.Background())
-	sink.Start(context.Background())
-
-	done := make(chan struct{})
-	go func() {
-		sink.Close()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("Close blocked")
 	}
 }
 

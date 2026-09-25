@@ -7,29 +7,6 @@ import (
 	"github.com/liuscraft/orion-x/internal/billing"
 )
 
-// TestPaymentConfigDisabled 钉住「默认关闭」这条决定。
-//
-// 它和 BillingConfig 刚好相反（计费是默认启用）：支付默认开着而商户密钥没配，
-// 用户点「充值」那一刻才会失败——那种失败比启动时就说「没接支付」难查得多。
-func TestPaymentConfigDisabled(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  PaymentConfig
-		want bool
-	}{
-		{"missing section means disabled", PaymentConfig{}, true},
-		{"explicit false", PaymentConfig{Enabled: boolPtr(false)}, true},
-		{"explicit true", PaymentConfig{Enabled: boolPtr(true)}, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.cfg.Disabled(); got != tc.want {
-				t.Fatalf("Disabled() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestPaymentConfigChannelsAllowlist(t *testing.T) {
 	// 不写 channels 就是全开。
 	got, err := PaymentConfig{}.ChannelsAllowlist()

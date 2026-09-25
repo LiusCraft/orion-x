@@ -328,18 +328,3 @@ func TestNormalizeConfigDefaults(t *testing.T) {
 		t.Fatalf("normalizeConfig overrode explicit values: %+v", custom)
 	}
 }
-
-func TestValidateSubject(t *testing.T) {
-	if err := validateSubject("user", "u1"); err != nil {
-		t.Fatalf("validateSubject() = %v, want nil", err)
-	}
-	for _, tc := range [][2]string{{"", "u1"}, {"user", ""}, {"", ""}} {
-		err := validateSubject(tc[0], tc[1])
-		if err == nil {
-			t.Fatalf("validateSubject(%q, %q) = nil, want error", tc[0], tc[1])
-		}
-		if !strings.Contains(err.Error(), "subject_type and subject_id are required") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	}
-}

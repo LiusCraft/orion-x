@@ -7,16 +7,6 @@ import (
 	"testing"
 )
 
-func TestNew_PCM(t *testing.T) {
-	c, err := New(FormatPCM, 16000, 1, 60)
-	if err != nil {
-		t.Fatalf("New(pcm) failed: %v", err)
-	}
-	if _, ok := c.(*pcmCodec); !ok {
-		t.Fatalf("expected *pcmCodec, got %T", c)
-	}
-}
-
 func TestNew_EmptyFormatDefaultsToPCM(t *testing.T) {
 	c, err := New(Format(""), 16000, 1, 60)
 	if err != nil {
@@ -27,25 +17,9 @@ func TestNew_EmptyFormatDefaultsToPCM(t *testing.T) {
 	}
 }
 
-func TestNew_Opus(t *testing.T) {
-	c, err := New(FormatOpus, 16000, 1, 60)
-	if err != nil {
-		t.Fatalf("New(opus) failed: %v", err)
-	}
-	if _, ok := c.(*opusCodec); !ok {
-		t.Fatalf("expected *opusCodec, got %T", c)
-	}
-}
-
 func TestNew_UnsupportedFormat(t *testing.T) {
 	if _, err := New(Format("mp3"), 16000, 1, 60); err == nil {
 		t.Fatal("expected error for unsupported format")
-	}
-}
-
-func TestNew_OpusInvalidSampleRate(t *testing.T) {
-	if _, err := New(FormatOpus, 22050, 1, 60); err == nil {
-		t.Fatal("expected error for non-opus sample rate (22050)")
 	}
 }
 

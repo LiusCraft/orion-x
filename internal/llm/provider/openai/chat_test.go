@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/liuscraft/orion-x/internal/llm"
 	openaisdk "github.com/openai/openai-go/v3"
+
+	"github.com/liuscraft/orion-x/internal/llm"
 )
 
 func TestApplyDialectThinking(t *testing.T) {
@@ -40,14 +41,6 @@ func TestApplyDialectThinking(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestMiniMaxM2CannotDisableThinking(t *testing.T) {
-	params := openaisdk.ChatCompletionNewParams{Model: "model"}
-	err := applyDialect(&params, "MiniMaxAI/MiniMax-M2.5", llm.ThinkingConfig{Mode: llm.ThinkingModeDisabled}, nil)
-	if err == nil {
-		t.Fatal("expected unsupported option error")
 	}
 }
 

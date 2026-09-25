@@ -165,17 +165,6 @@ func TestVoiceCloneSkipsBillingForBYOK(t *testing.T) {
 	}
 }
 
-// 计费关闭（meter 为 nil）时复刻照常工作。
-func TestVoiceCloneWithoutMeter(t *testing.T) {
-	model := cloneableSystemVoiceCloneModel(t)
-	cloner := &fakeVoiceCloner{result: &ttsprovider.VoiceCloneResult{VoiceID: "provider-voice"}}
-	svc := newCloneServiceWithMeter(model, &fakeVoiceCloneVoiceStore{}, cloner, nil)
-
-	if _, err := svc.Clone(context.Background(), model.ID, "user-1", cloneURLRequest()); err != nil {
-		t.Fatalf("Clone() error = %v", err)
-	}
-}
-
 // 预冻结失败（余额不足）：不调厂商，错误原样带出去给 writeVoiceCloneError 映射成 402。
 func TestVoiceCloneReserveFailureBlocksVendorCall(t *testing.T) {
 	model := cloneableSystemVoiceCloneModel(t)

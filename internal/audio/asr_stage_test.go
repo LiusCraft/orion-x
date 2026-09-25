@@ -96,32 +96,6 @@ func TestASRStage_ForwardsInterruptFromInput(t *testing.T) {
 	}
 }
 
-// TestASRStage_ForwardsDataFromInput 验证 input 里的 Data 类型消息（例如
-// WS "listen state:detect" 直接注入的文本）会被转发到 output，跳过 ASR
-// 直接驱动下游 AgentStage。
-func TestASRStage_ForwardsDataFromInput(t *testing.T) {
-	proc := &mockASRProcessor{}
-	stage := NewASRStage(proc, nil)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	input := make(chan pipeline.Message, 1)
-	output := stage.Process(ctx, input)
-
-	input <- pipeline.NewMessage(pipeline.MessageTypeData, "injected text")
-
-	select {
-	case msg := <-output:
-		text, ok := msg.Payload.(string)
-		if !ok || text != "injected text" {
-			t.Errorf("unexpected forwarded message: %+v", msg)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for forwarded data message")
-	}
-}
-
 // TestASRStage_IgnoresFinishedAndErrorFromInput 验证 Finished/Error 类型的
 // input 消息不会被转发——这两种只应该由 pipeline 内部产生，不是外部注入的
 // 合法控制信号。

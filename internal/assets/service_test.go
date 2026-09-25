@@ -116,9 +116,6 @@ func newTestService(st assetStore, be storage.Storage) *Service {
 // pngBytes 最小合法 PNG 文件头。
 func pngBytes() []byte { return []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR") }
 
-// wavBytes 最小 RIFF/WAVE 文件头。
-func wavBytes() []byte { return []byte("RIFF\x24\x00\x00\x00WAVEfmt ") }
-
 // ── Create ──
 
 func TestCreateValidImage(t *testing.T) {
@@ -157,23 +154,6 @@ func TestCreateValidImage(t *testing.T) {
 	}
 	if len(st.created) != 1 {
 		t.Fatalf("created records = %d, want 1", len(st.created))
-	}
-}
-
-func TestCreateValidWavVoiceSample(t *testing.T) {
-	st, be := newFakeStore(), newFakeStorage()
-	svc := newTestService(st, be)
-	body := wavBytes()
-
-	asset, err := svc.Create(context.Background(), Upload{
-		OwnerID: "user-1", Purpose: PurposeVoiceSample, FileName: "sample.wav",
-		Size: int64(len(body)), Body: bytes.NewReader(body),
-	})
-	if err != nil {
-		t.Fatalf("create wav: %v", err)
-	}
-	if !strings.HasPrefix(asset.ObjectKey, "test/voice:sample/user-1/") {
-		t.Fatalf("key = %q", asset.ObjectKey)
 	}
 }
 

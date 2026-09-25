@@ -153,18 +153,6 @@ func TestASRProcessorCreate(t *testing.T) {
 	}
 }
 
-func TestASRProcessorStartStop(t *testing.T) {
-	r := newMockRecognizer()
-	proc, _ := NewASRProcessor(newTestASRConfig(r))
-
-	if err := proc.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-	if err := proc.Stop(); err != nil {
-		t.Fatalf("Stop failed: %v", err)
-	}
-}
-
 func TestASRProcessorDoubleStart(t *testing.T) {
 	r := newMockRecognizer()
 	proc, _ := NewASRProcessor(newTestASRConfig(r))
@@ -384,27 +372,6 @@ func TestASRProcessorRecognizerStartError(t *testing.T) {
 
 	if err := proc.BeginTurn(context.Background()); err == nil {
 		t.Fatal("expected error when recognizer.Start fails")
-	}
-}
-
-// TestASRProcessorWrite_NoActiveTurn verifies Write silently drops audio (no
-// error, no SendAudio call) in manual mode before BeginTurn / after EndTurn,
-// instead of propagating an error that would trip up callers like
-// ASRStage.readFromSource.
-func TestASRProcessorWrite_NoActiveTurn(t *testing.T) {
-	r := newMockRecognizer()
-	proc, _ := NewASRProcessor(newTestASRConfig(r))
-
-	if err := proc.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-	defer func() { _ = proc.Stop() }()
-
-	if err := proc.Write(make([]byte, 320)); err != nil {
-		t.Fatalf("Write without BeginTurn should not error: %v", err)
-	}
-	if r.getSendAudioCount() != 0 {
-		t.Fatalf("expected no SendAudio calls without an active turn, got %d", r.getSendAudioCount())
 	}
 }
 

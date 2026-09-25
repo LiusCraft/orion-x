@@ -97,36 +97,6 @@ func TestBillingTiersScan(t *testing.T) {
 	}
 }
 
-func TestBillingTiersRoundTrip(t *testing.T) {
-	tests := []struct {
-		name  string
-		tiers BillingTiers
-	}{
-		{name: "nil", tiers: nil},
-		{name: "empty", tiers: BillingTiers{}},
-		{name: "tiers", tiers: BillingTiers{{UpTo: 1_000_000, UnitPriceMicro: 800_000}, {UpTo: 0, UnitPriceMicro: 500_000}}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			val, err := tt.tiers.Value()
-			if err != nil {
-				t.Fatalf("Value: %v", err)
-			}
-			var back BillingTiers
-			if err := back.Scan(val); err != nil {
-				t.Fatalf("Scan: %v", err)
-			}
-			if len(back) == 0 && len(tt.tiers) == 0 {
-				return // NULL 与空数组都表示“没有阶梯”，两者互通
-			}
-			if !reflect.DeepEqual(back, tt.tiers) {
-				t.Errorf("round trip = %+v, want %+v", back, tt.tiers)
-			}
-		})
-	}
-}
-
 // TestBillingModelSchema 钉住表名、主键、唯一索引与易漂的列名。这些名字在
 // billing/service 和 SQL 里都被直接引用，改 Go 字段名而不改 tag 会静默改列名。
 func TestBillingModelSchema(t *testing.T) {

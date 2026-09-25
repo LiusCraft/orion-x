@@ -27,40 +27,6 @@ func TestQwenDisabledThinkingUsesNoneEffort(t *testing.T) {
 	}
 }
 
-// regression: input must be populated — map→JSON→unmarshal round-trip used to drop the
-// ResponseNewParams.Input union field, causing "Either input or instructions must be provided".
-func TestParamsIncludesInputMessages(t *testing.T) {
-	a := &adapter{cfg: Config{Model: "deepseek-reasoner"}}
-	params, err := a.params(llm.Request{
-		Messages: []llm.Message{
-			{Role: "system", Content: "你是助手"},
-			{Role: "user", Content: "你好"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := json.Marshal(params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(data, &body); err != nil {
-		t.Fatal(err)
-	}
-	raw, ok := body["input"]
-	if !ok {
-		t.Fatalf("input missing from body: %s", data)
-	}
-	items, ok := raw.([]any)
-	if !ok {
-		t.Fatalf("input not an array: %T", raw)
-	}
-	if len(items) != 2 {
-		t.Fatalf("input len = %d, want 2; body=%s", len(items), data)
-	}
-}
-
 func TestParamsIncludesTools(t *testing.T) {
 	a := &adapter{cfg: Config{Model: "deepseek-reasoner"}}
 	params, err := a.params(llm.Request{

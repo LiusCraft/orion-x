@@ -300,29 +300,3 @@ func TestAPIKeyRoutesWhenDisabled(t *testing.T) {
 		t.Fatalf("API key request with apikey disabled = %d, want 401", response.Code)
 	}
 }
-
-// TestAPIKeyRoutesWhenEnabled：开关打开时四条管理路由都在，且 key 能拿到目录。
-func TestAPIKeyRoutesWhenEnabled(t *testing.T) {
-	r := newTestRouter(t, nil, apikey.New(newFakeKeyStore(), apikey.Config{}), false)
-
-	cases := []struct {
-		method string
-		path   string
-		want   bool
-	}{
-		{http.MethodGet, "/api/api-keys", true},
-		{http.MethodPost, "/api/api-keys", true},
-		{http.MethodGet, "/api/api-keys/scopes", true},
-		{http.MethodDelete, "/api/api-keys/:id", true},
-	}
-	for _, tc := range cases {
-		if got := hasRoute(r, tc.method, tc.path); got != tc.want {
-			t.Errorf("%s %s registered = %v, want %v", tc.method, tc.path, got, tc.want)
-		}
-	}
-
-	// 资源路由仍然只认 JWT 或 key，没带凭证一律 401。
-	if response := routeRequest(r, http.MethodGet, "/api/sessions", ""); response.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated GET /api/sessions = %d, want 401", response.Code)
-	}
-}

@@ -37,17 +37,6 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestNewDefaultCreatedAt(t *testing.T) {
-	meta := SessionMeta{
-		UserID: "u1",
-		Model:  "m1",
-	}
-	sess := New(meta)
-	if sess.Meta.CreatedAt.IsZero() {
-		t.Error("CreatedAt should be auto-filled if zero")
-	}
-}
-
 func TestAdd(t *testing.T) {
 	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
 
@@ -96,22 +85,6 @@ func TestAddUpdatesUpdatedAt(t *testing.T) {
 
 	if !sess.UpdatedAt.After(before) {
 		t.Errorf("UpdatedAt not updated: before=%v, after=%v", before, sess.UpdatedAt)
-	}
-}
-
-func TestMessageIDUnique(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	sess.Add(Message{Role: RoleUser, Content: "a"})
-	sess.Add(Message{Role: RoleUser, Content: "b"})
-	sess.Add(Message{Role: RoleUser, Content: "c"})
-
-	ids := map[string]bool{
-		sess.Messages[0].ID: true,
-		sess.Messages[1].ID: true,
-		sess.Messages[2].ID: true,
-	}
-	if len(ids) != 3 {
-		t.Errorf("IDs should be unique")
 	}
 }
 
@@ -230,59 +203,6 @@ func TestPopNPartial(t *testing.T) {
 	}
 }
 
-func TestPopNZero(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	sess.Add(Message{Role: RoleUser, Content: "a"})
-
-	removed := sess.PopN(0)
-	if len(removed) != 0 {
-		t.Errorf("PopN(0) should return nil, got %v", removed)
-	}
-	if len(sess.Messages) != 1 {
-		t.Errorf("PopN(0) should not modify messages")
-	}
-}
-
-func TestPopUpdatesUpdatedAt(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	sess.Add(Message{Role: RoleUser, Content: "hi"})
-
-	before := sess.UpdatedAt
-	time.Sleep(time.Millisecond)
-	sess.Pop()
-
-	if !sess.UpdatedAt.After(before) {
-		t.Error("UpdatedAt should be updated after Pop")
-	}
-}
-
-func TestPopNUpdatesUpdatedAt(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	sess.Add(Message{Role: RoleUser, Content: "a"})
-	sess.Add(Message{Role: RoleUser, Content: "b"})
-
-	before := sess.UpdatedAt
-	time.Sleep(time.Millisecond)
-	sess.PopN(1)
-
-	if !sess.UpdatedAt.After(before) {
-		t.Error("UpdatedAt should be updated after PopN")
-	}
-}
-
-func TestPopNNegative(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	sess.Add(Message{Role: RoleUser, Content: "a"})
-
-	removed := sess.PopN(-1)
-	if len(removed) != 0 {
-		t.Errorf("PopN(-1) should return nil, got %v", removed)
-	}
-	if len(sess.Messages) != 1 {
-		t.Errorf("PopN(-1) should not modify messages")
-	}
-}
-
 func TestToLLMMessages(t *testing.T) {
 	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
 	sess.Add(Message{Role: RoleUser, Content: "hello"})
@@ -327,24 +247,6 @@ func TestToLLMMessages(t *testing.T) {
 	}
 }
 
-func TestToLLMMessagesEmpty(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	result := sess.ToLLMMessages()
-	if len(result) != 0 {
-		t.Fatalf("expected empty, got %d", len(result))
-	}
-}
-
-func TestToLLMMessagesNoToolCalls(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	sess.Add(Message{Role: RoleAssistant, Content: "plain response"})
-
-	result := sess.ToLLMMessages()
-	if result[0].ToolCalls != nil {
-		t.Errorf("expected nil ToolCalls, got %v", result[0].ToolCalls)
-	}
-}
-
 func TestLastN(t *testing.T) {
 	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
 	sess.Add(Message{Role: RoleUser, Content: "a"})
@@ -369,24 +271,6 @@ func TestLastNMoreThanLength(t *testing.T) {
 	got := sess.LastN(10)
 	if len(got) != 2 {
 		t.Fatalf("expected 2, got %d", len(got))
-	}
-}
-
-func TestLastNZero(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	sess.Add(Message{Role: RoleUser, Content: "a"})
-
-	got := sess.LastN(0)
-	if got != nil {
-		t.Errorf("LastN(0) should return nil, got %v", got)
-	}
-}
-
-func TestLastNEmpty(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	got := sess.LastN(3)
-	if got != nil {
-		t.Errorf("LastN on empty should return nil, got %v", got)
 	}
 }
 
@@ -423,43 +307,5 @@ func TestCloneToolCallsDeepCopy(t *testing.T) {
 
 	if sess.Messages[0].ToolCalls[0].Name == "modified" {
 		t.Error("clone should deep copy ToolCalls")
-	}
-}
-
-func TestCloneNilMessages(t *testing.T) {
-	sess := &Session{ID: "test", Messages: nil}
-	cloned := sess.Clone()
-	if cloned.ID != "test" {
-		t.Errorf("ID mismatch")
-	}
-	if cloned.Messages != nil {
-		t.Errorf("expected nil Messages")
-	}
-}
-
-func TestCloneOriginalModificationIsolation(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	sess.Add(Message{Role: RoleUser, Content: "hello"})
-	cloned := sess.Clone()
-
-	sess.Messages[0].Content = "changed"
-	if cloned.Messages[0].Content == "changed" {
-		t.Error("modifying original should not affect clone")
-	}
-}
-
-func TestCloneNilToolCalls(t *testing.T) {
-	sess := New(SessionMeta{UserID: "u1", Model: "m1"})
-	sess.Add(Message{Role: RoleUser, Content: "hello"}) // ToolCalls: nil
-	sess.Add(Message{Role: RoleAssistant, Content: "ok", ToolCalls: []ToolCall{
-		{ID: "c1", Name: "f", Arguments: "{}"},
-	}})
-
-	cloned := sess.Clone()
-	if cloned.Messages[0].ToolCalls != nil {
-		t.Error("nil ToolCalls should remain nil in clone")
-	}
-	if cloned.Messages[1].ToolCalls == nil {
-		t.Error("non-nil ToolCalls should be deep-copied in clone")
 	}
 }

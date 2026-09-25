@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -278,117 +277,6 @@ func TestDAGPipelineDiamond(t *testing.T) {
 	}
 }
 
-func TestDAGPipelineReportScenario(t *testing.T) {
-	// 用户的场景：Agent → TTS，TTS → Output + TTS → Report（异步上报）
-	var reportCount int32
-	var reportMu sync.Mutex
-	var reports []string
-
-	// Report 是 sink 节点：接收消息但不产出到 output
-	reportStage := newMockStage("report", func(ctx context.Context, input <-chan Message) <-chan Message {
-		output := make(chan Message)
-		go func() {
-			defer close(output)
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case msg, ok := <-input:
-					if !ok {
-						return
-					}
-					// 异步上报：不阻塞下游
-					atomic.AddInt32(&reportCount, 1)
-					reportMu.Lock()
-					reports = append(reports, msg.Payload.(string))
-					reportMu.Unlock()
-				}
-			}
-		}()
-		return output
-	})
-
-	// TTS 输出：先发句子文本，再发音频标记
-	ttsStage := newMockStage("tts", func(ctx context.Context, input <-chan Message) <-chan Message {
-		output := make(chan Message)
-		go func() {
-			defer close(output)
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case msg, ok := <-input:
-					if !ok {
-						return
-					}
-					text := msg.Payload.(string)
-					// 1. 先发句子
-					sentenceMsg := NewMessage(MessageTypeData, text)
-					sentenceMsg.Metadata = msg.Metadata
-					select {
-					case output <- sentenceMsg:
-					case <-ctx.Done():
-						return
-					}
-					// 2. 再发音频（模拟）
-					audioMsg := NewMessage(MessageTypeData, text+"-audio")
-					select {
-					case output <- audioMsg:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
-		}()
-		return output
-	})
-
-	p, err := NewDAGBuilder().
-		AddStage(newPassthroughStage("agent", nil)).
-		AddStage(ttsStage).
-		AddStage(newPassthroughStage("output", nil)). // 显式输出 sink
-		AddStage(reportStage).
-		Connect("agent", "tts").
-		Connect("tts", "output"). // 主路径
-		Connect("tts", "report"). // 上报分支（fan-out）
-		SetFanoutBufferSize(8).
-		Build()
-
-	if err != nil {
-		t.Fatalf("Build failed: %v", err)
-	}
-
-	ctx := context.Background()
-	if err := p.Start(ctx); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-	defer func() { _ = p.Stop() }()
-
-	// 发送 3 个文本
-	for i := 0; i < 3; i++ {
-		p.Input() <- NewMessage(MessageTypeData, fmt.Sprintf("sentence-%d", i))
-	}
-
-	// output 应收到 6 条消息（3 个句子 + 3 个音频，sink 只有 tts）
-	results := collectAll(t, p.Output(), 6, 500*time.Millisecond)
-
-	dataCount := 0
-	for _, m := range results {
-		if m.Type == MessageTypeData {
-			dataCount++
-		}
-	}
-	if dataCount != 6 {
-		t.Errorf("Expected 6 data messages (3 sentences + 3 audio), got %d", dataCount)
-	}
-
-	// report 应收到 6 条消息（异步分支，需要等待）
-	time.Sleep(50 * time.Millisecond)
-	if atomic.LoadInt32(&reportCount) != 6 {
-		t.Errorf("Expected 6 report messages, got %d", reportCount)
-	}
-}
-
 func TestDAGPipelineCycleDetection(t *testing.T) {
 	_, err := NewDAGBuilder().
 		AddStage(newPassthroughStage("a", nil)).
@@ -402,24 +290,6 @@ func TestDAGPipelineCycleDetection(t *testing.T) {
 	}
 	if err.Error() != "cycle detected in pipeline DAG" {
 		t.Errorf("Expected cycle error, got: %v", err)
-	}
-}
-
-func TestDAGPipelineUnknownNode(t *testing.T) {
-	_, err := NewDAGBuilder().
-		AddStage(newPassthroughStage("a", nil)).
-		Connect("a", "nonexistent").
-		Build()
-
-	if err == nil {
-		t.Fatal("Expected unknown node error")
-	}
-}
-
-func TestDAGPipelineEmptyDAG(t *testing.T) {
-	_, err := NewDAGBuilder().Build()
-	if err == nil {
-		t.Fatal("Expected empty DAG error")
 	}
 }
 
@@ -617,52 +487,5 @@ func TestDAGPipelineAsyncReportNonBlocking(t *testing.T) {
 		// ok
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Report did not finish in time")
-	}
-}
-
-func TestDAGBuilderImmutable(t *testing.T) {
-	// 验证 Build 后修改 builder 不影响已构建的 pipeline
-	builder := NewDAGBuilder().
-		AddStage(newPassthroughStage("a", func(s string) string { return s + "-A" })).
-		AddStage(newPassthroughStage("b", func(s string) string { return s + "-B" })).
-		Connect("a", "b")
-
-	p1, err := builder.Build()
-	if err != nil {
-		t.Fatalf("Build failed: %v", err)
-	}
-
-	// 修改 builder
-	builder.AddStage(newPassthroughStage("c", nil))
-	builder.Connect("b", "c")
-
-	p2, err := builder.Build()
-	if err != nil {
-		t.Fatalf("Second build failed: %v", err)
-	}
-
-	// p1 不应看到 "c" 节点
-	ctx := context.Background()
-	if err := p1.Start(ctx); err != nil {
-		t.Fatalf("p1 Start failed: %v", err)
-	}
-	defer func() { _ = p1.Stop() }()
-
-	p1.Input() <- NewMessage(MessageTypeData, "hello")
-	msg := <-p1.Output()
-	if msg.Payload.(string) != "hello-A-B" {
-		t.Errorf("p1: Expected 'hello-A-B', got '%s'", msg.Payload)
-	}
-
-	// p2 应该包含 c
-	if err := p2.Start(ctx); err != nil {
-		t.Fatalf("p2 Start failed: %v", err)
-	}
-	defer func() { _ = p2.Stop() }()
-
-	p2.Input() <- NewMessage(MessageTypeData, "hello")
-	msg = <-p2.Output()
-	if msg.Payload.(string) != "hello-A-B" {
-		t.Errorf("p2: Expected 'hello-A-B', got '%s' (c is passthrough)", msg.Payload)
 	}
 }

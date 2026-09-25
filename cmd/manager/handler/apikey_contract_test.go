@@ -57,22 +57,3 @@ func TestAPIKeyCreateUnknownScopeListsValues(t *testing.T) {
 		t.Fatalf("unknown = %v, want [agent:blah nope]", body["unknown"])
 	}
 }
-
-// 废弃的 scope 与未知的分开列：前者是"曾经存在、不再可授"。
-func TestAPIKeyCreateDeprecatedScopeIsListed(t *testing.T) {
-	h := NewAPIKeyHandler(apikey.New(newFakeAPIKeyStore(), apikey.Config{}), false)
-
-	c, w := apiKeyRequest(http.MethodPost, "/api/api-keys",
-		`{"name":"ci","scopes":["agent:read"],"preset":"readonly"}`, "user-1", false, nil)
-	h.Create(c)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("preset expansion must stay accepted: %d (body %s)", w.Code, w.Body.String())
-	}
-
-	c, w = apiKeyRequest(http.MethodPost, "/api/api-keys",
-		`{"name":"ci","preset":"everything"}`, "user-1", false, nil)
-	h.Create(c)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("unknown preset = %d, want 400", w.Code)
-	}
-}

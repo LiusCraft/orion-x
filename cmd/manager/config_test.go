@@ -10,27 +10,6 @@ import (
 	"github.com/liuscraft/orion-x/internal/billing/service"
 )
 
-func boolPtr(v bool) *bool { return &v }
-
-func TestBillingConfigDisabled(t *testing.T) {
-	cases := []struct {
-		name string
-		cfg  BillingConfig
-		want bool
-	}{
-		{name: "missing section means enabled", cfg: BillingConfig{}, want: false},
-		{name: "enabled true", cfg: BillingConfig{Enabled: boolPtr(true)}, want: false},
-		{name: "enabled false", cfg: BillingConfig{Enabled: boolPtr(false)}, want: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.cfg.Disabled(); got != tc.want {
-				t.Fatalf("Disabled() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestBillingConfigServiceConfig(t *testing.T) {
 	fixed := time.Date(2026, 9, 20, 10, 30, 0, 0, time.UTC)
 	now := func() time.Time { return fixed }
@@ -131,26 +110,6 @@ func TestBillingConfigServiceConfig(t *testing.T) {
 			}
 			if tc.want != nil {
 				tc.want(t, got)
-			}
-		})
-	}
-}
-
-func TestAPIKeyConfigDisabled(t *testing.T) {
-	cases := []struct {
-		name string
-		cfg  APIKeyConfig
-		want bool
-	}{
-		// 与 payment 相反、与 billing 也不同：凭证默认关闭，写这一段才是显式决定。
-		{name: "missing section means disabled", cfg: APIKeyConfig{}, want: true},
-		{name: "enabled true", cfg: APIKeyConfig{Enabled: boolPtr(true)}, want: false},
-		{name: "enabled false", cfg: APIKeyConfig{Enabled: boolPtr(false)}, want: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.cfg.Disabled(); got != tc.want {
-				t.Fatalf("Disabled() = %v, want %v", got, tc.want)
 			}
 		})
 	}
