@@ -162,7 +162,7 @@ func TestParseRejectsMalformed(t *testing.T) {
 		})
 	}
 
-	// "wrong crc" 这一条只是碰巧不对时会被拒；用真算出来的另一个 CRC 才说明校验段在起作用。
+	// "wrong crc" 那条只是碰巧不对；用真算出来的另一个 CRC 才证明校验段在起作用。
 	other := encodeBase58(uint64(crc32.ChecksumIEEE([]byte("something else"))), crcLength)
 	if other == plaintext[len(plaintext)-crcLength:] {
 		t.Fatal("crc fixture collided with the generated key")
@@ -178,9 +178,8 @@ func TestParseRejectsMalformed(t *testing.T) {
 }
 
 func TestParseAcceptsKnownVector(t *testing.T) {
-	// 一个固定向量：格式一旦发布就冻结，这条测试是"改格式必须是有意识的决定"的闸门。
-	// 校验段的期望值 `1URfjp` 是用独立实现（python zlib + base58）算出来的，
-	// 不是拿 crcSuffix 自证。
+	// 固定向量：格式一旦发布就冻结，这条断言是闸门。`1URfjp` 是用独立实现
+	// （python zlib + base58）算出来的，不是拿 crcSuffix 自证。
 	lookup := "123456789A"
 	secret := strings.Repeat("1", secretLength)
 	raw := Prefix + lookup + "_" + secret + "_1URfjp"

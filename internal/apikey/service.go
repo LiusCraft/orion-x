@@ -12,18 +12,16 @@ import (
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
-// Service 对外暴露的错误。HTTP 层按它们映射状态码（§5.3 的错误语义表）。
+// Service 对外暴露的错误，HTTP 层按它们映射状态码（§5.3）。
 var (
-	// ErrRevoked 与 ErrExpired 刻意与 ErrInvalid 分开：key 的主人就是我们的用户，
+	// ErrRevoked / ErrExpired 刻意与 ErrInvalid 分开：key 的主人就是我们的用户，
 	// "被撤了"还是"过期了"直接决定他下一步该干什么（§6 N7）。
 	ErrRevoked = errors.New("apikey: key revoked")
 	ErrExpired = errors.New("apikey: key expired")
 )
 
 // Store 是 Service 需要的持久化能力，由 internal/store 的 APIKeyStore 实现。
-//
-// 定义成接口不是为了将来换数据库，而是为了让领域层的单测能内联假实现
-// （仓库约定：不引 mock 生成器，测试里的假实现写在 *_test.go 里）。
+// 抽成接口不是为了换数据库，而是为了让单测能内联假实现（仓库约定：不引 mock 生成器）。
 type Store interface {
 	Create(ctx context.Context, k *store.APIKey) error
 	GetByLookup(ctx context.Context, lookup string) (*store.APIKey, error)
@@ -33,31 +31,26 @@ type Store interface {
 	AddUsage(ctx context.Context, id string, calls int64, lastUsed time.Time) error
 }
 
-// Identity 是校验成功后交给上层的全部事实。它在返回后视为不可变，
-// 随请求上下文传递，不跨请求缓存（§5.3）。
+// Identity 是校验成功后交给上层的全部事实：返回后视为不可变，随请求上下文传递，
+// 不跨请求缓存（§5.3）。
 type Identity struct {
 	KeyID  string
 	UserID string
 	Scopes []string
 }
 
-// Config 是运行参数。零值可用，两个例外：
-//
-//   - 限流参数：RateLimitRPS / RateLimitBurst <= 0 表示**不限流**（默认值在
-//     DefaultConfig 里，由配置层兜底——配置文件里写 0 不会把限流关掉）；
-//   - MaxKeysPerAccount <= 0 表示不限制账号的 key 数。
+// Config 是运行参数。零值可用，两个例外：RateLimitRPS / RateLimitBurst <= 0 表示
+// 不限流（默认值在 DefaultConfig，配置层兜底——配置文件里写 0 不会把限流关掉）；
+// MaxKeysPerAccount <= 0 表示不限制账号的 key 数。
 type Config struct {
-	// RateLimitRPS / RateLimitBurst 是每 key 令牌桶的参数；rps 或 burst <= 0 表示不限流。
 	RateLimitRPS   float64
 	RateLimitBurst int
-	// CounterFlush 是用量计数的刷库窗口（§3.2：计数延迟 ≤ 60s，默认 30s）。
-	CounterFlush time.Duration
-	// MaxKeysPerAccount 是单账号的 key 上限（§3.2 容量假设），<= 0 表示不限制。
+	// CounterFlush 是用量计数的刷库窗口（§3.2：默认 30s）。
+	CounterFlush      time.Duration
 	MaxKeysPerAccount int
-	// Limiter 便于测试注入；nil = 按 RateLimitRPS/Burst 建进程内令牌桶。
+	// Limiter nil = 按 RateLimitRPS/Burst 建进程内令牌桶；Limiter 与 Now 便于测试注入。
 	Limiter Limiter
-	// Now 便于测试注入。
-	Now func() time.Time
+	Now     func() time.Time
 }
 
 func DefaultConfig() Config {
@@ -70,8 +63,7 @@ func DefaultConfig() Config {
 	}
 }
 
-// Service 是 API Key 的全部能力：自助管理（Create/List/Revoke）与校验热路径
-// （Authenticate + Allow + RecordUsage）。
+// Service 是 API Key 的全部能力：自助管理与校验热路径。
 type Service struct {
 	store   Store
 	limiter Limiter
@@ -105,12 +97,12 @@ func normalizeConfig(cfg Config) Config {
 	return cfg
 }
 
-// createAttempts 是创建时撞上唯一索引的重试次数。lookup/hash 的取值空间是
-// 2^95 / 2^256 量级，撞车概率可忽略——唯一索引是兜底，不是常态路径。
+// createAttempts 是创建时撞唯一索引的重试次数：lookup/hash 的取值空间是 2^95 /
+// 2^256 量级，撞车可忽略，唯一索引只是兜底。
 const createAttempts = 3
 
-// Create 生成并落库一把新 key，返回明文（唯一一次）与记录。
-// 全部按 userID 过滤：这里不接受"给谁创建"这个参数。
+// Create 生成并落库一把新 key，返回明文（唯一一次）与记录。不接受"给谁创建"这个
+// 参数：全都按 userID 过滤。
 func (s *Service) Create(ctx context.Context, userID, name string, scopes []string, expiresAt *time.Time) (string, *store.APIKey, error) {
 	name, err := normalizeName(name)
 	if err != nil {
@@ -155,14 +147,13 @@ func (s *Service) List(ctx context.Context, userID string) ([]store.APIKey, erro
 	return s.store.ListByUser(ctx, userID)
 }
 
-// Revoke 撤销一把 key：只能撤自己的，软删，重复调用幂等（§5.4 状态机）。
-// 撤销后立刻失效，不需要等任何缓存——P1 根本没有 key 缓存（§1 D6）。
+// Revoke 撤销一把 key：只能撤自己的，软删，重复调用幂等（§5.4）。撤销后立刻失效：
+// 没有缓存可以变旧（§1 D6）。
 func (s *Service) Revoke(ctx context.Context, userID, keyID string) error {
 	if err := s.store.Revoke(ctx, keyID, userID, s.cfg.Now()); err != nil {
 		return err
 	}
-	// 桶与待刷计数跟着撤销一起清掉（§5.2 路径 B）：撤销后的 key 不会再被判定，
-	// 留着只会让内存里攒着一堆死条目。
+	// 桶与待刷计数跟着一起清掉（§5.2 路径 B）：撤销后的 key 不会再被判定。
 	s.limiter.Forget(keyID)
 	s.counter.Forget(keyID)
 	return nil
@@ -170,9 +161,8 @@ func (s *Service) Revoke(ctx context.Context, userID, keyID string) error {
 
 // Authenticate 是热路径：形状 → 查库 → 常量时间比对 → 撤销/过期判定。
 //
-// 唯一判定有效性的地方：任何别的路径都不许自行判断"这把 key 还能不能用"
-// （§5.4 的不变量）。不缓存是刻意的（§1 D6）：省一次索引点查，代价是把撤销延迟
-// 从 0 变成 TTL，而未来多副本还要再加一套跨副本失效。
+// 唯一判定有效性的地方，别的路径不许自行判断"这把 key 还能不能用"（§5.4 不变量）。
+// 不缓存（§1 D6）：撤销延迟因此为 0，多副本时也省掉跨副本失效。
 func (s *Service) Authenticate(ctx context.Context, raw string) (Identity, error) {
 	lookup, _, ok := Parse(raw)
 	if !ok {
@@ -214,7 +204,7 @@ func (s *Service) RecordUsage(keyID string) {
 }
 
 // RunCounter 是进程级单个刷库 goroutine 的循环，生命周期跟随 manager 的 root context。
-// 退出时最多丢一个窗口（§3.2），这里仍会在收到取消后尽量刷最后一次。
+// 收到取消后尽量刷最后一次，最多丢一个窗口（§3.2）。
 func (s *Service) RunCounter(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.CounterFlush)
 	defer ticker.Stop()
@@ -233,10 +223,8 @@ func (s *Service) RunCounter(ctx context.Context) {
 	}
 }
 
-// Flush 把当前窗口的计数写回库（增量 + 取最大，多副本安全）。
-//
-// 失败只告警不重试（§6 R5）：计数本来就是非精确口径，若有一天它值得一套重试队列，
-// 那说明它已经变成关键路径了——那时应该改成正经的指标管道，而不是给这里加重试。
+// Flush 把当前窗口的计数写回库（增量 + 取最大，多副本安全）。失败只告警不重试
+// （§6 R5）：计数本来就是非精确口径，真值得重试就该换成正经的指标管道。
 func (s *Service) Flush(ctx context.Context) {
 	for keyID, d := range s.counter.Drain() {
 		if err := s.store.AddUsage(ctx, keyID, d.Calls, d.LastUsed); err != nil {

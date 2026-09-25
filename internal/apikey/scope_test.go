@@ -39,7 +39,7 @@ func TestCatalogIntegrity(t *testing.T) {
 			t.Errorf("scope %q references unknown group %q", s.Value, s.Group)
 		}
 	}
-	// 容量假设：目录 ≤ 200 条且只增（§3.2）。超了就该先想清楚分类，而不是继续加。
+	// 容量假设：目录 ≤ 200 条且只增（§3.2）；超了先想清楚分类，而不是继续加。
 	if len(catalog) > 200 {
 		t.Errorf("catalog has %d entries, capacity assumption is <= 200", len(catalog))
 	}
@@ -190,8 +190,7 @@ func TestNormalizeScopes(t *testing.T) {
 }
 
 func TestNormalizeScopesRejectsDeprecated(t *testing.T) {
-	// 废弃态是兼容规则要求的过渡态：历史 key 仍可持有，但不能授予新 key。
-	// 目录是编译期常量，这里临时改一条再还原。
+	// 废弃态：历史 key 仍可持有，但不能授予新 key。目录是编译期常量，临时改一条再还原。
 	const probe = ScopeAgentRead
 	original := catalog[0]
 	t.Cleanup(func() { catalog[0] = original })
