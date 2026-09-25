@@ -17,11 +17,11 @@ func Open(dsn string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: open db: %w", err)
 	}
-	if err := db.AutoMigrate(&User{}, &Voicebot{}, &Device{}, &Provider{}, &AIModel{}, &ModelVoice{}, &MCPMarketEntry{}, &MCPServer{}, &VoicebotMCPBinding{}, &MemoryEntry{}, &SessionTurn{}, &KnowledgeBase{}, &Document{}, &Chunk{}, &VoicebotKB{}, &OAuthBinding{}, &AgentTemplate{}, &Asset{}, &BillingItem{}, &BillingPrice{}, &BillingAccount{}, &BillingLedger{}, &BillingUsageEvent{}, &BillingReservation{}, &BillingGrant{}, &BillingPeriodState{}, &BillingDailyStat{}, &PaymentOrder{}, &PaymentNotification{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &Voicebot{}, &Device{}, &Provider{}, &AIModel{}, &ModelVoice{}, &MCPMarketEntry{}, &MCPServer{}, &VoicebotMCPBinding{}, &MemoryEntry{}, &SessionTurn{}, &KnowledgeBase{}, &Document{}, &Chunk{}, &VoicebotKB{}, &OAuthBinding{}, &AgentTemplate{}, &Asset{}, &APIKey{}, &BillingItem{}, &BillingPrice{}, &BillingAccount{}, &BillingLedger{}, &BillingUsageEvent{}, &BillingReservation{}, &BillingGrant{}, &BillingPeriodState{}, &BillingDailyStat{}, &PaymentOrder{}, &PaymentNotification{}); err != nil {
 		return nil, fmt.Errorf("store: migrate: %w", err)
 	}
 
-	logging.Infof("store: migration done (users, voicebots, devices, providers, ai_models, model_voices, mcp_market_entries, mcp_servers, voicebot_mcp_bindings, memory_entries, session_turns, knowledge_bases, documents, chunks, oauth_bindings, agent_templates, assets, billing_items, billing_prices, billing_accounts, billing_ledger, billing_usage_events, billing_reservations, billing_grants, billing_period_states, billing_daily_stats, billing_payment_orders, billing_payment_notifications)")
+	logging.Infof("store: migration done (users, voicebots, devices, providers, ai_models, model_voices, mcp_market_entries, mcp_servers, voicebot_mcp_bindings, memory_entries, session_turns, knowledge_bases, documents, chunks, oauth_bindings, agent_templates, assets, api_keys, billing_items, billing_prices, billing_accounts, billing_ledger, billing_usage_events, billing_reservations, billing_grants, billing_period_states, billing_daily_stats, billing_payment_orders, billing_payment_notifications)")
 
 	if err := ensureTurnFTSIndex(db); err != nil {
 		return nil, fmt.Errorf("store: fts index: %w", err)
