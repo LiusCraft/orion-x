@@ -95,7 +95,7 @@ func (c *TGChannel) Info() channels.ChannelInfo {
 		platform.Telegram,
 		"Telegram Bot",
 		channels.ChannelPolling,
-		[]channels.Capability{channels.CapText, channels.CapVoiceFile},
+		[]channels.Capability{channels.CapText, channels.CapTextStream, channels.CapVoiceFile},
 	)
 }
 
@@ -249,7 +249,7 @@ func (c *TGChannel) handleUpdate(deviceID string, update tgbotapi.Update) {
 	}
 
 	if update.Message.Text != "" {
-		c.handleText(ctx, deviceID, chatID, tgUserID, update.Message.Text, sess, deviceCfg)
+		c.handleText(ctx, deviceID, update.Message.Chat, tgUserID, update.Message.Text, sess, deviceCfg)
 		return
 	}
 
@@ -268,7 +268,7 @@ func (c *TGChannel) handleCommand(ctx context.Context, deviceID string, chatID i
 	}
 }
 
-func (c *TGChannel) handleText(ctx context.Context, deviceID string, chatID int64, tgUserID int64, text string, sess *session.Session, deviceCfg *config.AppConfig) {
+func (c *TGChannel) handleText(ctx context.Context, deviceID string, chat *tgbotapi.Chat, tgUserID int64, text string, sess *session.Session, deviceCfg *config.AppConfig) {
 	defer c.sessions.CloseSession(sess.ID)
 	logging.Infof("tg[%s]: text from %d: %q", deviceID, tgUserID, text)
 
@@ -276,7 +276,7 @@ func (c *TGChannel) handleText(ctx context.Context, deviceID string, chatID int6
 	if bot == nil {
 		return
 	}
-	_, _ = bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+	_, _ = bot.Send(tgbotapi.NewChatAction(chat.ID, tgbotapi.ChatTyping))
 
 	connMgr := c.toolsMgr.Clone()
 	agentCfg := agent.Config{
@@ -294,7 +294,7 @@ func (c *TGChannel) handleText(ctx context.Context, deviceID string, chatID int6
 	llmClient, err := c.providers.GetOrCreateLLM(ctx, deviceCfg.Provider.LLM.Type, deviceCfg.Provider.LLM.OpenAI)
 	if err != nil {
 		logging.Errorf("tg[%s]: get LLM client: %v", deviceID, err)
-		c.reply(deviceID, chatID, "初始化失败，请稍后再试。")
+		c.reply(deviceID, chat.ID, "初始化失败，请稍后再试。")
 		return
 	}
 	for _, spec := range c.tasks.ToolSpecs(sess.ID, func(_ context.Context, taskRecord *task.Task) error {
@@ -316,7 +316,7 @@ func (c *TGChannel) handleText(ctx context.Context, deviceID string, chatID int6
 	agt, err := agent.NewWithClient(agentCfg, llmClient, connMgr, c.memSvc)
 	if err != nil {
 		logging.Errorf("tg[%s]: create agent: %v", deviceID, err)
-		c.reply(deviceID, chatID, "初始化失败，请稍后再试。")
+		c.reply(deviceID, chat.ID, "初始化失败，请稍后再试。")
 		return
 	}
 
@@ -324,26 +324,23 @@ func (c *TGChannel) handleText(ctx context.Context, deviceID string, chatID int6
 	eventChan, err := agt.Run(ctx, sess)
 	if err != nil {
 		logging.Errorf("tg[%s]: agent run error: %v", deviceID, err)
-		c.reply(deviceID, chatID, "处理消息时出错。")
+		c.reply(deviceID, chat.ID, "处理消息时出错。")
 		return
 	}
 
-	var response string
+	stream := newReplyStream(bot, deviceID, chat)
+	stream.start()
 	for event := range eventChan {
 		switch e := event.(type) {
 		case *agent.TextChunkEvent:
-			response += e.Chunk
+			stream.push(e.Chunk)
 		case *agent.FinishedEvent:
 			if e.Error != nil {
 				logging.Warnf("tg[%s]: agent finished with error: %v", deviceID, e.Error)
 			}
 		}
 	}
-
-	if response == "" {
-		response = "（无响应）"
-	}
-	c.reply(deviceID, chatID, response)
+	stream.finish()
 }
 
 func (c *TGChannel) reply(deviceID string, chatID int64, text string) {

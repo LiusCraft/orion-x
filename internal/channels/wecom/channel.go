@@ -134,7 +134,7 @@ func (c *WeComChannel) Info() channels.ChannelInfo {
 		platform.WeCom,
 		"企业微信智能机器人",
 		channels.ChannelClient,
-		[]channels.Capability{channels.CapText},
+		[]channels.Capability{channels.CapText, channels.CapTextStream},
 	)
 }
 

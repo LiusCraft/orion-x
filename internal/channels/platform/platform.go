@@ -51,6 +51,7 @@ var registry = []Descriptor{
 		Type:        channels.ChannelPolling,
 		Capabilities: []channels.Capability{
 			channels.CapText,
+			channels.CapTextStream,
 			channels.CapVoiceFile,
 		},
 		Fields: []Field{
@@ -63,6 +64,7 @@ var registry = []Descriptor{
 		Type:        channels.ChannelClient,
 		Capabilities: []channels.Capability{
 			channels.CapText,
+			channels.CapTextStream,
 		},
 		QRBinding: true,
 		Fields: []Field{
