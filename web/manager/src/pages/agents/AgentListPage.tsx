@@ -40,7 +40,6 @@ interface ParsedConfig {
   mcpCount: number;
   language: string;
   prompt: string;
-  vadMode: string;
 }
 
 function parseConfig(configJson: string): ParsedConfig {
@@ -55,7 +54,6 @@ function parseConfig(configJson: string): ParsedConfig {
         mcpCount: Array.isArray(c.mcp) ? c.mcp.length : 0,
         language: c.language || "",
         prompt: c.llm?.prompt || "",
-        vadMode: c.asr?.vad_mode || "",
       };
     }
     return {
@@ -66,7 +64,6 @@ function parseConfig(configJson: string): ParsedConfig {
       mcpCount: Array.isArray(c?.tools?.mcp) ? c.tools.mcp.length : 0,
       language: "",
       prompt: "",
-      vadMode: "",
     };
   } catch {
     return {
@@ -77,7 +74,6 @@ function parseConfig(configJson: string): ParsedConfig {
       mcpCount: 0,
       language: "",
       prompt: "",
-      vadMode: "",
     };
   }
 }
@@ -353,14 +349,6 @@ export default function AgentListPage() {
                       {cfg.language && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
                           {langMap[cfg.language] || cfg.language}
-                        </span>
-                      )}
-                      {cfg.vadMode && cfg.vadMode !== "auto" && (
-                        <span
-                          className={`text-[10px] px-1.5 py-0.5 rounded border
-                          ${cfg.vadMode === "manual" ? "bg-amber-500/10 border-amber-500/20 text-amber-400" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"}`}
-                        >
-                          {cfg.vadMode === "manual" ? "手动" : "实时"}
                         </span>
                       )}
                       {cfg.mcpCount > 0 && (

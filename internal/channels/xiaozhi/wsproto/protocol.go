@@ -26,9 +26,12 @@ const (
 	TypeMCP    MessageType = "mcp"
 )
 
-// Mode is the interaction mode negotiated at hello time and fixed for the
-// life of the connection (switching modes mid-connection would require
-// rebuilding the ASR processor, so it isn't supported).
+// Mode is the client's listening mode. It is the client's call, not a server
+// setting: it depends on client-side capabilities (hardware AEC, button vs.
+// wake word) the server can't know. The esp32 firmware announces it on every
+// listen start message; clients may also declare it in hello as an early hint.
+// The mode can change mid-connection — the server reconfigures its ASR
+// processor instead of requiring a reconnect.
 type Mode string
 
 const (
@@ -38,7 +41,23 @@ const (
 	// listen start/stop messages; the server disables VAD for the
 	// connection's ASR processor.
 	ModeManual Mode = "manual"
+	// ModeRealtime is what AEC-capable esp32 firmware announces when it
+	// expects a full-duplex session (the uplink stays open during playback).
+	// This server doesn't implement server-side AEC, so NormalizeMode
+	// degrades it to ModeAuto.
+	ModeRealtime Mode = "realtime"
 )
+
+// NormalizeMode maps a raw wire mode onto the two modes this server
+// implements: manual stays manual, everything else (auto, realtime, empty,
+// unknown) behaves as auto. Mirrors xiaozhi-esp32-server, whose runtime
+// behavior only branches on `listen_mode != "manual"`.
+func NormalizeMode(m Mode) Mode {
+	if m == ModeManual {
+		return ModeManual
+	}
+	return ModeAuto
+}
 
 // ListenState is the "state" field of a listen message.
 type ListenState string
@@ -97,8 +116,11 @@ type HelloMessage struct {
 	SessionID   string      `json:"session_id,omitempty"`
 	DeviceID    string      `json:"device_id,omitempty"`
 	AudioParams AudioParams `json:"audio_params"`
-	Mode        Mode        `json:"mode,omitempty"`
-	WelcomeMsg  string      `json:"welcome_msg,omitempty"`
+	// Mode is an optional early listening-mode hint (see Mode). The esp32
+	// firmware does not send it in hello — it announces the mode on each
+	// listen start instead; empty means auto until announced.
+	Mode       Mode   `json:"mode,omitempty"`
+	WelcomeMsg string `json:"welcome_msg,omitempty"`
 	// Features lists optional capabilities the client supports.
 	// Currently recognised values: "mcp": true (client acts as device-MCP server).
 	Features map[string]bool `json:"features,omitempty"`
@@ -120,7 +142,11 @@ type ListenMessage struct {
 	Type      MessageType `json:"type"`
 	SessionID string      `json:"session_id,omitempty"`
 	State     ListenState `json:"state"`
-	Text      string      `json:"text,omitempty"`
+	// Mode announces the client's listening mode. The esp32 firmware sets it
+	// on listen start only (stop carries no mode); empty means "keep the
+	// current mode".
+	Mode Mode   `json:"mode,omitempty"`
+	Text string `json:"text,omitempty"`
 }
 
 // AbortMessage asks the server to immediately stop the current response
@@ -209,11 +235,11 @@ type IoTCommand struct {
 // Client→server: carries Descriptors (capability declaration) and/or States (current values).
 // Server→client: carries Commands (control instructions).
 type IoTMessage struct {
-	Type        MessageType      `json:"type"`
-	SessionID   string           `json:"session_id,omitempty"`
-	Descriptors []IoTDescriptor  `json:"descriptors,omitempty"`
-	States      []IoTState       `json:"states,omitempty"`
-	Commands    []IoTCommand     `json:"commands,omitempty"`
+	Type        MessageType     `json:"type"`
+	SessionID   string          `json:"session_id,omitempty"`
+	Descriptors []IoTDescriptor `json:"descriptors,omitempty"`
+	States      []IoTState      `json:"states,omitempty"`
+	Commands    []IoTCommand    `json:"commands,omitempty"`
 }
 
 // NewIoTCommandMessage builds a server→client IoT control frame.

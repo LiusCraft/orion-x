@@ -80,7 +80,6 @@ interface BotConfig {
   language: string;
   asr: {
     model_id: string;
-    vad_mode: string;
     vad_threshold: number;
     vad_min_silence_ms: number;
     vad_speech_pad_ms: number;
@@ -115,7 +114,6 @@ const DC: BotConfig = {
   language: "zh",
   asr: {
     model_id: "",
-    vad_mode: "auto",
     vad_threshold: 0.5,
     vad_min_silence_ms: 500,
     vad_speech_pad_ms: 300,
@@ -148,11 +146,17 @@ const EMOTION_LABELS: Record<string, string> = {
   excited: "兴奋",
 };
 
-const VAD_MODES = [
-  { value: "realtime", label: "实时模式", desc: "持续监听，需要 AEC 支持" },
-  { value: "auto", label: "自动模式", desc: "VAD 检测语音边界，自动停止" },
-  { value: "manual", label: "手动模式", desc: "客户端发送开始/停止信号" },
-];
+/**
+ * 监听模式（auto/manual）由客户端在 listen 时宣告（见 wsproto.Mode），不是
+ * 智能体配置；历史配置里存过的 asr.vad_mode 在这里顺手剥掉，避免被原样存回。
+ */
+function stripVadMode(
+  raw: Record<string, unknown> | undefined,
+): Partial<BotConfig["asr"]> {
+  const rest: Record<string, unknown> = { ...raw };
+  delete rest.vad_mode;
+  return rest as Partial<BotConfig["asr"]>;
+}
 
 function parseCfg(json: string): BotConfig {
   try {
@@ -165,7 +169,10 @@ function parseCfg(json: string): BotConfig {
     ) {
       return {
         language: c.language || DC.language,
-        asr: { ...DC.asr, ...c.asr },
+        asr: {
+          ...DC.asr,
+          ...stripVadMode(c.asr as Record<string, unknown> | undefined),
+        },
         tts: { ...DC.tts, ...c.tts },
         llm: {
           ...DC.llm,
@@ -180,7 +187,6 @@ function parseCfg(json: string): BotConfig {
       language: DC.language,
       asr: {
         model_id: "",
-        vad_mode: c.audio?.in_pipe?.enable_vad === false ? "manual" : "auto",
         vad_threshold: c.audio?.in_pipe?.vad_threshold ?? DC.asr.vad_threshold,
         vad_min_silence_ms:
           c.audio?.in_pipe?.vad_min_silence_ms ?? DC.asr.vad_min_silence_ms,
@@ -1112,89 +1118,58 @@ export default function AgentDetailPage() {
                 </Select>
               </Field>
 
-              <div className="border-t border-zinc-800 pt-4">
-                <Label className="text-xs text-zinc-400 uppercase tracking-wide mb-3 block">
-                  监听模式
+              <div className="border-t border-zinc-800 pt-4 space-y-4">
+                <Label className="text-xs text-zinc-400 uppercase tracking-wide block">
+                  VAD 参数
                 </Label>
-                <div className="space-y-2">
-                  {VAD_MODES.map((mode) => (
-                    <label
-                      key={mode.value}
-                      className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors
-                      ${asr.vad_mode === mode.value ? "border-violet-500 bg-violet-500/10" : "border-zinc-800 bg-zinc-900 hover:border-zinc-700"}`}
-                      onClick={() => setAsr({ vad_mode: mode.value })}
-                    >
-                      <div
-                        className={`w-4 h-4 mt-0.5 rounded-full border-2 shrink-0 flex items-center justify-center
-                      ${asr.vad_mode === mode.value ? "border-violet-500" : "border-zinc-600"}`}
-                      >
-                        {asr.vad_mode === mode.value && (
-                          <div className="w-2 h-2 rounded-full bg-violet-500" />
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-sm text-white font-medium">
-                          {mode.label}
-                        </p>
-                        <p className="text-xs text-zinc-500 mt-0.5">
-                          {mode.desc}
-                        </p>
-                      </div>
-                    </label>
-                  ))}
+                <p className="text-xs text-zinc-500">
+                  拾音模式（自动 / 手动）由设备端决定，以下参数只在自动模式下生效。
+                </p>
+                <Field
+                  label={`活动检测阈值 (${asr.vad_threshold.toFixed(2)})`}
+                >
+                  <Input
+                    variant="unstyled"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={asr.vad_threshold}
+                    onChange={(e) =>
+                      setAsr({ vad_threshold: +e.target.value })
+                    }
+                    className="w-full accent-violet-500"
+                  />
+                  <div className="flex justify-between text-[10px] text-zinc-600 -mt-1">
+                    <span>0 (低灵敏度)</span>
+                    <span>1 (高灵敏度)</span>
+                  </div>
+                </Field>
+                <div className="flex flex-wrap gap-4">
+                  <Field label="最小静音时长 (ms)">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={asr.vad_min_silence_ms}
+                      onChange={(e) =>
+                        setAsr({ vad_min_silence_ms: +e.target.value })
+                      }
+                      className={inp}
+                    />
+                  </Field>
+                  <Field label="语音填充 (ms)">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={asr.vad_speech_pad_ms}
+                      onChange={(e) =>
+                        setAsr({ vad_speech_pad_ms: +e.target.value })
+                      }
+                      className={inp}
+                    />
+                  </Field>
                 </div>
               </div>
-
-              {asr.vad_mode !== "manual" && (
-                <div className="border-t border-zinc-800 pt-4 space-y-4">
-                  <Field
-                    label={`活动检测阈值 (${asr.vad_threshold.toFixed(2)})`}
-                  >
-                    <Input
-                      variant="unstyled"
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={asr.vad_threshold}
-                      onChange={(e) =>
-                        setAsr({ vad_threshold: +e.target.value })
-                      }
-                      className="w-full accent-violet-500"
-                    />
-                    <div className="flex justify-between text-[10px] text-zinc-600 -mt-1">
-                      <span>0 (低灵敏度)</span>
-                      <span>1 (高灵敏度)</span>
-                    </div>
-                  </Field>
-                  {asr.vad_mode === "auto" && (
-                    <div className="flex flex-wrap gap-4">
-                      <Field label="最小静音时长 (ms)">
-                        <Input
-                          type="number"
-                          min={0}
-                          value={asr.vad_min_silence_ms}
-                          onChange={(e) =>
-                            setAsr({ vad_min_silence_ms: +e.target.value })
-                          }
-                          className={inp}
-                        />
-                      </Field>
-                      <Field label="语音填充 (ms)">
-                        <Input
-                          type="number"
-                          min={0}
-                          value={asr.vad_speech_pad_ms}
-                          onChange={(e) =>
-                            setAsr({ vad_speech_pad_ms: +e.target.value })
-                          }
-                          className={inp}
-                        />
-                      </Field>
-                    </div>
-                  )}
-                </div>
-              )}
             </TabsContent>
 
             {/* ── TTS ── */}
@@ -2075,11 +2050,7 @@ export default function AgentDetailPage() {
           className="flex h-full min-h-0 flex-col min-w-0 overflow-hidden"
           style={{ width: `${100 - splitPct}%` }}
         >
-          <QuickChat
-            agentId={id!}
-            vadMode={cfg.asr.vad_mode}
-            onBeforeConnect={saveAgent}
-          />
+          <QuickChat agentId={id!} onBeforeConnect={saveAgent} />
         </div>
       </div>
 
