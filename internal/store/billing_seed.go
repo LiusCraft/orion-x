@@ -47,59 +47,55 @@ func billingSeedItems() []billingSeedItem {
 	}
 }
 
-// SyncBillingItems 把内置计费项目录投影进 billing_items：
-//   - 按 code upsert：名称 / 模式 / 单位 / 计量点跟着代码走，**enabled 保留管理员的设置**
-//     （口径互斥的两组项就靠管理端只启用一组）；
-//   - 已经不在 seed 里的项不物删，只标 enabled=false——历史事件和流水还引用着这个 code。
+// SyncBillingFallbackPrices 给还没有生效平台价的启用计费项各插一条 item 级兜底价，
+// 返回插入的行数；unitPriceMicro 传负数表示显式关闭（价格缺失即拒绝，fail closed）。
 //
-// 幂等，每次启动都可以跑。建议在 AutoMigrate 之后、HTTP 服务起来之前调用，
-// 和 SyncSystemTemplates 放在一起。
-// sessionMeterSource 判断这个计量点是否在会话内产生用量（会走 authorize 的价格
-// 快照）；voice:clone / mcp / kb 这些控制面计量点由各自的业务动作直接报账。
-func sessionMeterSource(source string) bool {
-	switch source {
-	case "llm", "tts", "asr":
-		return true
-	}
-	return false
-}
-
-// SyncBillingFallbackPrices 给还没有生效价格的会话计费项插一条 item 级兜底价，
-// 返回插入的行数。
+// 默认兜底价是 0（免费档）：价格表为空的部署不该一上来就把所有会话按 price_missing
+// 拒掉（§14.3），服务先可用，运营再按需用管理端录真实价格。兜底价只在“这一项当前
+// 没有任何生效平台价”时插入，绝不覆盖运营录的真实价格；插入的行 creator =
+// "system:fallback" 便于识别，改价与清理都走价格版本（同 scope 后录的版本选价优先，
+// §3.2）。
 //
-// 为什么需要它：billing 一开、价格表为空的话，每个会话都会被 price_missing 拒掉，
-// 而放行又会静默变成免费服务（§3.4 / §14.3）。兜底价只在“这一项当前没有任何生效
-// 价格”时插入，绝不覆盖运营录的真实价格；unitPriceMicro <= 0 时什么都不做——宁可
-// 不放行，也不要一个静默的免费档。
+// 计费项以数据库为准：enabled 是管理员的设置，可能已经改过代码 seed 的默认值。
 func SyncBillingFallbackPrices(db *gorm.DB, unitPriceMicro int64) (int, error) {
-	if unitPriceMicro <= 0 {
+	if unitPriceMicro < 0 {
 		return 0, nil
 	}
+	var items []BillingItem
+	if err := db.Where("enabled = ?", true).Find(&items).Error; err != nil {
+		return 0, fmt.Errorf("billing seed: list enabled items: %w", err)
+	}
+	return seedFallbackPrices(db, items, unitPriceMicro)
+}
+
+// seedFallbackPrices 是 SyncBillingFallbackPrices 的主体：逐项查重，缺价才插。
+// items 由调用方给出（生产走 DB，测试直接构造）。
+func seedFallbackPrices(db *gorm.DB, items []BillingItem, unitPriceMicro int64) (int, error) {
 	now := time.Now()
 	var created []BillingPrice
-	for _, seed := range billingSeedItems() {
-		if !seed.Enabled || !sessionMeterSource(seed.MeterSource) {
+	for _, item := range items {
+		if !item.Enabled {
 			continue
 		}
 		var count int64
 		err := db.Model(&BillingPrice{}).
-			Where("item_code = ? AND account_id = ''", seed.Code).
+			Where("item_code = ? AND account_id = ''", item.Code).
 			Where("effective_from <= ? AND (effective_to IS NULL OR effective_to > ?)", now, now).
 			Count(&count).Error
 		if err != nil {
-			return 0, fmt.Errorf("billing seed: count prices for %s: %w", seed.Code, err)
+			return 0, fmt.Errorf("billing seed: count prices for %s: %w", item.Code, err)
 		}
 		if count > 0 {
 			continue
 		}
 		rounding := "none"
-		if seed.ChargeMode == "duration" {
+		if item.ChargeMode == "duration" {
 			// duration 类默认向上取整（§3.3）。
 			rounding = "ceil"
 		}
 		created = append(created, BillingPrice{
 			ID:             uuid.NewString(),
-			ItemCode:       seed.Code,
+			ItemCode:       item.Code,
 			AccountID:      "",
 			ResourceType:   "item",
 			Currency:       "CNY",
@@ -107,6 +103,7 @@ func SyncBillingFallbackPrices(db *gorm.DB, unitPriceMicro int64) (int, error) {
 			UnitSize:       1,
 			Rounding:       rounding,
 			EffectiveFrom:  now,
+			BaseModel:      BaseModel{Creator: "system:fallback"},
 		})
 	}
 	if len(created) == 0 {
@@ -118,6 +115,13 @@ func SyncBillingFallbackPrices(db *gorm.DB, unitPriceMicro int64) (int, error) {
 	return len(created), nil
 }
 
+// SyncBillingItems 把内置计费项目录投影进 billing_items：
+//   - 按 code upsert：名称 / 模式 / 单位 / 计量点跟着代码走，**enabled 保留管理员的设置**
+//     （口径互斥的两组项就靠管理端只启用一组）；
+//   - 已经不在 seed 里的项不物删，只标 enabled=false——历史事件和流水还引用着这个 code。
+//
+// 幂等，每次启动都可以跑。建议在 AutoMigrate 之后、HTTP 服务起来之前调用，
+// 和 SyncSystemTemplates 放在一起。
 func SyncBillingItems(db *gorm.DB) error {
 	seeds := billingSeedItems()
 	rows := make([]BillingItem, 0, len(seeds))

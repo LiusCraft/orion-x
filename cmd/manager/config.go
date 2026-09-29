@@ -76,9 +76,10 @@ type BillingConfig struct {
 	OverdraftPolicy  string `yaml:"overdraft_policy"`   // deny | allow
 	PeriodTimezone   string `yaml:"period_timezone"`    // 如 Asia/Shanghai，默认 UTC
 	SignupGrantMicro int64  `yaml:"signup_grant_micro"` // 新账户注册赠款总额
-	// FallbackPriceMicro 是“会话计费项还没有任何生效价格”时插入的 item 级兜底单价
-	// （微元/token、微元/秒、微元/字符）。为 0 时不插：价格表为空的话每个会话都会
-	// 被 price_missing 拒掉，这是有意的 fail closed（docs/billing-design.md §3.4）。
+	// FallbackPriceMicro 是给“还没有任何生效价格”的启用计费项在启动时插入的 item 级
+	// 兜底单价（微元/单位）。默认 0 = 免费档：价格表为空的部署不该一上来就把所有
+	// 会话按 price_missing 拒掉（docs/billing-design.md §3.4）。负数 = 关闭兜底，回到
+	// fail closed（价格缺失即拒绝会话）。
 	FallbackPriceMicro int64 `yaml:"fallback_price_micro"`
 }
 

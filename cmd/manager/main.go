@@ -82,17 +82,14 @@ func main() {
 	if err := store.SyncBillingItems(db); err != nil {
 		logging.Warnf("sync billing items: %v", err)
 	}
-	// 兜底价：只在某个会话计费项还没有任何生效价格时插入，不覆盖运营录的真实价格。
-	// 没配 fallback_price_micro 而价格表又为空的话，会话会被 price_missing 拒掉——
-	// 那时只能靠管理端录价格（§3.4）。
-	if cfg.Billing.FallbackPriceMicro > 0 {
-		created, err := store.SyncBillingFallbackPrices(db, cfg.Billing.FallbackPriceMicro)
-		if err != nil {
-			logging.Warnf("sync billing fallback prices: %v", err)
-		} else if created > 0 {
-			logging.Warnf("billing: seeded %d fallback price row(s) at %d micro/unit — 真实价格请用管理端 API 录（录完把 fallback_price_micro 清掉）",
-				created, cfg.Billing.FallbackPriceMicro)
-		}
+	// 默认兜底价（0 = 免费档）：给还没有生效价格的启用计费项插一条 item 级平台标准价。
+	// 价格表为空的部署不该一上来就把所有会话按 price_missing 拒掉（§3.4）；想回到
+	// fail closed（价格缺失即拒绝）把 fallback_price_micro 设为负数。
+	if created, err := store.SyncBillingFallbackPrices(db, cfg.Billing.FallbackPriceMicro); err != nil {
+		logging.Warnf("sync billing fallback prices: %v", err)
+	} else if created > 0 {
+		logging.Warnf("billing: seeded %d fallback price row(s) at %d micro/unit (0 = 免费档) — 改价请在管理端录新版本价格",
+			created, cfg.Billing.FallbackPriceMicro)
 	}
 
 	users := store.NewUserStore(db)
