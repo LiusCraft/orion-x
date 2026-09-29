@@ -144,7 +144,10 @@ function SelectContent({
   align = "start",
   alignOffset = 0,
   alignItemWithTrigger = false,
-  collisionAvoidance = { side: "none", align: "none" },
+  // 默认避让照搬 base-ui 给下拉的 DROPDOWN_COLLISION_AVOIDANCE（side/align 都是 flip，只是
+  // 不往垂直轴兜底）：下方放不下就翻到触发器上方，横向超出就把对齐翻到另一边。之前写死
+  // {side:"none", align:"none"}，触发器贴近窗口底部时下拉照旧往下弹，整块被裁在可视区外。
+  collisionAvoidance = { side: "flip", align: "flip", fallbackAxisSide: "none" },
   disablePortal = false,
   positionMethod = "fixed",
   ...props
@@ -178,7 +181,11 @@ function SelectContent({
           // 宽度按内容撑开（至少和触发器一样宽），否则触发器上的短文案会把下拉压得
           // 放不下选项，长选项只能截断。上限之外的兜底用视口而不是 --available-width：
           // 后者由浮动层的当前宽度反推，宽度随内容变化时会来回抖。
-          "relative isolate z-50 max-h-(--available-height) w-max min-w-[var(--anchor-width)] max-w-[min(var(--available-width),calc(100vw-2rem))] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--foreground))] shadow-lg p-1 duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          //
+          // 高度上限是 15rem（约 7 行）与可用空间取小：语言、模型这类长列表不把下拉拉得太长，
+          // 同时翻面后永远按上/下方实测空间收，不会顶出可视区；100vh 兜底是给
+          // --available-height 还没算出来的第一帧，免得闪一下全高。
+          "relative isolate z-50 max-h-[min(15rem,var(--available-height,100vh))] w-max min-w-[var(--anchor-width)] max-w-[min(var(--available-width),calc(100vw-2rem))] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--foreground))] shadow-lg p-1 duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className,
         )}
         {...props}

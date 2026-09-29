@@ -939,7 +939,7 @@ export default function AgentDetailPage() {
                             ?.name || cfg.language}
                         </span>
                       </SelectTrigger>
-                      <SelectContent className="max-h-60">
+                      <SelectContent>
                         {languages.map((l) => (
                           <SelectItem key={l.code} value={l.code}>
                             {l.name} ({l.code})
