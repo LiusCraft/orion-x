@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useAuthStore } from "@/lib/store";
+import { useDocumentTitle } from "@/lib/title";
 import { authApi, type OAuthBinding, type OAuthProvider } from "@/lib/api";
 import {
   Copy,
@@ -331,6 +332,8 @@ function BindEmailDialog({
 }
 
 		export default function AccountPage() {
+  			useDocumentTitle("账号");
+
   			const { username, userId } = useAuthStore();
   			const [showPwd, setShowPwd] = useState(false);
   			const [showEmail, setShowEmail] = useState(false);

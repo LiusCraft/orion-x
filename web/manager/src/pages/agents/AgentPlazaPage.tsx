@@ -8,8 +8,11 @@ import {
 	voicebotApi,
 	type AgentTemplate,
 } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 
 export default function AgentPlazaPage() {
+	useDocumentTitle("智能体广场");
+
 	const [templates, setTemplates] = useState<AgentTemplate[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [query, setQuery] = useState("");

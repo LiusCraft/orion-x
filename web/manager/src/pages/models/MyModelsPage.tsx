@@ -28,6 +28,7 @@ import {
   type ModelType,
   type Provider,
 } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 import { useAuthStore } from "@/lib/store";
 
 const TYPE_BADGE: Record<string, string> = {
@@ -47,6 +48,8 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default function MyModelsPage() {
+  useDocumentTitle("我的模型");
+
   const isAdmin = useAuthStore((state) => state.isAdmin);
   const [models, setModels] = useState<AIModel[]>([]);
   const [modelTypes, setModelTypes] = useState<ModelType[]>([]);

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { voiceApi, languageApi, type ModelVoice } from "@/lib/api";
 import { Tooltip } from "@/components/ui/tooltip";
+import { useDocumentTitle } from "@/lib/title";
 
 const GENDERS = ["全部", "女声", "男声", "中性"];
 const GENDER_MAP: Record<string, string> = {
@@ -31,6 +32,8 @@ const VOICE_COLORS = [
 ];
 
 export default function VoicePlazaPage() {
+  useDocumentTitle("音色广场");
+
   const [voices, setVoices] = useState<ModelVoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState<string | null>(null);

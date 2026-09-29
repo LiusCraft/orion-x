@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { SimpleSelect } from "@/components/ui/select";
 import { billingApi, type BillingSummary, type BillingUsageEvent } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 import {
 	accountStatusLabel,
 	BILLING_DISABLED_TITLE,
@@ -69,6 +70,8 @@ const ACCOUNT_STATUS_TONES: Record<string, "emerald" | "red" | "zinc"> = {
 };
 
 export default function UsagePage() {
+	useDocumentTitle("用量与余额");
+
 	const [preset, setPreset] = useState<PeriodPreset>("current");
 	const [summary, setSummary] = useState<BillingSummary | null>(null);
 	const [summaryLoading, setSummaryLoading] = useState(true);

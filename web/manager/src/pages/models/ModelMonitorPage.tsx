@@ -28,6 +28,7 @@ import {
 	type BillingModelUsage,
 	type BillingModelUsageRow,
 } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 import {
 	BILLING_DISABLED_TITLE,
 	billingErrorMessage,
@@ -228,6 +229,8 @@ function sortGroups(groups: ModelUsageGroup[], key: SortKey): ModelUsageGroup[] 
 }
 
 export default function ModelMonitorPage() {
+	useDocumentTitle("模型监控");
+
 	const [range, setRange] = useState<RangeKey>("7d");
 	const [sort, setSort] = useState<SortKey>("amount");
 	const [expanded, setExpanded] = useState<string | null>(null);

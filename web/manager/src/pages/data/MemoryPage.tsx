@@ -17,6 +17,7 @@ import {
   type DeviceItem,
   type EntryItem,
 } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 
 const PAGE_SIZE = 20;
 const DEVICE_PAGE_SIZE = 20;
@@ -60,6 +61,9 @@ function useDebouncedValue<T>(value: T, delay: number) {
 export default function MemoryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const deviceId = searchParams.get("device_id")?.trim() || "";
+
+  // 展开某台设备时页面就是「设备记忆」，否则是记忆库总览。
+  useDocumentTitle(deviceId ? "设备记忆" : "记忆库");
   const [agents, setAgents] = useState<AgentItem[]>([]);
   const [agentTotal, setAgentTotal] = useState(0);
   const [agentPage, setAgentPage] = useState(1);
