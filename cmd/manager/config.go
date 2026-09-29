@@ -158,6 +158,7 @@ func (c PaymentConfig) OrderTTLDuration() time.Duration {
 // PaymentServiceConfig 把 yaml 里的配置翻译成 service.PaymentConfig。
 func (c PaymentConfig) PaymentServiceConfig(channels []billing.PayChannel) service.PaymentConfig {
 	cfg := service.DefaultPaymentConfig()
+	cfg.Enabled = !c.Disabled()
 	if c.MinAmountMicro > 0 {
 		cfg.MinAmountMicro = c.MinAmountMicro
 	}
