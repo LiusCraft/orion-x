@@ -385,7 +385,7 @@ func (e *sessionRejectedError) Error() string {
 // reason 用稳定的机器可读串。同时不建 session、不建 pipeline、不写 reservation。
 func (s *XiaozhiWSChannel) rejectConnection(rawConn *websocket.Conn, hello *wsproto.HelloMessage, rejected *sessionRejectedError) {
 	safeConn := NewSafeConn(rawConn)
-	if err := writeHelloResponse(safeConn, rejected.SessionID, hello.Mode, hello); err != nil {
+	if err := writeHelloResponse(safeConn, rejected.SessionID, wsproto.NormalizeMode(hello.Mode), hello); err != nil {
 		logging.Warnf("xiaozhi-channel[%s]: send hello before rejection failed: %v", rejected.SessionID, err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -462,9 +462,13 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		connCfg = config.DefaultConfig()
 	}
 
-	mode := hello.Mode
-	if mode == "" {
-		mode = wsproto.ModeAuto
+	// 拾音模式由客户端决定：esp32 固件的 hello 里不带 mode（它在每条
+	// listen start 上宣告），hello 里的只是提前提示；未知值/realtime 一律
+	// 归一为 auto（NormalizeMode），连接中途宣告变更见 applyAnnouncedMode。
+	mode := wsproto.NormalizeMode(hello.Mode)
+	if hello.Mode != "" && hello.Mode != mode {
+		logging.Warnf("xiaozhi-channel: listening mode %q from hello not supported (device_id=%q), using %s",
+			hello.Mode, hello.DeviceID, mode)
 	}
 
 	format := hello.AudioParams.Format
@@ -831,7 +835,9 @@ type wsConnection struct {
 	rawConn   *websocket.Conn
 	safeConn  *SafeConn
 	sessionID string
-	mode      wsproto.Mode
+	// mode 是客户端宣告的拾音模式：建连时取 hello 的提示（缺省 auto），之后随
+	// listen start 上的宣告在连接内切换（applyAnnouncedMode）。
+	mode wsproto.Mode
 
 	asrProc  audio.ASRProcessor
 	ttsProc  audio.TTSProcessor
@@ -969,6 +975,9 @@ func (c *wsConnection) handleTextMessage(data []byte) {
 func (c *wsConnection) handleListen(m *wsproto.ListenMessage) {
 	switch m.State {
 	case wsproto.ListenStart:
+		// 客户端在每条 listen start 上宣告拾音模式（可能与建连时不同），
+		// 先落实它再决定这次 start 要不要驱动 recognizer。
+		c.applyAnnouncedMode(m.Mode)
 		// 本地估算到 90% 就不再接受新的 listen 窗口，当前这个 turn 让它走完（§15.4）。
 		if c.billing.nearLimit() {
 			logging.Warnf("xiaozhi-channel[%s]: billing budget near limit, refusing listen start", c.sessionID)
@@ -998,6 +1007,30 @@ func (c *wsConnection) handleListen(m *wsproto.ListenMessage) {
 		case <-c.ctx.Done():
 		}
 	}
+}
+
+// applyAnnouncedMode 把客户端在 listen start 上宣告的 mode 落到连接上。
+// 空值表示沿用当前模式；realtime/未知值与 auto 同义（对齐
+// xiaozhi-esp32-server：运行行为只区分 manual 与"其它"）。切换通过
+// ASRProcessor.SetVADEnabled 完成，不需要重建连接或 processor。
+func (c *wsConnection) applyAnnouncedMode(announced wsproto.Mode) {
+	if announced == "" {
+		return
+	}
+	mode := wsproto.NormalizeMode(announced)
+	if announced != mode {
+		logging.Warnf("xiaozhi-channel[%s]: listening mode %q not supported, using %s",
+			c.sessionID, announced, mode)
+	}
+	if mode == c.mode {
+		return
+	}
+	if err := c.asrProc.SetVADEnabled(mode == wsproto.ModeAuto); err != nil {
+		logging.Errorf("xiaozhi-channel[%s]: enable VAD for mode %s failed: %v", c.sessionID, mode, err)
+	}
+	logging.Infof("xiaozhi-channel[%s]: listening mode announced as %q, switching %s -> %s",
+		c.sessionID, announced, c.mode, mode)
+	c.mode = mode
 }
 
 func (c *wsConnection) handleAbort() {

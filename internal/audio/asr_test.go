@@ -500,3 +500,91 @@ func TestASRProcessorConcurrentWrite(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestASRProcessorSetVADEnabled_SwitchesAtRuntime 验证模式可以在运行中切换：
+// 切到 manual 后没有活跃 turn 的音频被丢弃、BeginTurn 之后直送 recognizer；
+// 切回 auto 后音频改走 segmenter 并触发语音开始回调。
+func TestASRProcessorSetVADEnabled_SwitchesAtRuntime(t *testing.T) {
+	r := newMockRecognizer()
+	seg := &mockSegmenter{
+		processFunc: func([]byte) (*vad.Segment, bool) {
+			return nil, true // 任何输入都当作新的语音开始
+		},
+	}
+	// 直接构造并预注入 mockSegmenter：切换模式不能真的去加载 Silero 模型。
+	proc := &asrProcessor{
+		cfg:            &ASRConfig{Recognizer: r, VADType: string(vad.TypeSilero)},
+		recognizer:     r,
+		vadEnabled:     true,
+		segmenter:      seg,
+		silenceTimeout: 10 * time.Millisecond,
+	}
+
+	speechCh := make(chan struct{}, 1)
+	proc.OnSpeechStart(func() {
+		select {
+		case speechCh <- struct{}{}:
+		default:
+		}
+	})
+
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = proc.Stop() }()
+
+	// 客户端宣告 manual：VAD 关闭，没有活跃 turn 的音频被静默丢弃。
+	if err := proc.SetVADEnabled(false); err != nil {
+		t.Fatalf("SetVADEnabled(false) failed: %v", err)
+	}
+	if err := proc.Write(make([]byte, 320)); err != nil {
+		t.Fatalf("manual idle Write failed: %v", err)
+	}
+	if got := r.getSendAudioCount(); got != 0 {
+		t.Fatalf("manual idle write reached the recognizer (%d SendAudio calls)", got)
+	}
+
+	// BeginTurn 之后同样由 manual 通路直送 recognizer。
+	if err := proc.BeginTurn(context.Background()); err != nil {
+		t.Fatalf("BeginTurn failed: %v", err)
+	}
+	if err := proc.Write(make([]byte, 320)); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	if got := r.getSendAudioCount(); got != 1 {
+		t.Fatalf("SendAudio calls = %d, want 1 after BeginTurn", got)
+	}
+	if err := proc.EndTurn(context.Background()); err != nil {
+		t.Fatalf("EndTurn failed: %v", err)
+	}
+
+	// 切回 auto：音频改走 segmenter，语音开始回调触发。
+	if err := proc.SetVADEnabled(true); err != nil {
+		t.Fatalf("SetVADEnabled(true) failed: %v", err)
+	}
+	if err := proc.Write(make([]byte, 320)); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	select {
+	case <-speechCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for speech-start callback after re-enabling VAD")
+	}
+}
+
+// TestASRProcessorSetVADEnabled_BuildFailure：segmenter 建不出来（配置了不
+// 支持的 VAD 类型）时，切到 auto 必须报错，而不是静默把音频吞掉。
+func TestASRProcessorSetVADEnabled_BuildFailure(t *testing.T) {
+	r := newMockRecognizer()
+	proc := &asrProcessor{
+		cfg:        &ASRConfig{Recognizer: r, VADType: "not-a-vad"},
+		recognizer: r,
+	}
+
+	if err := proc.SetVADEnabled(true); err == nil {
+		t.Fatal("expected an error when the VAD segmenter cannot be built")
+	}
+	if err := proc.SetVADEnabled(false); err != nil {
+		t.Fatalf("disabling VAD must stay a no-op, got %v", err)
+	}
+}

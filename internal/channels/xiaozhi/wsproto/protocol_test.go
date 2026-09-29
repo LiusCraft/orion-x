@@ -44,6 +44,39 @@ func TestParseClientMessage_ListenDetectWithText(t *testing.T) {
 	}
 }
 
+func TestParseClientMessage_ListenWithMode(t *testing.T) {
+	data := []byte(`{"type": "listen", "state": "start", "mode": "manual"}`)
+	msg, err := ParseClientMessage(data)
+	if err != nil {
+		t.Fatalf("ParseClientMessage failed: %v", err)
+	}
+	listen, ok := msg.(*ListenMessage)
+	if !ok {
+		t.Fatalf("expected *ListenMessage, got %T", msg)
+	}
+	if listen.State != ListenStart || listen.Mode != ModeManual {
+		t.Errorf("unexpected listen message: %+v", listen)
+	}
+}
+
+func TestNormalizeMode(t *testing.T) {
+	tests := []struct {
+		in   Mode
+		want Mode
+	}{
+		{ModeManual, ModeManual},
+		{ModeAuto, ModeAuto},
+		{ModeRealtime, ModeAuto},
+		{"", ModeAuto},
+		{"banana", ModeAuto},
+	}
+	for _, tc := range tests {
+		if got := NormalizeMode(tc.in); got != tc.want {
+			t.Errorf("NormalizeMode(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestParseClientMessage_Abort(t *testing.T) {
 	data := []byte(`{"type": "abort", "session_id": "s1"}`)
 	msg, err := ParseClientMessage(data)

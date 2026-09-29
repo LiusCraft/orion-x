@@ -59,9 +59,11 @@ xiaozhi-esp32-server 的设计（JSON 控制帧 + 二进制音频帧），但裁
 - `audio_params.play_buffer_duration`：客户端播放缓冲区大小（ms）。值越大，服务端
   在每轮播报开始时可以安全预缓冲更多帧再切换到匀速 pacing，从而降低被感知的延迟。
   省略或 ≤0 使用服务端默认值（3 帧 × frame_duration = 180ms worth）。
-- `mode`：`"auto"`（服务端 VAD 自动判断说话起止）或 `"manual"`（客户端通过
-  `listen start/stop` 明确控制）。省略默认 `"auto"`。**连接生命周期内不可
-  变更**——切换意味着重建整个 `ASRProcessor`，协议上只在首次 hello 生效。
+- `mode`：可选的早期提示，取值 `"auto"` / `"manual"` / `"realtime"`。esp32
+  固件**不在 hello 里带 mode**——它在每条 `listen start` 上宣告（见下文）；
+  这里填了只是给"连接后立刻开始送音频"的客户端提前声明，省略默认 `"auto"`。
+  拾音模式由客户端决定（设备最清楚自己有没有 AEC、是按键还是唤醒词），且
+  可在连接中途随 `listen` 变换，服务端不把它当配置。
 
 服务端响应：
 
@@ -84,18 +86,25 @@ xiaozhi-esp32-server 的设计（JSON 控制帧 + 二进制音频帧），但裁
 不是回显客户端请求的采样率——TTS 固定按 16000Hz 合成（对所有连接一致，
 详见下文"音频编码与采样率"），客户端应按这个值配置播放器。上行方向
 （客户端→服务端）沿用客户端在请求里声明的参数，服务端按需重采样，不强行
-要求客户端改用某个特定采样率。
+要求客户端改用某个特定采样率。响应里的 `mode` 是服务端当前生效的（归一化
+后的）模式，仅供参考，客户端可以不理会。
 
 ### listen（客户端→服务端）
 
 ```json
-{"type": "listen", "state": "start"}
+{"type": "listen", "state": "start", "mode": "manual"}
 {"type": "listen", "state": "stop"}
 {"type": "listen", "state": "detect", "text": "直接注入的文本"}
 ```
 
+- `mode`（仅 `start`）：客户端宣告拾音模式，取值 `"auto"` / `"manual"` /
+  `"realtime"`（esp32 固件就是这么发的；`stop` 不带 `mode`）。省略表示沿用
+  当前模式。它可以在连接中途变化：服务端通过 `ASRProcessor.SetVADEnabled`
+  运行时切换，不重建连接；`realtime` 与未知值一律按 auto 处理（需要服务端
+  AEC 的全双工本仓库未实现，见"Auto / Manual 模式"）。
 - `start`/`stop`：manual 模式下驱动 `ASRProcessor.BeginTurn`/`EndTurn`
   （启动/结束一次 recognizer task）；auto 模式下忽略（VAD 自动管理边界）。
+  start 上宣告的 mode 先落地，再决定这次 start 要不要开 recognizer。
 - `detect`：跳过 ASR，把 `text` 作为一轮新的用户输入直接注入 DAG（`asr`
   节点转发 `MessageTypeData` 类型的 input 消息），同时会经由 `asr→ws_output`
   这条 fan-out 边被当作 `stt` 消息回显给客户端。
@@ -172,8 +181,16 @@ TTS provider（阿里云 DashScope）路径下均能正常工作——`sentence_
 
 ## Auto / Manual 模式
 
-由 `audio.ASRProcessor.EnableVAD` 配置决定（`mode=="auto"` 时为
-`true`）：
+**模式由客户端决定，不是服务端配置**——设备最清楚自己有没有 AEC、是按键
+还是唤醒词；这与 xiaozhi-esp32-server 一致（参考实现也没有 per-agent 的
+拾音模式设置，运行行为只区分 `manual` 与"其它"）。客户端在 `listen start`
+上宣告（esp32 固件），也可以在 hello 里提前声明；服务端用
+`wsproto.NormalizeMode` 把 `realtime` 和未知值归一为 auto，并允许连接中途
+切换。控制台上曾经的"监听模式"配置已移除，`audio.in_pipe` 只保留 VAD 调参
+（阈值/最小静音/语音填充），在 auto 下生效。
+
+服务端侧由 `audio.ASRProcessor` 的 VAD 开关实现（`SetVADEnabled`，运行时
+可切）：
 
 - **auto**：Silero VAD 自动检测语音起止，`Write()` 内部走
   `processVAD`，识别到语音开始触发 `OnSpeechStart`（转为 Interrupt），
@@ -185,6 +202,9 @@ TTS provider（阿里云 DashScope）路径下均能正常工作——`sentence_
   DashScope `Recognizer.Start()` 在连接存活时只发新 `run-task`，不重建
   连接）。没有活跃轮次时收到的音频帧会被 `Write()` 静默丢弃，不会报错
   导致 `ASRStage.readFromSource` 循环提前退出。
+- **realtime**（固件在开启 AEC 时宣告）：需要服务端 AEC/全双工下行的实时
+  打断，本服务端未实现，归一为 auto；设备上行保持打开，VAD 仍能切分轮次，
+  只是没有服务端回声消除。
 
 ## 音频编码与采样率
 

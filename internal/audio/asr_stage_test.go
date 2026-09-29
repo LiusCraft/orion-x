@@ -44,6 +44,8 @@ func (m *mockASRProcessor) Stop() error { return nil }
 func (m *mockASRProcessor) BeginTurn(_ context.Context) error { return nil }
 func (m *mockASRProcessor) EndTurn(_ context.Context) error   { return nil }
 
+func (m *mockASRProcessor) SetVADEnabled(_ bool) error { return nil }
+
 func (m *mockASRProcessor) emitResult(r ASRResult) {
 	m.mu.Lock()
 	fn := m.onResult

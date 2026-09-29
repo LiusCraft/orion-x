@@ -21,13 +21,14 @@ const WS_URL =
 
 export default function QuickChat({
   agentId,
-  vadMode,
   onBeforeConnect,
 }: {
   agentId: string;
-  vadMode: string;
   onBeforeConnect?: () => Promise<boolean>;
 }) {
+  // 拾音模式由客户端自己决定（对应 wsproto 的 Mode）：自动 = 持续送音频交给
+  // 服务端 VAD 切分；手动 = 按住按钮的一轮，用 listen start/stop 界定。
+  const [mode, setMode] = useState<"auto" | "manual">("auto");
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [text, setText] = useState("");
   const [connected, setConnected] = useState(false);
@@ -44,7 +45,7 @@ export default function QuickChat({
   const streamRef = useRef<MediaStream | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
 
-  const isAutoMode = vadMode !== "manual";
+  const isAutoMode = mode === "auto";
 
   const scrollToBottom = () => {
     if (chatRef.current)
@@ -257,7 +258,7 @@ export default function QuickChat({
   const handlePTTDown = useCallback(() => {
     if (pttRef.current || !wsRef.current) return;
     pttRef.current = true;
-    send({ type: "listen", state: "start" });
+    send({ type: "listen", state: "start", mode: "manual" });
     startMic();
   }, [send, startMic]);
 
@@ -293,16 +294,37 @@ export default function QuickChat({
             </span>
           )}
         </div>
-        {connected && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={disconnect}
-            className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 h-7 px-3 text-xs"
+        <div className="flex items-center gap-2">
+          <div
+            className={`flex rounded-lg border border-zinc-800 overflow-hidden ${connected ? "opacity-50" : ""}`}
+            title="拾音模式（连接前选择）：自动 = 持续监听交给服务端 VAD；按住说话 = 手动按键录音"
           >
-            断开
-          </Button>
-        )}
+            {(["auto", "manual"] as const).map((m) => (
+              <button
+                key={m}
+                disabled={connected}
+                onClick={() => setMode(m)}
+                className={`h-7 px-2.5 text-xs transition-colors ${
+                  mode === m
+                    ? "bg-violet-600/20 text-violet-300"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {m === "auto" ? "自动" : "按住说话"}
+              </button>
+            ))}
+          </div>
+          {connected && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={disconnect}
+              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 h-7 px-3 text-xs"
+            >
+              断开
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Chat area */}
@@ -343,6 +365,13 @@ export default function QuickChat({
             <p className="text-zinc-400 text-sm">
               {connecting ? "正在保存并连接..." : connectionError || "连接后开始体验"}
             </p>
+            {!connecting && !connectionError && (
+              <p className="text-[11px] text-zinc-600">
+                {isAutoMode
+                  ? "自动模式：连接后直接说话即可"
+                  : "按住说话模式：连接后按住按钮录音"}
+              </p>
+            )}
             {!connecting && (
               <Button
                 onClick={connect}

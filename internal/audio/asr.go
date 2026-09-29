@@ -70,6 +70,13 @@ type ASRProcessor interface {
 	// recognizer to finalize and deliver its result via OnResult. No-op
 	// when EnableVAD=true or when there is no active turn.
 	EndTurn(ctx context.Context) error
+	// SetVADEnabled switches between VAD-driven and manual-turn behavior at
+	// runtime. The client owns its listening mode and may announce it after
+	// the processor was created (see internal/channels/xiaozhi), so this
+	// can't be fixed at construction time. Enabling builds the VAD segmenter
+	// lazily; disabling drops pending VAD state. No-op when already in the
+	// requested state.
+	SetVADEnabled(enabled bool) error
 }
 
 // NewASRProcessor creates an ASRProcessor. cfg.Recognizer must not be nil.
@@ -117,15 +124,9 @@ func newASRProcessor(cfg *ASRConfig) (*asrProcessor, error) {
 	}
 
 	var seg vad.Segmenter
-	var err error
-	if cfg.EnableVAD && cfg.VADType == string(vad.TypeSilero) {
-		seg, err = vad.NewSegmenterWithConfig(vad.SegmenterConfig{
-			SampleRate:   InternalSampleRate,
-			Threshold:    cfg.VADThreshold,
-			MinSilenceMs: cfg.VADMinSilenceMs,
-			SpeechPadMs:  cfg.VADSpeechPadMs,
-			ModelPath:    cfg.VADModelPath,
-		})
+	if cfg.EnableVAD {
+		var err error
+		seg, err = newVADSegmenter(cfg)
 		if err != nil {
 			logging.Warnf("ASRProcessor: failed to create VAD segmenter: %v, VAD disabled", err)
 		}
@@ -139,6 +140,25 @@ func newASRProcessor(cfg *ASRConfig) (*asrProcessor, error) {
 		vadResetDur:    time.Duration(cfg.VADMinSilenceMs*16) * time.Millisecond,
 		silenceTimeout: time.Duration(150) * time.Millisecond,
 	}, nil
+}
+
+// newVADSegmenter builds the VAD segmenter configured by cfg. Only Silero is
+// implemented; an empty type defaults to it (see DefaultASRConfig).
+func newVADSegmenter(cfg *ASRConfig) (vad.Segmenter, error) {
+	vadType := cfg.VADType
+	if vadType == "" {
+		vadType = string(vad.TypeSilero)
+	}
+	if vadType != string(vad.TypeSilero) {
+		return nil, fmt.Errorf("unsupported VAD type %q", vadType)
+	}
+	return vad.NewSegmenterWithConfig(vad.SegmenterConfig{
+		SampleRate:   InternalSampleRate,
+		Threshold:    cfg.VADThreshold,
+		MinSilenceMs: cfg.VADMinSilenceMs,
+		SpeechPadMs:  cfg.VADSpeechPadMs,
+		ModelPath:    cfg.VADModelPath,
+	})
 }
 
 func (p *asrProcessor) OnResult(fn func(ASRResult)) {
@@ -164,35 +184,24 @@ func (p *asrProcessor) Start(ctx context.Context) error {
 	p.ctx, p.cancel = context.WithCancel(ctx)
 
 	if !p.vadEnabled {
-		// manual 模式：这里只注册结果回调，不立即启动 recognizer task——
-		// task 的生命周期由 BeginTurn/EndTurn 按 listen start/stop 驱动，
-		// 避免在没有活跃 listen 窗口时空占后端资源。
-		p.recognizer.OnResult(func(result asr.Result) {
-			logging.Infof("ASRProcessor: result received (final=%v, text_len=%d, usage_duration=%s, begin_ms=%d, end_ms=%s)",
-				result.IsFinal,
-				len([]rune(result.Text)),
-				formatOptionalInt(result.UsageDuration),
-				result.BeginTimeMs,
-				formatOptionalInt64(result.EndTimeMs),
-			)
-			p.mu.Lock()
-			fn := p.onResult
-			p.mu.Unlock()
-			if fn != nil {
-				fn(ASRResult{Text: result.Text, IsFinal: result.IsFinal})
-			}
-		})
-	} else {
-		p.asrStartCh = make(chan struct{}, 1)
-		p.asrFrameCh = make(chan []byte, 128) // ~3.8s buffer at 30ms/frame
-		p.asrFinishCh = make(chan struct{}, 1)
-		p.speechCh = make(chan struct{}, 1)
-		p.asrWG.Add(1)
-		go func() {
-			defer p.asrWG.Done()
-			p.runASRLoop(p.ctx)
-		}()
+		// manual 模式：不启动 recognizer task，只注册裸结果转发——task 的
+		// 生命周期由 BeginTurn/EndTurn 按 listen start/stop 驱动，避免在
+		// 没有活跃 listen 窗口时空占后端资源。
+		p.registerResultForwarder()
 	}
+
+	// VAD worker 无论当前模式都启动：客户端可能在连接中途宣告切到 auto
+	// （SetVADEnabled），VAD 通路必须已经就绪；空闲时它只阻塞在 asrStartCh
+	// 上，没有额外开销。
+	p.asrStartCh = make(chan struct{}, 1)
+	p.asrFrameCh = make(chan []byte, 128) // ~3.8s buffer at 30ms/frame
+	p.asrFinishCh = make(chan struct{}, 1)
+	p.speechCh = make(chan struct{}, 1)
+	p.asrWG.Add(1)
+	go func() {
+		defer p.asrWG.Done()
+		p.runASRLoop(p.ctx)
+	}()
 
 	p.started = true
 	p.lastActive = time.Now()
@@ -216,43 +225,37 @@ func (p *asrProcessor) Stop() error {
 
 	logging.Infof("ASRProcessor: stopping...")
 
-	if vadEnabled {
-		if segmenter != nil {
-			if seg := segmenter.Flush(); seg != nil && seg.Bytes > 0 {
-				p.recognizer.OnResult(func(result asr.Result) {
-					if result.IsFinal && result.Text != "" {
-						p.emitResult(result.Text, asrSecondsOf([]asr.Result{result}))
-					}
-				})
-				if err := p.recognizer.Start(ctx); err == nil {
-					for _, frame := range seg.Frames {
-						if len(frame) > 0 {
-							_ = p.recognizer.SendAudio(ctx, frame)
-						}
-					}
-					_ = p.recognizer.Finish(ctx)
+	// VAD 模式下 segmenter 里可能还压着一段没切完的语音，先同步 flush 出来，
+	// 否则会随 ctx 一起被丢掉。manual 模式没有这条通路。
+	if vadEnabled && segmenter != nil {
+		if seg := segmenter.Flush(); seg != nil && seg.Bytes > 0 {
+			p.recognizer.OnResult(func(result asr.Result) {
+				if result.IsFinal && result.Text != "" {
+					p.emitResult(result.Text, asrSecondsOf([]asr.Result{result}))
 				}
+			})
+			if err := p.recognizer.Start(ctx); err == nil {
+				for _, frame := range seg.Frames {
+					if len(frame) > 0 {
+						_ = p.recognizer.SendAudio(ctx, frame)
+					}
+				}
+				_ = p.recognizer.Finish(ctx)
 			}
-		}
-		if cancel != nil {
-			cancel()
-		}
-		p.asrWG.Wait()
-		if recognizer != nil {
-			_ = recognizer.Close()
-		}
-	} else {
-		if cancel != nil {
-			cancel()
-		}
-		if recognizer != nil {
-			if manualTurnActive {
-				_ = recognizer.Finish(ctx)
-			}
-			_ = recognizer.Close()
 		}
 	}
 
+	if cancel != nil {
+		cancel()
+	}
+	p.asrWG.Wait()
+
+	if recognizer != nil {
+		if !vadEnabled && manualTurnActive {
+			_ = recognizer.Finish(ctx)
+		}
+		_ = recognizer.Close()
+	}
 	if segmenter != nil {
 		_ = segmenter.Close()
 	}
@@ -315,6 +318,10 @@ func (p *asrProcessor) BeginTurn(ctx context.Context) error {
 		_ = p.recognizer.Finish(ctx)
 	}
 
+	// 每次开新 turn 都重挂裸转发回调：模式可能在连接中途切换，VAD 会话结束
+	// 后留下的聚合回调不能把 manual turn 的结果吞掉。
+	p.registerResultForwarder()
+
 	if err := p.recognizer.Start(ctx); err != nil {
 		return fmt.Errorf("ASRProcessor: begin turn: %w", err)
 	}
@@ -347,6 +354,101 @@ func (p *asrProcessor) EndTurn(ctx context.Context) error {
 	p.manualTurnActive = false
 	p.mu.Unlock()
 	return nil
+}
+
+// SetVADEnabled switches the processor between VAD-driven and manual-turn
+// behavior at runtime. The client owns its listening mode (the xiaozhi
+// protocol announces it on listen messages, which can arrive after the
+// processor was created), so this is not a construction-time decision.
+func (p *asrProcessor) SetVADEnabled(enabled bool) error {
+	p.mu.Lock()
+	if !enabled {
+		wasEnabled := p.vadEnabled
+		segmenter := p.segmenter
+		p.vadEnabled = false
+		p.mu.Unlock()
+		if wasEnabled {
+			p.resetVADState(segmenter)
+		}
+		return nil
+	}
+
+	if p.vadEnabled && p.segmenter != nil {
+		p.mu.Unlock()
+		return nil
+	}
+	segmenter := p.segmenter
+	if segmenter == nil {
+		var err error
+		if segmenter, err = newVADSegmenter(p.cfg); err != nil {
+			p.mu.Unlock()
+			return fmt.Errorf("ASRProcessor: enable VAD: %w", err)
+		}
+		p.segmenter = segmenter
+	}
+	recognizer := p.recognizer
+	ctx := p.ctx
+	turnActive := p.manualTurnActive
+	p.vadEnabled = true
+	p.manualTurnActive = false
+	p.mu.Unlock()
+
+	// 收尾可能还开着的 manual turn：否则 recognizer 停在旧 task 上，第一个
+	// VAD 会话的 Start 会撞上 "already started"。
+	if turnActive && recognizer != nil && ctx != nil {
+		_ = recognizer.Finish(ctx)
+	}
+	return nil
+}
+
+// resetVADState 丢弃 VAD 通路上的半截状态：segmenter 的 RNN/预语音缓冲，以及
+// 尚未被 ASR 会话消费的 start/frame/finish 信号。切换模式时用——旧模式的残留
+// 信号会让下一个会话凭空启动，或永远等不到切段。
+func (p *asrProcessor) resetVADState(segmenter vad.Segmenter) {
+	if segmenter != nil {
+		segmenter.Reset()
+	}
+	purgeSignal(p.asrStartCh)
+	purgeSignal(p.asrFrameCh)
+	purgeSignal(p.asrFinishCh)
+	p.speechMu.Lock()
+	p.inSpeech = false
+	p.speechStart = time.Time{}
+	p.speechMu.Unlock()
+}
+
+// purgeSignal 非阻塞地清空信号 channel 里的残留。
+func purgeSignal[T any](ch chan T) {
+	if ch == nil {
+		return
+	}
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+// registerResultForwarder 给 recognizer 挂裸结果转发：manual turn 用它，
+// VAD 模式不用——每个 VAD 会话在 runOneSession 里注册自己的聚合回调。
+func (p *asrProcessor) registerResultForwarder() {
+	p.recognizer.OnResult(func(result asr.Result) {
+		logging.Infof("ASRProcessor: result received (final=%v, text_len=%d, usage_duration=%s, begin_ms=%d, end_ms=%s)",
+			result.IsFinal,
+			len([]rune(result.Text)),
+			formatOptionalInt(result.UsageDuration),
+			result.BeginTimeMs,
+			formatOptionalInt64(result.EndTimeMs),
+		)
+		p.mu.Lock()
+		fn := p.onResult
+		p.mu.Unlock()
+		if fn != nil {
+			fn(ASRResult{Text: result.Text, IsFinal: result.IsFinal})
+		}
+	})
 }
 
 func (p *asrProcessor) processVAD(ctx context.Context, audio []byte) {

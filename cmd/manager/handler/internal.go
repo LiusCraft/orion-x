@@ -143,11 +143,9 @@ func (h *InternalHandler) assembleConfig(ac AgentConfig, voicebotID string) (*co
 		}
 	}
 
-	vadMode := ac.ASR.VADMode
-	if vadMode == "" {
-		vadMode = "auto"
-	}
-	full.Audio.InPipe.EnableVAD = vadMode != "manual"
+	// 拾音模式（auto/manual）由客户端在 listen 消息里决定（见
+	// internal/channels/xiaozhi 的 applyAnnouncedMode），控制面不再下发；
+	// 这里只透传服务端 VAD 调参。
 	if ac.ASR.VADThreshold > 0 {
 		full.Audio.InPipe.VADThreshold = ac.ASR.VADThreshold
 	}

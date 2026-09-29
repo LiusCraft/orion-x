@@ -20,7 +20,6 @@ type AgentConfig struct {
 
 type ASRAgentConfig struct {
 	ModelID         string  `json:"model_id"`
-	VADMode         string  `json:"vad_mode"`
 	VADThreshold    float64 `json:"vad_threshold"`
 	VADMinSilenceMs int     `json:"vad_min_silence_ms"`
 	VADSpeechPadMs  int     `json:"vad_speech_pad_ms"`
