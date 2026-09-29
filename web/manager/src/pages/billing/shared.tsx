@@ -240,13 +240,17 @@ export function Pill({
 	tone = "zinc",
 	children,
 	className,
+	title,
 }: {
 	tone?: keyof typeof PILL_TONES;
 	children: ReactNode;
 	className?: string;
+	/** 悬浮提示：诸如被压缩成展示名的内部 ID，方便排查时照抄。 */
+	title?: string;
 }) {
 	return (
 		<span
+			title={title}
 			className={cn(
 				"inline-flex items-center text-[11px] px-1.5 py-0.5 rounded border whitespace-nowrap",
 				PILL_TONES[tone],

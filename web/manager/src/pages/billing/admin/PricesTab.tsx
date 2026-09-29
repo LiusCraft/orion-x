@@ -1,12 +1,15 @@
-// 计费管理 · 价格版本：列表（含未生效）+ 新建 + 停用 + 删除。
+// 计费管理 · 价格版本：列表（含未生效）+ 新建 + 编辑 + 调价 + 停用 + 删除。
 //
 // 价格表上没有 enabled 开关，生不生效只由 effective_from / effective_to 决定（§3.2），
-// 所以管理动作只有两个：
+// 所以管理动作都绕着「版本」转：
+//   - 还没生效的版本要改 → 直接编辑（它从没匹配过用量，改单价 / 生效时间都安全）；
+//   - 还没生效的版本要取消 → 删除（也没被任何流水引用）；
 //   - 已经生效的版本要停用 → 把 effective_to 收到当前时刻（不删行，历史账单还指着它）；
-//   - 还没生效的版本要取消 → 直接删（它从没匹配过用量，也没被任何流水引用）。
+//   - 已经生效的版本要调价 → 「调价」= 以它为新版模板 + 旧版同刻停用，一步完成。
+//     不原地改价：按事件发生时刻匹配价格的机制下，原地改会改写整个生效窗口。
 
-import { useEffect, useState } from "react";
-import { Ban, Plus, RefreshCw, Tag, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Ban, Pencil, Plus, RefreshCw, Tag, TrendingUp, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SimpleSelect } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -31,9 +34,16 @@ import {
 	resourceTypeLabel,
 	roundingLabel,
 	scopeLabel,
+	scopeTitle,
 	subjectTypeLabel,
 } from "@/lib/billing";
-import { PriceCreateDialog } from "./PriceCreateDialog";
+import {
+	EMPTY_RESOURCE_LISTS,
+	loadBillingResourceLists,
+	resourceNameIndex,
+	type BillingResourceLists,
+} from "@/lib/billingResources";
+import { PriceDialog } from "./PriceDialog";
 import {
 	Banner,
 	EmptyState,
@@ -52,15 +62,22 @@ import {
 
 const PAGE_SIZE = 20;
 
+/** 打开哪个对话框：新建，或者对某版价格编辑 / 调价。 */
+type PriceDialogState =
+	| { mode: "create" }
+	| { mode: "edit" | "adjust"; price: BillingPrice };
+
 export default function PricesTab() {
 	const [prices, setPrices] = useState<BillingPrice[]>([]);
 	const [items, setItems] = useState<BillingItem[]>([]);
 	const [accounts, setAccounts] = useState<BillingAccount[]>([]);
+	const [resources, setResources] =
+		useState<BillingResourceLists>(EMPTY_RESOURCE_LISTS);
 	const [loading, setLoading] = useState(true);
 	const [disabled, setDisabled] = useState(false);
 	const [banner, setBanner] = useState<BannerMessage | null>(null);
 	const [busyId, setBusyId] = useState<string | null>(null);
-	const [creating, setCreating] = useState(false);
+	const [dialog, setDialog] = useState<PriceDialogState | null>(null);
 
 	const [itemCode, setItemCode] = useState("");
 	const [resourceType, setResourceType] = useState("");
@@ -91,6 +108,17 @@ export default function PricesTab() {
 					});
 				}
 			});
+		return () => {
+			cancelled = true;
+		};
+	}, [reloadKey]);
+
+	// 资源名称只影响展示，不阻断页面：三个列表各自容错，失败的那类在文案里说明。
+	useEffect(() => {
+		let cancelled = false;
+		loadBillingResourceLists().then((lists) => {
+			if (!cancelled) setResources(lists);
+		});
 		return () => {
 			cancelled = true;
 		};
@@ -134,9 +162,18 @@ export default function PricesTab() {
 		};
 	}, [itemCode, resourceType, scope, accountId, activeOnly, page, reloadKey]);
 
+	const names = useMemo(() => resourceNameIndex(resources), [resources]);
+
+	/** 对话框成功收工：关掉、报信、重拉列表（价格行变了，统计也要重算）。 */
+	const finishDialog = (message: string, kind: "ok" | "error" = "ok") => {
+		setDialog(null);
+		setBanner({ kind, text: message });
+		setReloadKey((key) => key + 1);
+	};
+
 	const deactivate = async (price: BillingPrice) => {
 		const ok = window.confirm(
-			`停用「${itemLabel(price.item_code)}」的这版价格（${scopeLabel(price)}）？\n\n` +
+			`停用「${itemLabel(price.item_code)}」的这版价格（${scopeLabel(price, names)}）？\n\n` +
 				"停用会把 effective_to 收到当前时刻，之后不再匹配新的用量事件；\n" +
 				"已经产生的历史账单不受影响——结算按事件发生时刻的价格走，历史账单永不因调价而变动。",
 		);
@@ -161,7 +198,7 @@ export default function PricesTab() {
 
 	const remove = async (price: BillingPrice) => {
 		const ok = window.confirm(
-			`删除这版还没生效的价格（${scopeLabel(price)}，${formatDate(price.effective_from)} 起生效）？\n\n` +
+			`删除这版还没生效的价格（${scopeLabel(price, names)}，${formatDate(price.effective_from)} 起生效）？\n\n` +
 				"它从来没有匹配过任何用量事件，也没有被任何流水引用，删除后不可恢复。",
 		);
 		if (!ok) return;
@@ -288,7 +325,7 @@ export default function PricesTab() {
 						刷新
 					</button>
 					<Button
-						onClick={() => setCreating(true)}
+						onClick={() => setDialog({ mode: "create" })}
 						disabled={items.length === 0}
 						className="h-7 px-2.5 text-xs bg-violet-600 hover:bg-violet-500 text-white gap-1"
 					>
@@ -301,8 +338,16 @@ export default function PricesTab() {
 			<Hint tone="zinc" icon={Tag}>
 				改价 = 新增一版 effective_from 更晚的价格，不覆盖历史。同一 scope
 				（计费项 + 账户 + 资源粒度）同一时刻只能有一版价格，命中优先级是
-				账户协议价 → 音色 → 模型 → 厂商 → 计费项兜底。
+				账户协议价 → 音色 → 模型 → 厂商 → 计费项兜底。未生效的版本可以直接编辑；
+				已生效的版本用「调价」一键新增一版并停用旧版。
 			</Hint>
+
+			{resources.missing.length > 0 && (
+				<Hint tone="zinc" icon={Tag}>
+					{resources.missing.map(resourceTypeLabel).join(" / ")}
+					列表没加载出来，这些价格的适用范围暂时显示内部 ID；刷新页面可重试。
+				</Hint>
+			)}
 
 			<Panel
 				title="价格版本"
@@ -352,11 +397,10 @@ export default function PricesTab() {
 									<Td>
 										<div className="flex flex-col gap-0.5">
 											<Pill
-												tone={
-													price.account_id ? "violet" : "zinc"
-												}
+												tone={price.account_id ? "violet" : "zinc"}
+												title={scopeTitle(price, names)}
 											>
-												{scopeLabel(price)}
+												{scopeLabel(price, names)}
 											</Pill>
 											{price.tiers && price.tiers.length > 0 && (
 												<span className="text-[11px] text-zinc-500">
@@ -422,6 +466,21 @@ export default function PricesTab() {
 										<div className="flex items-center justify-end gap-1.5">
 											{effective && (
 												<button
+													onClick={() =>
+														setDialog({ mode: "adjust", price })
+													}
+													disabled={busy}
+													className="inline-flex items-center gap-1 h-7 px-2 text-[11px] rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+												>
+													<TrendingUp
+														className="w-3 h-3"
+														strokeWidth={1.5}
+													/>
+													调价
+												</button>
+											)}
+											{effective && (
+												<button
 													onClick={() => deactivate(price)}
 													disabled={busy}
 													className="inline-flex items-center gap-1 h-7 px-2 text-[11px] rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
@@ -431,6 +490,21 @@ export default function PricesTab() {
 														strokeWidth={1.5}
 													/>
 													停用
+												</button>
+											)}
+											{pending && (
+												<button
+													onClick={() =>
+														setDialog({ mode: "edit", price })
+													}
+													disabled={busy}
+													className="inline-flex items-center gap-1 h-7 px-2 text-[11px] rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+												>
+													<Pencil
+														className="w-3 h-3"
+														strokeWidth={1.5}
+													/>
+													编辑
 												</button>
 											)}
 											{pending && (
@@ -468,15 +542,23 @@ export default function PricesTab() {
 				onPageChange={setPage}
 			/>
 
-			{creating && (
-				<PriceCreateDialog
+			{dialog?.mode === "create" && (
+				<PriceDialog
+					mode="create"
 					items={items}
-					onClose={() => setCreating(false)}
-					onDone={(message) => {
-						setCreating(false);
-						setBanner({ kind: "ok", text: message });
-						setReloadKey((key) => key + 1);
-					}}
+					resources={resources}
+					onClose={() => setDialog(null)}
+					onDone={finishDialog}
+				/>
+			)}
+			{dialog && dialog.mode !== "create" && (
+				<PriceDialog
+					mode={dialog.mode}
+					price={dialog.price}
+					items={items}
+					resources={resources}
+					onClose={() => setDialog(null)}
+					onDone={finishDialog}
 				/>
 			)}
 		</div>

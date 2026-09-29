@@ -3,6 +3,10 @@
 // 只公示平台标准价（当前生效的那一版）——账户协议价是别人和平台的约定，不外露。
 // 接口是 GET /api/billing/prices（§8），503 = 计费未启用，走空态而不是报错。
 //
+// 「适用范围」显示资源名而不是内部 ID：名字从 /api/models、/api/providers、
+// /api/voices 现成列表解析（lib/billingResources.ts），解析不到（看不到的资源 /
+// 列表加载失败）就回落到 ID。价格都是 item 级时不去拉这几个列表。
+//
 // 底部的口径说明只提炼自 docs/billing-design.md §3.3（金额与舍入）与 §13（quantity
 // 数的是什么），没有写进文档的规则不要往这里加。
 
@@ -27,6 +31,12 @@ import {
 	scopeLabel,
 } from "@/lib/billing";
 import {
+	EMPTY_RESOURCE_LISTS,
+	loadBillingResourceLists,
+	resourceNameIndex,
+	type BillingResourceLists,
+} from "@/lib/billingResources";
+import {
 	EmptyState,
 	LoadingBlock,
 	Panel,
@@ -44,6 +54,8 @@ export default function PricesPage() {
 	useDocumentTitle("价格公示");
 
 	const [prices, setPrices] = useState<BillingPrice[]>([]);
+	const [resources, setResources] =
+		useState<BillingResourceLists>(EMPTY_RESOURCE_LISTS);
 	const [loading, setLoading] = useState(true);
 	const [disabled, setDisabled] = useState(false);
 	const [error, setError] = useState("");
@@ -52,10 +64,13 @@ export default function PricesPage() {
 		let cancelled = false;
 		setLoading(true);
 		billingApi
-			.prices()
+			// 同一个路径在服务端按 is_admin 分流：管理员拿到的是「全部版本 + 账户协议价」那个
+			// 列表，所以这里显式要 active_only 并带上分页上限；普通用户这一支本来就只回
+			// 当前生效的平台标准价，参数被忽略。协议价再在下面逐行滤掉。
+			.prices({ active_only: "1", page: 1, page_size: 100 })
 			.then(({ data }) => {
 				if (cancelled) return;
-				setPrices(data.items);
+				setPrices(data.items.filter((price) => price.account_id === ""));
 				setDisabled(false);
 				setError("");
 			})
@@ -74,6 +89,20 @@ export default function PricesPage() {
 			cancelled = true;
 		};
 	}, []);
+
+	// 资源名只在公示里有非 item 级价格时才去解析：全是兜底价就不多发四个请求。
+	useEffect(() => {
+		if (!prices.some((price) => price.resource_type !== "item")) return;
+		let cancelled = false;
+		loadBillingResourceLists().then((lists) => {
+			if (!cancelled) setResources(lists);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [prices]);
+
+	const names = useMemo(() => resourceNameIndex(resources), [resources]);
 
 	const groups = useMemo(() => {
 		const byMeter = new Map<string, BillingPrice[]>();
@@ -176,7 +205,7 @@ export default function PricesPage() {
 											</Td>
 											<Td>
 												<Pill tone="zinc">
-													{scopeLabel(price)}
+													{scopeLabel(price, names)}
 												</Pill>
 											</Td>
 											<Td className="text-right whitespace-nowrap">

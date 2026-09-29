@@ -1,9 +1,21 @@
-// 「新建价格」dialog。
+// 「价格」dialog：新建 / 编辑未生效版本 / 调价（对已生效版本新增一版）。
 //
 // 价格是版本化的运营数据：改价 = 新增一条 effective_from 更晚的版本，不覆盖历史
-// （§3.2）。录入时最容易错的是微单位——单价必须是整数微元（int64），所以表单里不
-// 让人直接填 micro，而是填「每 N 个 unit 收 X 元」两个框，前端算成
-// unit_price_micro / unit_size：精度不够就抬 unit_size，而不是把单价舍成 0。
+// （§3.2）。三种模式共用一个表单，差别只在提交动作：
+//   - create：新建一版，计费项与资源粒度可改；
+//   - edit：改一版还没生效的价格。它没有被任何用量事件匹配过，改单价 / 单位 / 起步价 /
+//     舍入 / 生效时间都是安全的（服务端 PUT 只认这几个字段）；
+//   - adjust：已生效的版本不原地改价——按事件发生时刻匹配价格的机制下，原地改会改写
+//     整个生效窗口（含已记录未结算的用量）。调价 = 以它为模板新增一版，再把旧版本的
+//     effective_to 收到新版本生效时刻，一次点击完成。
+//
+// 录入时最容易错的是微单位——单价必须是整数微元（int64），所以表单里不让人直接填
+// micro，而是填「每 N 个 unit 收 X 元」两个框，前端算成 unit_price_micro / unit_size：
+// 精度不够就抬 unit_size，而不是把单价舍成 0。
+//
+// 资源维度优先用下拉（按粒度列出模型 / 厂商 / 音色，提交的是内部 ID），下拉里没有
+// （别的用户的资源、列表加载失败）就切「手动填 ID」兜底——手抄 UUID 写错的后果是不
+// 报错、永远匹配不上，所以能不手抄就不手抄。
 //
 // 阶梯的不变量在服务端校验（up_to 严格递增、只有最后一档可为空），这里先拦一道。
 
@@ -23,6 +35,7 @@ import { SimpleSelect } from "@/components/ui/select";
 import {
 	billingAdminApi,
 	type BillingItem,
+	type BillingPrice,
 	type BillingPriceCreate,
 	type BillingResourceType,
 	type BillingRounding,
@@ -31,16 +44,25 @@ import {
 import {
 	billingErrorMessage,
 	chargeModeLabel,
+	formatDate,
 	formatUnitPrice,
 	itemLabel,
 	meterSourceLabel,
+	microToYuan,
+	resourceName,
 	resourceTypeLabel,
 	roundingLabel,
+	scopeLabel,
 	toDateTimeLocalValue,
 	toRFC3339,
 	unitLabel,
 	yuanToMicro,
 } from "@/lib/billing";
+import {
+	resourceNameIndex,
+	resourceOptions,
+	type BillingResourceLists,
+} from "@/lib/billingResources";
 
 /** 各单位的默认计价基数：token 按百万、字符按千，其余按 1（每 1 个单位）。 */
 const DEFAULT_UNIT_SIZE: Record<string, string> = {
@@ -59,40 +81,69 @@ interface TierDraft {
 
 const emptyTier = (): TierDraft => ({ upTo: "", amount: "" });
 
-export function PriceCreateDialog({
-	items,
-	onClose,
-	onDone,
-}: {
+/** 把一版已有价格的阶梯摊回表单：上限 0 是「不封顶」，单价从微元无损换算成元。 */
+function draftTiers(price?: BillingPrice): TierDraft[] {
+	if (!price || !price.tiers) return [];
+	return price.tiers.map((tier) => ({
+		upTo: tier.up_to > 0 ? String(tier.up_to) : "",
+		amount: microToYuan(tier.unit_price_micro),
+	}));
+}
+
+export type PriceDialogMode = "create" | "edit" | "adjust";
+
+interface PriceDialogBaseProps {
 	items: BillingItem[];
+	resources: BillingResourceLists;
 	onClose: () => void;
-	onDone: (message: string) => void;
-}) {
-	const [itemCode, setItemCode] = useState(items[0]?.code ?? "");
+	/** 成功后关掉对话框；调价的「新版本建好、旧版本没停成」用 kind=error 报出来。 */
+	onDone: (message: string, kind?: "ok" | "error") => void;
+}
+
+export type PriceDialogProps =
+	| (PriceDialogBaseProps & { mode: "create"; price?: undefined })
+	| (PriceDialogBaseProps & { mode: "edit" | "adjust"; price: BillingPrice });
+
+export function PriceDialog(props: PriceDialogProps) {
+	const { items, resources, mode, onClose, onDone } = props;
+	const price = props.price;
+	const editing = mode !== "create";
+
+	const names = useMemo(() => resourceNameIndex(resources), [resources]);
+
+	const [itemCode, setItemCode] = useState(price?.item_code ?? items[0]?.code ?? "");
 	const [unitSize, setUnitSize] = useState(
-		DEFAULT_UNIT_SIZE[items[0]?.unit ?? ""] ?? "1",
+		price ? String(price.unit_size) : (DEFAULT_UNIT_SIZE[items[0]?.unit ?? ""] ?? "1"),
 	);
-	const [amount, setAmount] = useState("");
-	const [rounding, setRounding] = useState<BillingRounding>("none");
-	const [minCharge, setMinCharge] = useState("");
-	const [currency, setCurrency] = useState("CNY");
-	const [resourceType, setResourceType] = useState<BillingResourceType>("item");
-	const [resourceId, setResourceId] = useState("");
+	const [amount, setAmount] = useState(price ? microToYuan(price.unit_price_micro) : "");
+	const [rounding, setRounding] = useState<BillingRounding>(price?.rounding ?? "none");
+	const [minCharge, setMinCharge] = useState(
+		price && price.min_charge_micro > 0 ? microToYuan(price.min_charge_micro) : "",
+	);
+	const [currency, setCurrency] = useState(price?.currency ?? "CNY");
+	const [resourceType, setResourceType] = useState<BillingResourceType>(
+		price?.resource_type ?? "item",
+	);
+	const [resourceId, setResourceId] = useState(price?.resource_id ?? "");
+	const [manualResource, setManualResource] = useState(false);
 	const [effectiveFrom, setEffectiveFrom] = useState(
-		toDateTimeLocalValue(new Date()),
+		toDateTimeLocalValue(
+			mode === "edit" && price ? new Date(price.effective_from) : new Date(),
+		),
 	);
-	const [tiers, setTiers] = useState<TierDraft[]>([]);
+	const [tiers, setTiers] = useState<TierDraft[]>(() => draftTiers(price));
 	const [saving, setSaving] = useState(false);
 	const [formError, setFormError] = useState("");
 
 	const item = items.find((candidate) => candidate.code === itemCode);
 
-	// 切换计费项时把依赖计费项的默认值重置：单位基数与默认舍入口径（duration → ceil）。
+	// 新建时切换计费项才重置依赖计费项的默认值：单位基数与默认舍入口径（duration → ceil）。
+	// 编辑 / 调价沿用这一版自己的值，不能被默认值覆盖。
 	useEffect(() => {
-		if (!item) return;
+		if (mode !== "create" || !item) return;
 		setUnitSize(DEFAULT_UNIT_SIZE[item.unit] ?? "1");
 		setRounding(item.charge_mode === "duration" ? "ceil" : "none");
-	}, [item]);
+	}, [mode, item]);
 
 	// 列表拉取失败或目录为空时都能走到这里：没有计费项就录不了价
 	const itemsError =
@@ -149,6 +200,20 @@ export function PriceCreateDialog({
 					unit_size: unitSizeValue,
 				};
 
+	const options = useMemo(() => {
+		const list = resourceOptions(resourceType, resources);
+		// 当前值不在列表里（别的用户的资源 / 列表没加载出来）也要能看见、不被静默清掉
+		if (resourceId && !list.some((option) => option.value === resourceId)) {
+			return [{ value: resourceId, label: `${resourceId}（不在列表里）` }, ...list];
+		}
+		return list;
+	}, [resourceType, resources, resourceId]);
+
+	const manualResourceEntry = manualResource || options.length === 0;
+	const lockedResourceName = price
+		? resourceName(names, price.resource_type, price.resource_id) || price.resource_id
+		: "";
+
 	const canSubmit =
 		!saving &&
 		itemCode !== "" &&
@@ -158,6 +223,18 @@ export function PriceCreateDialog({
 		minChargeMicro !== null &&
 		tierError === "" &&
 		(resourceType === "item" || resourceId.trim() !== "");
+
+	/** 提交时说清这一版是怎么来的，调价的那条路要额外把旧版本停掉。 */
+	const modeLabel =
+		mode === "create" ? "新增价格" : mode === "edit" ? "保存修改" : "创建新版本";
+	const failureLabel =
+		mode === "create" ? "新增价格失败" : mode === "edit" ? "保存失败" : "调价失败";
+
+	const tierPayload = () =>
+		tierRows.map<BillingTier>((row) => ({
+			up_to: row.upToText === "" ? 0 : row.upTo,
+			unit_price_micro: row.amountMicro ?? 0,
+		}));
 
 	const submit = async () => {
 		setFormError("");
@@ -183,35 +260,79 @@ export function PriceCreateDialog({
 			setFormError(tierError);
 			return;
 		}
-
-		const payload: BillingPriceCreate = {
-			item_code: itemCode,
-			currency: currency.trim() || "CNY",
-			unit_price_micro: amountMicro,
-			unit_size: unitSizeValue,
-			min_charge_micro: minChargeMicro,
-			rounding,
-			resource_type: resourceType,
-			resource_id: resourceType === "item" ? "" : resourceId.trim(),
-			effective_from: toRFC3339(new Date(effectiveFrom)) ?? undefined,
-			...(tiers.length > 0
-				? {
-						tiers: tierRows.map<BillingTier>((row) => ({
-							up_to: row.upToText === "" ? 0 : row.upTo,
-							unit_price_micro: row.amountMicro ?? 0,
-						})),
-					}
-				: {}),
-		};
+		const parsedEffective = new Date(effectiveFrom);
+		const effectiveValid = !Number.isNaN(parsedEffective.getTime());
+		// 新建 / 调价留空按「现在」处理（和服务端一致）；调价时这一刻也是旧版本的停用时刻。
+		// 编辑留空则不动原来的生效时间。
+		const effectiveDate = effectiveValid ? parsedEffective : new Date();
+		if (mode === "adjust" && price && effectiveDate <= new Date(price.effective_from)) {
+			setFormError(
+				`新版本的生效时间必须晚于当前版本（${formatDate(price.effective_from)} 起生效），否则旧版本收不紧。`,
+			);
+			return;
+		}
 
 		setSaving(true);
 		try {
-			await billingAdminApi.createPrice(payload);
+			if (mode === "edit" && price) {
+				await billingAdminApi.updatePrice(price.id, {
+					currency: currency.trim() || "CNY",
+					unit_price_micro: amountMicro,
+					unit_size: unitSizeValue,
+					min_charge_micro: minChargeMicro,
+					rounding,
+					// 空数组 = 清掉阶梯，所以这里总是带上 tiers
+					tiers: tierPayload(),
+					effective_from: effectiveValid ? toRFC3339(parsedEffective) : undefined,
+				});
+				onDone(
+					`已保存「${itemLabel(price.item_code)}」未生效价格版本的改动（${scopeLabel(price, names)}）`,
+				);
+				return;
+			}
+
+			const payload: BillingPriceCreate = {
+				item_code: itemCode,
+				account_id: price?.account_id ? price.account_id : undefined,
+				currency: currency.trim() || "CNY",
+				unit_price_micro: amountMicro,
+				unit_size: unitSizeValue,
+				min_charge_micro: minChargeMicro,
+				rounding,
+				resource_type: resourceType,
+				resource_id: resourceType === "item" ? "" : resourceId.trim(),
+				effective_from: toRFC3339(effectiveDate),
+				...(tiers.length > 0 ? { tiers: tierPayload() } : {}),
+			};
+			const created = (await billingAdminApi.createPrice(payload)).data;
+			if (mode === "adjust" && price) {
+				// 旧版本还有一段没被覆盖的窗口才收紧它；收紧失败不算全败，但要说清楚
+				const overlaps =
+					!price.effective_to || new Date(price.effective_to) > effectiveDate;
+				if (overlaps) {
+					try {
+						await billingAdminApi.updatePrice(price.id, {
+							effective_to: effectiveDate.toISOString(),
+						});
+					} catch (err) {
+						onDone(
+							`新版本已创建（${formatDate(created.effective_from)} 起生效），但旧版本自动停用失败：${billingErrorMessage(err, "停用失败")}。请在列表里手动「停用」旧版本。`,
+							"error",
+						);
+						return;
+					}
+				}
+				onDone(
+					`已调价：「${itemLabel(created.item_code)}」（${scopeLabel(created, names)}）新版本 ${formatDate(created.effective_from)} 起生效，旧版本同时停用，历史账单不变`,
+				);
+				return;
+			}
+
 			onDone(
 				`已新增价格版本：${itemLabel(itemCode)} · ${previewPrice ? formatUnitPrice(previewPrice) : ""}`,
 			);
 		} catch (err) {
-			setFormError(billingErrorMessage(err, "新增价格失败"));
+			setFormError(billingErrorMessage(err, failureLabel));
 		} finally {
 			setSaving(false);
 		}
@@ -223,11 +344,57 @@ export function PriceCreateDialog({
 				<DialogHeader>
 					<DialogTitle className="text-white flex items-center gap-2">
 						<Tag className="w-4 h-4 text-violet-400" strokeWidth={1.5} />
-						新建价格版本
+						{mode === "create"
+							? "新建价格版本"
+							: mode === "edit"
+								? "编辑未生效的价格版本"
+								: "调价（新增价格版本）"}
 					</DialogTitle>
 				</DialogHeader>
 
 				<div className="space-y-4 py-2">
+					{mode === "adjust" && (
+						<p className="rounded-lg border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-300/90 leading-relaxed">
+							已生效的版本不原地改价：下面的数字会存成一版新价格，同时把旧版本的
+							effective_to 收到新版本生效时刻。结算按事件发生时刻的价格走，历史账单不变。
+						</p>
+					)}
+
+					{editing && price && (
+						<div className="rounded-lg bg-zinc-800/60 px-3 py-2.5 space-y-1">
+							<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+								<span className="text-[11px] text-zinc-500">
+									适用范围
+									<span className="ml-1 text-zinc-300">
+										{scopeLabel(price, names)}
+									</span>
+								</span>
+								{price.account_id && (
+									<span className="text-[11px] text-zinc-500">
+										账户
+										<span className="ml-1 text-zinc-300 font-mono">
+											{price.account_id}
+										</span>
+									</span>
+								)}
+								<span className="text-[11px] text-zinc-500">
+									当前生效
+									<span className="ml-1 text-zinc-300 font-mono">
+										{formatDate(price.effective_from)} ~{" "}
+										{price.effective_to
+											? formatDate(price.effective_to)
+											: "长期"}
+									</span>
+								</span>
+							</div>
+							<p className="text-[11px] text-zinc-600">
+								{mode === "edit"
+									? "这一版还没生效，没有被任何用量事件匹配过；计费项与适用范围在创建时定死，这里只改价格本身。"
+									: "下面存的是新版本，旧版本从上面的生效时刻起停用；计费项与适用范围照抄当前版本。"}
+							</p>
+						</div>
+					)}
+
 					<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 						<div className="space-y-1.5">
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
@@ -236,6 +403,7 @@ export function PriceCreateDialog({
 							<SimpleSelect
 								value={itemCode}
 								onValueChange={setItemCode}
+								disabled={editing}
 								placeholder="选择计费项"
 								className="font-mono"
 								options={items.map((option) => ({
@@ -256,7 +424,11 @@ export function PriceCreateDialog({
 								className="text-sm font-mono"
 							/>
 							<p className="text-[11px] text-zinc-600">
-								留空按"现在"处理；同一 scope 同一时刻只能有一版价格。
+								{mode === "adjust"
+									? "留空按“现在”处理；这一刻也是旧版本的停用时刻。"
+									: mode === "edit"
+										? "改的是还没生效的版本，调整生效时间不影响已产生的账单。"
+										: "留空按“现在”处理；同一 scope 同一时刻只能有一版价格。"}
 							</p>
 						</div>
 					</div>
@@ -439,10 +611,11 @@ export function PriceCreateDialog({
 							</Label>
 							<SimpleSelect
 								value={resourceType}
+								disabled={editing}
 								onValueChange={(value) => {
-									const next = value as BillingResourceType;
-									setResourceType(next);
-									if (next === "item") setResourceId("");
+									setResourceType(value as BillingResourceType);
+									setResourceId("");
+									setManualResource(false);
 								}}
 								options={(
 									["item", "provider", "model", "voice"] as const
@@ -459,26 +632,70 @@ export function PriceCreateDialog({
 							</p>
 						</div>
 						<div className="space-y-1.5">
-							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-								资源 ID
-								<IdHint resourceType={resourceType} />
-							</Label>
-							<Input
-								value={resourceId}
-								onChange={(e) => setResourceId(e.target.value)}
-								disabled={resourceType === "item"}
-								placeholder={
-									resourceType === "item"
-										? "item 级价格不带 resource_id"
-										: "库里的记录 ID（不是厂商的模型名 / 音色名）"
-								}
-								className="text-sm font-mono disabled:opacity-40"
-							/>
+							<div className="flex items-center justify-between gap-2">
+								<Label className="text-xs text-zinc-400 uppercase tracking-wide">
+									资源
+									<IdHint resourceType={resourceType} />
+								</Label>
+								{!editing &&
+									resourceType !== "item" &&
+									options.length > 0 && (
+										<button
+											type="button"
+											onClick={() =>
+												setManualResource((value) => !value)
+											}
+											className="text-[11px] text-violet-400 hover:text-violet-300 transition-colors cursor-pointer"
+										>
+											{manualResource ? "从列表选择" : "手动填 ID"}
+										</button>
+									)}
+							</div>
+							{editing ? (
+								<Input
+									value={lockedResourceName}
+									disabled
+									title={price?.resource_id}
+									placeholder="item 级价格不带 resource_id"
+									className="text-sm font-mono disabled:opacity-40"
+								/>
+							) : manualResourceEntry ? (
+								<Input
+									value={resourceId}
+									onChange={(e) => setResourceId(e.target.value)}
+									disabled={resourceType === "item"}
+									placeholder={
+										resourceType === "item"
+											? "item 级价格不带 resource_id"
+											: "库里的记录 ID（不是厂商的模型名 / 音色名）"
+									}
+									className="text-sm font-mono disabled:opacity-40"
+								/>
+							) : (
+								<SimpleSelect
+									value={resourceId}
+									onValueChange={setResourceId}
+									placeholder={`选择${resourceTypeLabel(resourceType)}`}
+									options={options}
+								/>
+							)}
 							<p className="text-[11px] text-zinc-600">
-								item 级留空；停在某一级就必填（层级链：voice → model → provider）。
-								填的是库里的记录 ID（ai_models.id / providers.id / model_voices.id），
-								不是厂商侧的模型名或音色名——写错不会报错，只是永远匹配不上。
+								{editing
+									? "换资源只能新增一版，不能原地改。"
+									: resourceType === "item"
+										? "item 级价格不带 resource_id，作用在全部资源上（兜底价）。"
+										: manualResourceEntry
+											? "填的是库里的记录 ID（ai_models.id / providers.id / model_voices.id），不是厂商侧的模型名或音色名——写错不会报错，只是永远匹配不上。"
+											: "下拉里是当前账号可见的资源；其它用户的资源，或列表加载失败时，切「手动填 ID」。"}
 							</p>
+							{!editing &&
+								resourceType !== "item" &&
+								resources.missing.includes(resourceType) && (
+									<p className="text-[11px] text-amber-400/80">
+										{resourceTypeLabel(resourceType)}
+										列表没加载出来，只能手动填 ID；刷新页面可重试。
+									</p>
+								)}
 						</div>
 					</div>
 
@@ -595,7 +812,7 @@ export function PriceCreateDialog({
 						disabled={!canSubmit}
 						className="bg-violet-600 hover:bg-violet-500 text-white"
 					>
-						{saving ? "提交中..." : "新增价格"}
+						{saving ? "提交中..." : modeLabel}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

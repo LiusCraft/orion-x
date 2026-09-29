@@ -302,15 +302,63 @@ export function roundingLabel(rounding: BillingRounding | string): string {
 }
 
 /**
+ * 资源 ID → 展示名的映射（provider / model / voice 各一张），由
+ * lib/billingResources.ts 从列表接口建出来。列表接口只给「系统内置 + 当前用户」
+ * 可见的资源，所以查不到名字时回落到 ID 是正常路径。
+ */
+export interface BillingResourceNames {
+	provider: Record<string, string>;
+	model: Record<string, string>;
+	voice: Record<string, string>;
+}
+
+/** 资源 ID 的展示名；没有映射（列表没加载 / 不在可见范围）时返回空串。 */
+export function resourceName(
+	names: BillingResourceNames | undefined,
+	type: BillingResourceType | string,
+	id: string,
+): string {
+	if (!names || !id) return "";
+	switch (type) {
+		case "provider":
+			return names.provider[id] ?? "";
+		case "model":
+			return names.model[id] ?? "";
+		case "voice":
+			return names.voice[id] ?? "";
+		default:
+			return "";
+	}
+}
+
+/**
  * 价格的适用范围。主体维度（账户协议价 / 平台标准价）与资源维度合起来读：
- * `平台标准价 · 模型 gpt-4o`、`账户协议价 · 音色 voice_1`（§3.2）。
+ * `平台标准价 · 模型 deepseek-flash`、`账户协议价 · 音色 voice_1`（§3.2）。
+ * 给了 names 就显示资源名，查不到名字仍然显示 ID。
  */
 export function scopeLabel(
 	price: Pick<BillingPrice, "account_id" | "resource_type" | "resource_id">,
+	names?: BillingResourceNames,
 ): string {
 	const parts = [price.account_id ? "账户协议价" : "平台标准价"];
 	if (price.resource_type !== "item" && price.resource_id) {
-		parts.push(`${resourceTypeLabel(price.resource_type)} ${price.resource_id}`);
+		const name = resourceName(names, price.resource_type, price.resource_id);
+		parts.push(`${resourceTypeLabel(price.resource_type)} ${name || price.resource_id}`);
+	}
+	return parts.join(" · ");
+}
+
+/** 适用范围的完整口径（悬浮提示用）：带上内部 ID，方便回资源页对照。 */
+export function scopeTitle(
+	price: Pick<BillingPrice, "account_id" | "resource_type" | "resource_id">,
+	names?: BillingResourceNames,
+): string {
+	const parts = [price.account_id ? `账户协议价 ${price.account_id}` : "平台标准价"];
+	if (price.resource_type !== "item" && price.resource_id) {
+		const name = resourceName(names, price.resource_type, price.resource_id);
+		parts.push(
+			`${resourceTypeLabel(price.resource_type)} ${name ? `${name}（${price.resource_id}）` : price.resource_id}`,
+		);
 	}
 	return parts.join(" · ");
 }
