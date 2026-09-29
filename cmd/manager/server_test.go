@@ -39,7 +39,25 @@ func newTestRouter(t *testing.T, billingSvc *service.Service, apikeySvc *apikey.
 	return newRouter(secret,
 		nil, nil, voicebots, devices, nil, nil, nil, nil, nil, nil, nil,
 		sign, nil, nil, nil, nil, nil, nil, nil, nil,
-		"internal-token", billingSvc, nil, apikeySvc, apikeyAdminOnly)
+		"internal-token", billingSvc, nil, apikeySvc, apikeyAdminOnly, nil)
+}
+
+// TestChannelQRRoutesRegistered 钉住扫码开通的三条路由：不依赖是否装配了 Binder
+// （关闭扫码时路由仍在，handler 用 400 拒绝），前端与 API 文档据此稳定。
+func TestChannelQRRoutesRegistered(t *testing.T) {
+	r := newTestRouter(t, nil, nil, false)
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/voicebots/:id/devices/:did/channels/:platform/qr"},
+		{http.MethodGet, "/api/voicebots/:id/devices/:did/channels/:platform/qr/:sid"},
+		{http.MethodDelete, "/api/voicebots/:id/devices/:did/channels/:platform/qr/:sid"},
+	} {
+		if !hasRoute(r, tc.method, tc.path) {
+			t.Errorf("%s %s must be registered", tc.method, tc.path)
+		}
+	}
 }
 
 func hasRoute(r *gin.Engine, method, path string) bool {

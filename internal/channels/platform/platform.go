@@ -38,6 +38,9 @@ type Descriptor struct {
 	Type         channels.ChannelType  `json:"type"`
 	Capabilities []channels.Capability `json:"capabilities"`
 	Fields       []Field               `json:"fields"`
+	// QRBinding 为真表示平台支持「扫码开通」：控制台在手动表单之外显示扫码入口。
+	// 运行时是否可用还要看 manager 是否装配了 Binder（channels.qr_binding.enabled）。
+	QRBinding bool `json:"qr_binding,omitempty"`
 }
 
 // registry 是全部已接入的平台。顺序即管理面展示顺序。
@@ -61,6 +64,7 @@ var registry = []Descriptor{
 		Capabilities: []channels.Capability{
 			channels.CapText,
 		},
+		QRBinding: true,
 		Fields: []Field{
 			{Key: "bot_id", Label: "Bot ID", Required: true, Hint: "智能机器人开启「API 模式 → 长连接」后获取"},
 			{Key: "bot_secret", Label: "Secret", Required: true, Secret: true, Hint: "长连接专用密钥，与回调模式的 Token/EncodingAESKey 不同"},

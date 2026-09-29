@@ -14,6 +14,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/assets"
 	"github.com/liuscraft/orion-x/internal/billing"
 	"github.com/liuscraft/orion-x/internal/billing/service"
+	"github.com/liuscraft/orion-x/internal/channels/qrbind"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/store"
 )
@@ -45,6 +46,7 @@ func newRouter(
 	paymentSvc *service.PaymentService,
 	apikeySvc *apikey.Service,
 	apikeyAdminOnly bool,
+	qrBinders map[string]qrbind.Binder,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -72,7 +74,7 @@ func newRouter(
 	authH := handler.NewAuthHandler(users, bindings, signToken)
 	botH := handler.NewVoicebotHandler(voicebots)
 	devH := handler.NewDeviceHandler(voicebots, devices, deviceChannels)
-	channelH := handler.NewChannelHandler(voicebots, devices, deviceChannels)
+	channelH := handler.NewChannelHandler(voicebots, devices, deviceChannels, qrBinders)
 	providerH := handler.NewProviderHandler(providers)
 	modelH := handler.NewModelHandler(models)
 	// 计费关闭（billing.enabled: false）时 billingSvc 为 nil：业务模块拿到的是 nil
@@ -158,6 +160,10 @@ func newRouter(
 		// 通道配置是平台无关的两个端点：能配什么由 GET /api/channels 的字段 Schema 决定。
 		bots.PUT("/:id/devices/:did/channels/:platform", channelH.SetChannel)
 		bots.DELETE("/:id/devices/:did/channels/:platform", channelH.DeleteChannel)
+		// 扫码开通：只有声明了 qr_binding 且装配了 Binder 的平台可用。
+		bots.POST("/:id/devices/:did/channels/:platform/qr", channelH.StartChannelQR)
+		bots.GET("/:id/devices/:did/channels/:platform/qr/:sid", channelH.GetChannelQR)
+		bots.DELETE("/:id/devices/:did/channels/:platform/qr/:sid", channelH.CancelChannelQR)
 
 		pvd := api.Group("/providers", authMw, scopeMw)
 		pvd.GET("", providerH.List)

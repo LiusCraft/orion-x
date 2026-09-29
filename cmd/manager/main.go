@@ -23,6 +23,8 @@ import (
 	"github.com/liuscraft/orion-x/internal/billing/gateway/epay"
 	"github.com/liuscraft/orion-x/internal/billing/service"
 	"github.com/liuscraft/orion-x/internal/channels/platform"
+	"github.com/liuscraft/orion-x/internal/channels/qrbind"
+	"github.com/liuscraft/orion-x/internal/channels/wecom/qrlogin"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/knowledge/retriever"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/anthropic/messages"
@@ -227,7 +229,11 @@ func main() {
 		}()
 	}
 
-	r := newRouter(secret, users, bindings, voicebots, devices, deviceChannels, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc, paymentSvc, apikeySvc, cfg.APIKey.AdminOnly)
+	// 扫码开通（企业微信智能机器人）：会话与出网都在 manager，凭证不进浏览器。
+	// 失败兜底是控制台的手动填写，装配与否由 channels.qr_binding 决定。
+	qrBinders := newQRBinders(workerCtx, cfg.Channels)
+
+	r := newRouter(secret, users, bindings, voicebots, devices, deviceChannels, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc, paymentSvc, apikeySvc, cfg.APIKey.AdminOnly, qrBinders)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {
@@ -316,6 +322,25 @@ func initPaymentService(cfg PaymentConfig, db *gorm.DB, billingSvc *service.Serv
 		cfg.APIBaseURL, cfg.PID, channels,
 		billing.FormatMicro(svcCfg.MinAmountMicro), billing.FormatMicro(svcCfg.MaxAmountMicro), svcCfg.OrderTTL)
 	return service.NewPaymentService(store.NewPaymentStore(db), billingSvc, gateway, svcCfg)
+}
+
+// newQRBinders 装配「扫码开通」的平台实现；channels.qr_binding.enabled: false 时
+// 返回空表：GET /api/channels 的 qr_binding 会被 handler 摘掉，控制台只剩手动填写。
+//
+// 扫码调的是企微网页端点（非公开开发者 API），端点失效时的兜底就是关掉这里
+// （docs/wecom-qr-onboarding-design.md R1）。
+func newQRBinders(ctx context.Context, cfg ChannelsConfig) map[string]qrbind.Binder {
+	if cfg.QRBinding.Disabled() {
+		logging.Infof("channel qr binding: disabled by config")
+		return nil
+	}
+	opts := qrlogin.Options{BaseURL: cfg.QRBinding.BaseURL, Source: cfg.QRBinding.Source}
+	if cfg.QRBinding.Timeout > 0 {
+		opts.Timeout = time.Duration(cfg.QRBinding.Timeout) * time.Second
+	}
+	// 空值表示用包内默认（source=orion-x，base_url=官方地址）。
+	logging.Infof("channel qr binding: ready (source=%q base_url=%q timeout=%s)", opts.Source, opts.BaseURL, opts.Timeout)
+	return map[string]qrbind.Binder{platform.WeCom: qrlogin.New(ctx, opts)}
 }
 
 // initAssetService 构造对象存储与资源服务。

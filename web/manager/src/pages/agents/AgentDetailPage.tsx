@@ -76,8 +76,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { ChevronLeft, Plus, Play, Send } from "lucide-react";
+import { ChevronLeft, Plus, Play, Send, QrCode } from "lucide-react";
 import QuickChat from "./QuickChat";
+import { ChannelQRDialog } from "./ChannelQRDialog";
 
 interface BotConfig {
   language: string;
@@ -277,12 +278,17 @@ export default function AgentDetailPage() {
   const [detailMcp, setDetailMcp] = useState<MCPServer | null>(null);
   const [devAdding, setDevAdding] = useState(false);
   const [devErr, setDevErr] = useState("");
-  	const [channelDeviceID, setChannelDeviceID] = useState<string | null>(null);
-  	const [channelPlatforms, setChannelPlatforms] = useState<ChannelPlatform[]>([]);
-  	// 键是 `${deviceId}:${platform}:${field}`，保存后清空。
-  	const [channelInputs, setChannelInputs] = useState<Record<string, string>>({});
-  	const [channelSaving, setChannelSaving] = useState<string | null>(null);
-  	const [channelErr, setChannelErr] = useState("");
+	const [channelDeviceID, setChannelDeviceID] = useState<string | null>(null);
+	const [channelPlatforms, setChannelPlatforms] = useState<ChannelPlatform[]>([]);
+	// 键是 `${deviceId}:${platform}:${field}`，保存后清空。
+	const [channelInputs, setChannelInputs] = useState<Record<string, string>>({});
+	const [channelSaving, setChannelSaving] = useState<string | null>(null);
+	const [channelErr, setChannelErr] = useState("");
+	// qrTarget 是扫码开通弹窗的目标（设备 + 平台）；null = 弹窗关闭。
+	const [qrTarget, setQRTarget] = useState<{
+		deviceId: string;
+		platform: ChannelPlatform;
+	} | null>(null);
 
   // Knowledge base state
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
@@ -2058,18 +2064,36 @@ export default function AgentDetailPage() {
                                       </p>
                                     </div>
                                   </div>
-                                  {connected && (
-                                    <Button
-                                      variant="outline"
-                                      onClick={() =>
-                                        handleClearChannel(d.id, platform)
-                                      }
-                                      disabled={saving}
-                                      className="h-8 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-red-300"
-                                    >
-                                      断开
-                                    </Button>
-                                  )}
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {platform.qr_binding && (
+                                      <Button
+                                        variant="outline"
+                                        onClick={() =>
+                                          setQRTarget({
+                                            deviceId: d.id,
+                                            platform,
+                                          })
+                                        }
+                                        disabled={saving}
+                                        className="h-8 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                                      >
+                                        <QrCode className="w-3.5 h-3.5" />
+                                        扫码开通
+                                      </Button>
+                                    )}
+                                    {connected && (
+                                      <Button
+                                        variant="outline"
+                                        onClick={() =>
+                                          handleClearChannel(d.id, platform)
+                                        }
+                                        disabled={saving}
+                                        className="h-8 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-red-300"
+                                      >
+                                        断开
+                                      </Button>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                   {platform.fields.map((field) => (
@@ -2402,6 +2426,20 @@ export default function AgentDetailPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* 扫码开通（wecom 等声明了 qr_binding 的平台） */}
+      {qrTarget && id && (
+        <ChannelQRDialog
+          open
+          voicebotId={id}
+          deviceId={qrTarget.deviceId}
+          platform={qrTarget.platform}
+          onClose={() => setQRTarget(null)}
+          onBound={(status) =>
+            updateDeviceChannels(qrTarget.deviceId, status.platform, status)
+          }
+        />
+      )}
 
         {/* Delete confirmation dialog */}
         <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>

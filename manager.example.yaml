@@ -104,3 +104,19 @@ apikey:
   counter_flush: "30s"              # 调用次数 / 最后使用的刷库窗口
   max_per_account: 100              # 单个账号可持有的 key 上限
   admin_only: false                 # 灰度开关：true 时只有管理员能创建新 key
+
+# 通道配置面（docs/wecom-qr-onboarding-design.md）。
+#
+# qr_binding：控制台对支持扫码的平台（目前只有企业微信智能机器人）提供
+# 「扫码开通」——manager 调企微的扫码会话端点生成二维码，用户扫码并在手机上点
+# 「一键创建机器人」后，Bot ID / Secret 由 manager 自动写入，不用再手抄。
+#
+# 注意：它调的是企微网页端点，不是公开开发者 API，随时可能变更或限流。
+# 失败/下线时置 enabled: false 即可（控制台只剩手动填写，已绑定的设备不受影响）；
+# manager 也需要能出网访问 work.weixin.qq.com（或通过 base_url 指向代理）。
+channels:
+  qr_binding:
+    enabled: true                   # nil / true = 启用；显式 false 关闭
+    source: ""                      # 扫码会话的接入方标识，空 = orion-x
+    base_url: ""                    # 覆盖企微端点根地址（测试/代理用），空 = 官方地址
+    timeout: 15                     # 单次出网超时秒数，0 = 15

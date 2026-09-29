@@ -190,6 +190,46 @@ func swaggerSetChannel() {}
 // @Router /api/voicebots/{id}/devices/{did}/channels/{platform} [delete]
 func swaggerDeleteChannel() {}
 
+// swaggerStartChannelQR starts a scan-to-bind session for a platform that supports it.
+// @Summary Start channel QR binding
+// @Tags Channels
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Voicebot ID"
+// @Param did path string true "Device ID"
+// @Param platform path string true "Platform name (wecom)"
+// @Success 200 {object} object
+// @Failure 400,401,403,404,502 {object} errorResponse
+// @Router /api/voicebots/{id}/devices/{did}/channels/{platform}/qr [post]
+func swaggerStartChannelQR() {}
+
+// swaggerGetChannelQR polls a scan-to-bind session; on success the channel is stored and returned.
+// @Summary Get channel QR binding status
+// @Tags Channels
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Voicebot ID"
+// @Param did path string true "Device ID"
+// @Param platform path string true "Platform name (wecom)"
+// @Param sid path string true "QR session ID"
+// @Success 200 {object} object
+// @Failure 401,403,404 {object} errorResponse
+// @Router /api/voicebots/{id}/devices/{did}/channels/{platform}/qr/{sid} [get]
+func swaggerGetChannelQR() {}
+
+// swaggerCancelChannelQR cancels a scan-to-bind session (idempotent).
+// @Summary Cancel channel QR binding
+// @Tags Channels
+// @Security BearerAuth
+// @Param id path string true "Voicebot ID"
+// @Param did path string true "Device ID"
+// @Param platform path string true "Platform name (wecom)"
+// @Param sid path string true "QR session ID"
+// @Success 200 {object} object
+// @Failure 401,403,404 {object} errorResponse
+// @Router /api/voicebots/{id}/devices/{did}/channels/{platform}/qr/{sid} [delete]
+func swaggerCancelChannelQR() {}
+
 // swaggerProviders documents provider collection operations.
 // @Summary List providers
 // @Tags Providers

@@ -2408,6 +2408,147 @@ paths:
       summary: Set device channel
       tags:
       - Channels
+  /api/voicebots/{id}/devices/{did}/channels/{platform}/qr:
+    post:
+      parameters:
+      - description: Voicebot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Device ID
+        in: path
+        name: did
+        required: true
+        type: string
+      - description: Platform name (wecom)
+        in: path
+        name: platform
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Start channel QR binding
+      tags:
+      - Channels
+  /api/voicebots/{id}/devices/{did}/channels/{platform}/qr/{sid}:
+    delete:
+      parameters:
+      - description: Voicebot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Device ID
+        in: path
+        name: did
+        required: true
+        type: string
+      - description: Platform name (wecom)
+        in: path
+        name: platform
+        required: true
+        type: string
+      - description: QR session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Cancel channel QR binding
+      tags:
+      - Channels
+    get:
+      parameters:
+      - description: Voicebot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Device ID
+        in: path
+        name: did
+        required: true
+        type: string
+      - description: Platform name (wecom)
+        in: path
+        name: platform
+        required: true
+        type: string
+      - description: QR session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get channel QR binding status
+      tags:
+      - Channels
   /api/voicebots/{id}/mcps:
     get:
       parameters:

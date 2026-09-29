@@ -1,6 +1,6 @@
 # 通道平台抽象与企业微信接入设计
 
-> 状态：已实现（TG 已迁移到通用端点，WeCom 待真机联调） | 日期：2026-09-30 | 范围：`internal/channels`（平台注册表 + TG/WeCom 通道）、`cmd/manager`（通用通道配置接口与内部下发）、`internal/store`（`device_channels` 表与一次性回填） | 关联：[智能机器人长连接](https://developer.work.weixin.qq.com/document/path/101463)（访问 2026-09-30）、[接收消息](https://developer.work.weixin.qq.com/document/path/100719)（访问 2026-09-30）
+> 状态：已实现（TG 已迁移到通用端点，WeCom 待真机联调） | 日期：2026-09-30 | 范围：`internal/channels`（平台注册表 + TG/WeCom 通道）、`cmd/manager`（通用通道配置接口与内部下发）、`internal/store`（`device_channels` 表与一次性回填） | 关联：[智能机器人长连接](https://developer.work.weixin.qq.com/document/path/101463)（访问 2026-09-30）、[接收消息](https://developer.work.weixin.qq.com/document/path/100719)（访问 2026-09-30）；扫码开通见 [wecom-qr-onboarding-design.md](wecom-qr-onboarding-design.md)
 
 ## 评审面（≤3 屏 / 约 120 行）
 

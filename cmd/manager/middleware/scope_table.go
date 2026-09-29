@@ -53,6 +53,10 @@ var routeScopes = ScopeTable{
 	"DELETE /api/voicebots/:id/devices/:did":                    {apikey.ScopeDeviceWrite},
 	"PUT /api/voicebots/:id/devices/:did/channels/:platform":    {apikey.ScopeDeviceWrite},
 	"DELETE /api/voicebots/:id/devices/:did/channels/:platform": {apikey.ScopeDeviceWrite},
+	// 扫码开通写的是设备凭证，与手动配置同级。
+	"POST /api/voicebots/:id/devices/:did/channels/:platform/qr":        {apikey.ScopeDeviceWrite},
+	"GET /api/voicebots/:id/devices/:did/channels/:platform/qr/:sid":    {apikey.ScopeDeviceWrite},
+	"DELETE /api/voicebots/:id/devices/:did/channels/:platform/qr/:sid": {apikey.ScopeDeviceWrite},
 
 	// ── 供应商 / 模型 / 音色（音色克隆会扣费，所以它要 model:write） ──
 	"GET /api/providers":                 {apikey.ScopeModelRead},
