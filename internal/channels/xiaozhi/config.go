@@ -18,6 +18,7 @@ type Config struct {
 	Health  HealthConfig  `yaml:"health"`
 	Manager ManagerConfig `yaml:"manager"`
 	Billing BillingConfig `yaml:"billing"`
+	Auth    AuthConfig    `yaml:"auth"`
 	Logging LoggingConfig `yaml:"logging"`
 }
 
@@ -52,6 +53,22 @@ type BillingConfig struct {
 // BillingEnabled 返回计费是否开启（默认开启）。
 func (c BillingConfig) BillingEnabled() bool {
 	return c.Enabled == nil || *c.Enabled
+}
+
+// AuthConfig 是数据面握手鉴权（docs/wsserver-apikey-auth-design.md §1 D6）。
+//
+// 默认关闭：存量只发 device_id 的客户端零变化；开启是一次显式运维动作，需要先给
+// 设备换发带 device:connect 的 Key，并保证 manager.token 已配。
+type AuthConfig struct {
+	// Enabled 为 true 时 /ws 握手必须携带有效的账号 Key。
+	Enabled *bool `yaml:"enabled"`
+	// Timeout 是 verify 的端到端超时；<=0 时取 client 的默认值（800ms）。
+	Timeout time.Duration `yaml:"timeout"`
+}
+
+// AuthEnabled 返回握手鉴权是否开启（默认关闭）。
+func (c AuthConfig) AuthEnabled() bool {
+	return c.Enabled != nil && *c.Enabled
 }
 
 // LoggingConfig holds logging level/format.
@@ -118,6 +135,20 @@ func ValidateManagerURL(rawURL string) error {
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("manager.url must use http or https: %q", managerURL)
+	}
+	return nil
+}
+
+// ValidateAuthConfig ensures the handshake verifier has what it needs before startup.
+//
+// 开启鉴权但没有内部 token 的话，每一条连接都会以 auth_unavailable 被拒：那是把
+// 配错留到线上才发现，不如启动时就拒绝（§D 开关/回滚：开启时 manager.token 必须已配）。
+func ValidateAuthConfig(cfg *Config) error {
+	if !cfg.Auth.AuthEnabled() {
+		return nil
+	}
+	if strings.TrimSpace(cfg.Manager.Token) == "" {
+		return errors.New("manager.token is required when auth.enabled is true (set it in the config file or MANAGER_TOKEN)")
 	}
 	return nil
 }

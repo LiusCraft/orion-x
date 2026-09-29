@@ -15,6 +15,13 @@ manager:
 #   enabled: true            # 显式 false 时整条计费链路关闭（等价于不给通道传 sink）
 #   suspension_ttl: 5m       # “已被停服”标记的本地 TTL：manager 不可达时仍拒（Go duration）
 
+# 握手鉴权（docs/wsserver-apikey-auth-design.md）。默认关闭：存量只发 device_id 的
+# 客户端零变化。开启前先给设备换发带 device:connect 的 Key；开启时 manager.token
+# 必须已配置，否则进程拒绝启动。
+# auth:
+#   enabled: false           # 显式 true 才要求 /ws 握手携带 ox_sk_ Key
+#   timeout: 800ms           # 调 manager 校验的端到端超时，缺省 800ms
+
 logging:
   level: "info"
   format: "console"   # console | json

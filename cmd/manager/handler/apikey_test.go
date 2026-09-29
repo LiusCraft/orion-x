@@ -20,6 +20,8 @@ import (
 type fakeAPIKeyStore struct {
 	rows        map[string]*store.APIKey
 	createCalls int
+	// usageCalls 累计 Flush 落库的调用次数（FR-8：WS 连接要计入 call_count）。
+	usageCalls int64
 }
 
 func newFakeAPIKeyStore() *fakeAPIKeyStore {
@@ -75,7 +77,16 @@ func (s *fakeAPIKeyStore) Revoke(_ context.Context, id, userID string, at time.T
 	return nil
 }
 
-func (s *fakeAPIKeyStore) AddUsage(context.Context, string, int64, time.Time) error { return nil }
+func (s *fakeAPIKeyStore) AddUsage(_ context.Context, _ string, calls int64, _ time.Time) error {
+	s.usageCalls += calls
+	return nil
+}
+
+// newTestAPIKeyHandler 构造管理面测试用的 handler：owner 只有 verify 面读，
+// 管理面用不上，传空 fake 占位（构造期要求非 nil）。
+func newTestAPIKeyHandler(svc *apikey.Service, adminOnly bool) *APIKeyHandler {
+	return NewAPIKeyHandler(svc, adminOnly, fakeDeviceOwner{})
+}
 
 // apiKeyRequest 直接驱动 handler：上下文里的 userID 与 JWT 中间件写的是同一个键。
 func apiKeyRequest(method, path, body, userID string, isAdmin bool, params gin.Params) (*gin.Context, *httptest.ResponseRecorder) {
@@ -112,7 +123,7 @@ func decodeBody(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
 
 func TestAPIKeyCreateReturnsPlaintextOnce(t *testing.T) {
 	st := newFakeAPIKeyStore()
-	h := NewAPIKeyHandler(apikey.New(st, apikey.Config{}), false)
+	h := newTestAPIKeyHandler(apikey.New(st, apikey.Config{}), false)
 
 	c, w := apiKeyRequest(http.MethodPost, "/api/api-keys",
 		`{"name":"生产环境","scopes":["agent:read","data:read"]}`, "user-1", false, nil)
@@ -177,7 +188,7 @@ func TestAPIKeyCreateReturnsPlaintextOnce(t *testing.T) {
 // 列表分页按仓库惯例：page 从 1 起，超出范围就是空页。
 func TestAPIKeyListPagination(t *testing.T) {
 	st := newFakeAPIKeyStore()
-	h := NewAPIKeyHandler(apikey.New(st, apikey.Config{}), false)
+	h := newTestAPIKeyHandler(apikey.New(st, apikey.Config{}), false)
 
 	for i := 0; i < 3; i++ {
 		c, w := apiKeyRequest(http.MethodPost, "/api/api-keys", `{"name":"k","scopes":["agent:read"]}`, "user-1", false, nil)
@@ -211,7 +222,7 @@ func TestAPIKeyListPagination(t *testing.T) {
 
 func TestAPIKeyCreateExpandsPreset(t *testing.T) {
 	st := newFakeAPIKeyStore()
-	h := NewAPIKeyHandler(apikey.New(st, apikey.Config{}), false)
+	h := newTestAPIKeyHandler(apikey.New(st, apikey.Config{}), false)
 
 	c, w := apiKeyRequest(http.MethodPost, "/api/api-keys", `{"name":"ci","preset":"readonly"}`, "user-1", false, nil)
 	h.Create(c)
@@ -265,7 +276,7 @@ func TestAPIKeyCreateErrorMapping(t *testing.T) {
 			if tc.maxPerAcct > 0 {
 				cfg.MaxKeysPerAccount = tc.maxPerAcct
 			}
-			h := NewAPIKeyHandler(apikey.New(st, cfg), false)
+			h := newTestAPIKeyHandler(apikey.New(st, cfg), false)
 
 			if tc.maxPerAcct > 0 {
 				c, w := apiKeyRequest(http.MethodPost, "/api/api-keys", `{"name":"first","scopes":["agent:read"]}`, "user-1", false, nil)
@@ -289,7 +300,7 @@ func TestAPIKeyCreateErrorMapping(t *testing.T) {
 
 func TestAPIKeyRevokeIsIdempotentAndScoped(t *testing.T) {
 	st := newFakeAPIKeyStore()
-	h := NewAPIKeyHandler(apikey.New(st, apikey.Config{}), false)
+	h := newTestAPIKeyHandler(apikey.New(st, apikey.Config{}), false)
 
 	c, w := apiKeyRequest(http.MethodPost, "/api/api-keys", `{"name":"ci","scopes":["agent:read"]}`, "user-1", false, nil)
 	h.Create(c)
@@ -343,7 +354,7 @@ func TestAPIKeyRevokeIsIdempotentAndScoped(t *testing.T) {
 
 func TestAPIKeyListIsScopedToOwner(t *testing.T) {
 	st := newFakeAPIKeyStore()
-	h := NewAPIKeyHandler(apikey.New(st, apikey.Config{}), false)
+	h := newTestAPIKeyHandler(apikey.New(st, apikey.Config{}), false)
 
 	for _, owner := range []string{"user-1", "user-2"} {
 		c, w := apiKeyRequest(http.MethodPost, "/api/api-keys", `{"name":"k","scopes":["agent:read"]}`, owner, false, nil)
@@ -362,7 +373,7 @@ func TestAPIKeyListIsScopedToOwner(t *testing.T) {
 }
 
 func TestAPIKeyScopesEndpoint(t *testing.T) {
-	h := NewAPIKeyHandler(apikey.New(newFakeAPIKeyStore(), apikey.Config{}), false)
+	h := newTestAPIKeyHandler(apikey.New(newFakeAPIKeyStore(), apikey.Config{}), false)
 
 	c, w := apiKeyRequest(http.MethodGet, "/api/api-keys/scopes", "", "user-1", false, nil)
 	h.Scopes(c)
@@ -402,7 +413,7 @@ func TestAPIKeyScopesEndpoint(t *testing.T) {
 
 func TestAPIKeyAdminOnlyGate(t *testing.T) {
 	st := newFakeAPIKeyStore()
-	h := NewAPIKeyHandler(apikey.New(st, apikey.Config{}), true)
+	h := newTestAPIKeyHandler(apikey.New(st, apikey.Config{}), true)
 
 	// 灰度期：普通账号连"能不能创建"都要看得出来，别等提交后才 403。
 	c, w := apiKeyRequest(http.MethodGet, "/api/api-keys/scopes", "", "user-1", false, nil)
@@ -433,7 +444,7 @@ func TestAPIKeyAdminOnlyGate(t *testing.T) {
 }
 
 func TestAPIKeyDisabledReturns503(t *testing.T) {
-	h := NewAPIKeyHandler(nil, false)
+	h := newTestAPIKeyHandler(nil, false)
 	cases := []struct {
 		name   string
 		invoke func(*gin.Context)

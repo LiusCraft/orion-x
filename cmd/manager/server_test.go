@@ -23,14 +23,21 @@ func newBillingTestRouter(t *testing.T, billingSvc *service.Service, internalTok
 	return newTestRouter(t, billingSvc, nil, false)
 }
 
-// newTestRouter 是 newRouter 的测试入口：store 全为 nil，apikey 按需给。
+// newTestRouter 是 newRouter 的测试入口：store 全为 nil，apikey 按需给。verify 的
+// owner 解析要 store 才能装配，所以 apikey 打开时补两个空 store——只用于构造，这些
+// 测试不真读库。
 func newTestRouter(t *testing.T, billingSvc *service.Service, apikeySvc *apikey.Service, apikeyAdminOnly bool) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	secret := []byte("test-secret")
 	sign := func(userID string, isAdmin bool) (string, error) { return signToken(secret, userID, isAdmin) }
+	var voicebots *store.VoicebotStore
+	var devices *store.DeviceStore
+	if apikeySvc != nil {
+		voicebots, devices = &store.VoicebotStore{}, &store.DeviceStore{}
+	}
 	return newRouter(secret,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, voicebots, devices, nil, nil, nil, nil, nil, nil,
 		sign, nil, nil, nil, nil, nil, nil, nil, nil,
 		"internal-token", billingSvc, nil, apikeySvc, apikeyAdminOnly)
 }
@@ -298,5 +305,33 @@ func TestAPIKeyRoutesWhenDisabled(t *testing.T) {
 	response = routeRequest(r, http.MethodGet, "/api/sessions", "ox_sk_"+strings.Repeat("x", 55))
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("API key request with apikey disabled = %d, want 401", response.Code)
+	}
+}
+
+// TestInternalAPIKeyVerifyRoute 钉住内部校验端点的注册与鉴权边界
+// （docs/wsserver-apikey-auth-design.md §3.2 / FR-7）：
+//   - apikey.enabled: false 时路由不存在（404），数据面据此记 auth_unavailable；
+//   - 开启后只接 internal token；token 对了才轮到 handler（空 body 回 400）。
+func TestInternalAPIKeyVerifyRoute(t *testing.T) {
+	disabled := newTestRouter(t, nil, nil, false)
+	if hasRoute(disabled, http.MethodPost, apikey.PathVerify) {
+		t.Fatal("verify route must not be registered when apikey is disabled")
+	}
+	if got := routeRequest(disabled, http.MethodPost, apikey.PathVerify, "internal-token"); got.Code != http.StatusNotFound {
+		t.Fatalf("verify with apikey disabled = %d, want 404", got.Code)
+	}
+
+	enabled := newTestRouter(t, nil, apikey.New(newFakeKeyStore(), apikey.Config{}), false)
+	if !hasRoute(enabled, http.MethodPost, apikey.PathVerify) {
+		t.Fatalf("POST %s must be registered when apikey is enabled", apikey.PathVerify)
+	}
+	if got := routeRequest(enabled, http.MethodPost, apikey.PathVerify, ""); got.Code != http.StatusUnauthorized {
+		t.Fatalf("verify without internal token = %d, want 401", got.Code)
+	}
+	if got := routeRequest(enabled, http.MethodPost, apikey.PathVerify, "wrong-token"); got.Code != http.StatusUnauthorized {
+		t.Fatalf("verify with a wrong internal token = %d, want 401", got.Code)
+	}
+	if got := routeRequest(enabled, http.MethodPost, apikey.PathVerify, "internal-token"); got.Code != http.StatusBadRequest {
+		t.Fatalf("verify with an empty body = %d, want 400 (body %s)", got.Code, got.Body.String())
 	}
 }

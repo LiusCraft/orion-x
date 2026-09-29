@@ -4,12 +4,21 @@ import (
 	"context"
 	"sync"
 
+	"github.com/liuscraft/orion-x/internal/apikey"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/provider"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/task"
 )
+
+// KeyVerifier 校验一次 WebSocket 握手的凭证，只回事实、不做任何本地判定。
+// 实现住在 internal/apikey/client（HTTP 调 manager 的 /internal/apikey/verify）。
+type KeyVerifier interface {
+	// Verify 返回校验结论；allowed=false 是业务拒绝（err == nil），err 只在
+	// 传输/协议失败时非 nil。
+	Verify(ctx context.Context, rawKey, deviceID string) (apikey.VerifyResponse, error)
+}
 
 // DeviceConfigLoader 从 manager 服务加载设备配置。
 type DeviceConfigLoader interface {
@@ -44,6 +53,9 @@ type Dependencies struct {
 	// P1 只接 xiaozhi WS 通道：TG 那边的会话边界本来就模糊（一个聊天窗口可以活
 	// 好几天），硬套“一次连接 = 一次会话”会引出一堆没人答得上来的问题（§15.5）。
 	Billing BillingFactory
+	// KeyVerifier 校验 WS 握手凭证；nil = auth.enabled: false（握手鉴权关闭，
+	// 通道按现状放行；docs/wsserver-apikey-auth-design.md §1 D6）。
+	KeyVerifier KeyVerifier
 }
 
 // Manager 管理多个 Channel 的生命周期。进程级单例。

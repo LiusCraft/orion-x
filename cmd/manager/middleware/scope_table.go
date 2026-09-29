@@ -166,17 +166,32 @@ func isKeyUnreachable(method, path string) bool {
 	return false
 }
 
+// dataPlaneScopes 是"由数据面消费、不在 /api 路由表里"的 scope 清单。覆盖性检查
+// 的反向方向（目录里每个 scope 都要有消费者）也认它们：这些 scope 没有 HTTP 路由
+// 可挂，判定发生在 wsserver 的连接握手，由 manager 的 /internal/apikey/verify 执行
+// （docs/wsserver-apikey-auth-design.md §2 覆盖性登记）。
+var dataPlaneScopes = []string{
+	apikey.ScopeDeviceConnect,
+}
+
 // ValidateCoverage 做 §7 V3 的双向覆盖性检查，返回所有问题（空 = 通过）：
 //
 //   - 正向：每条 /api/* 路由要么在 scope 表里（且声明了非空、目录里存在的 scope），
 //     要么在"key 不可达"白名单里；
-//   - 反向：目录里每个 scope 要么被至少一条路由使用，要么标了 Deprecated。
+//   - 反向：目录里每个 scope 要么被至少一条路由或数据面消费，要么标了 Deprecated。
 //
 // 两个方向任一不满足都是越权或"给了但没生效"的温床，所以它跑在测试里而不是 review 里。
 func ValidateCoverage(routes []gin.RouteInfo) []string {
 	var problems []string
 
-	used := make(map[string]bool, len(routeScopes))
+	used := make(map[string]bool, len(routeScopes)+len(dataPlaneScopes))
+	for _, s := range dataPlaneScopes {
+		if !catalogHas(s) {
+			problems = append(problems, "data plane: consumes unknown scope "+s)
+			continue
+		}
+		used[s] = true
+	}
 	for spec, scopes := range routeScopes {
 		if len(scopes) == 0 {
 			problems = append(problems, "scope table: "+spec+" declares no scope")

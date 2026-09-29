@@ -18,6 +18,15 @@ xiaozhi-esp32-server 的设计（JSON 控制帧 + 二进制音频帧），但裁
 
 `type` 字段保持可扩展，未来需要再加。消息结构定义在 `internal/wsproto/`。
 
+## 握手鉴权（已实现，默认关闭）
+
+`/ws` 握手鉴权（[wsserver-apikey-auth-design](./wsserver-apikey-auth-design.md)）开启
+（`auth.enabled: true`）后，握手要求 `Authorization: Bearer ox_sk_...`（兼容
+`?access_token=ox_sk_...`），校验 key 有效、拥有该设备且带 `device:connect` scope；
+无 key 在升级前回 401，业务校验失败时先回 `hello` 再以 Close 1008（policy violation）
+关闭连接，reason 即拒绝原因（本地链路故障是 `auth_unavailable`）。默认关闭时本节
+的鉴权行为不生效，`device_id` 仍是客户端自报的。
+
 ## 消息格式
 
 ### hello（握手，双向）
