@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	// draftThrottle 是私聊草稿更新的最小间隔。sendMessageDraft 的频率配额官方
-	// 未公开，先按单聊消息的 1 条/秒留出余量。
-	draftThrottle = 2 * time.Second
+	// draftThrottle 是私聊草稿更新的最小间隔。草稿不受消息发送配额限制，走的是
+	// typing 类限流（官方 AI 文档：与 messages.setTyping 同等），300ms 接近逐字观感。
+	draftThrottle = 300 * time.Millisecond
 	// editThrottleGroup 是群聊原地刷新的最小间隔：群聊没有草稿接口，且限制
 	// 20 条/分钟（Bot FAQ），4s 一次留出余量。
 	editThrottleGroup = 4 * time.Second
@@ -23,12 +23,18 @@ const (
 	// maxMessageUnits 是单条消息与草稿的字符上限（Bot API 限制 4096，按 UTF-16 码元计）。
 	maxMessageUnits = 4096
 
+	// draftFailureLimit 是一轮里草稿连续失败几次后放弃：草稿只是预览，收尾的
+	// sendMessage 才是交付，不必反复重试。
+	draftFailureLimit = 2
+
 	// replyEmptyText 是 Agent 没有任何产出时的占位回复。
 	replyEmptyText = "（无响应）"
 )
 
-// replyStream 是一轮回复的流式输出面：push 追加文本增量，finish 收尾。
+// replyStream 是一轮回复的流式输出面：start 开启输出，push 追加文本增量，
+// finish 收尾。
 type replyStream interface {
+	start()
 	push(chunk string)
 	finish()
 }
@@ -58,6 +64,9 @@ type draftReply struct {
 	shown  string          // 草稿里已展示的内容（按上限截断后的头部）
 	last   time.Time       // 上次成功更新草稿的时间
 	opened bool            // 是否已经成功发过草稿
+
+	failures int  // 连续失败次数
+	disabled bool // 连续失败超限后放弃本轮剩余的草稿
 }
 
 // newDraftReply 创建私聊草稿流。
@@ -69,6 +78,12 @@ func newDraftReply(bot *tgbotapi.BotAPI, deviceID string, chat *tgbotapi.Chat) *
 		draftID:  draftSeq.Add(1),
 		throttle: draftThrottle,
 	}
+}
+
+// start 在生成开始前先发一条空草稿：客户端把它渲染成「Thinking…」占位，
+// 用户不必等第一个 token 就有反馈。
+func (s *draftReply) start() {
+	s.flushDraft()
 }
 
 // push 追加一个文本增量：首块立即出草稿，其余按节流更新。
@@ -104,10 +119,13 @@ func (s *draftReply) finish() {
 }
 
 // flushDraft 把当前全文（头部截断到上限）作为草稿预览推给客户端；内容没变则跳过。
-// 草稿失败只记日志：下一块增量或收尾会重试，收尾的 sendMessage 保证文本最终送达。
+// 连续失败达到上限后放弃本轮草稿：收尾的 sendMessage 仍会把全文送达。
 func (s *draftReply) flushDraft() {
+	if s.disabled {
+		return
+	}
 	content := truncateToUnits(s.text.String(), maxMessageUnits)
-	if content == s.shown {
+	if s.opened && content == s.shown {
 		return
 	}
 	params := tgbotapi.Params{
@@ -116,12 +134,22 @@ func (s *draftReply) flushDraft() {
 		"text":     content,
 	}
 	if _, err := s.bot.MakeRequest("sendMessageDraft", params); err != nil {
+		s.failures++
+		if s.failures >= draftFailureLimit {
+			s.disabled = true
+			logging.Warnf("tg[%s]: draft streaming to chat %d disabled after %d failures: %v", s.deviceID, s.chatID, s.failures, err)
+			return
+		}
 		logging.Warnf("tg[%s]: draft reply to chat %d: %v", s.deviceID, s.chatID, err)
 		return
+	}
+	if !s.opened {
+		logging.Infof("tg[%s]: draft streaming started (chat %d)", s.deviceID, s.chatID)
 	}
 	s.shown = content
 	s.last = time.Now()
 	s.opened = true
+	s.failures = 0
 }
 
 // sendMessage 发一条落地消息。
@@ -152,6 +180,9 @@ type editReply struct {
 func newEditReply(bot *tgbotapi.BotAPI, deviceID string, chat *tgbotapi.Chat) *editReply {
 	return &editReply{bot: bot, deviceID: deviceID, chatID: chat.ID, throttle: editThrottleGroup}
 }
+
+// start 无操作：群聊的消息由首个增量直接创建，等待期的 typing 指示由调用方发送。
+func (s *editReply) start() {}
 
 // push 追加一个文本增量：首块立即建消息，其余距上次刷新超过节流间隔才编辑。
 func (s *editReply) push(chunk string) {

@@ -209,6 +209,49 @@ func TestDraftReplyDeliversFinalMessageAfterFailedDraft(t *testing.T) {
 	}
 }
 
+// start 先发一条空草稿：客户端显示「Thinking…」占位，第一个 token 前就有反馈。
+func TestDraftReplyStartShowsThinkingPlaceholder(t *testing.T) {
+	fake, stream := newDraftFixture(t)
+
+	stream.start()
+	stream.push("你好")
+	stream.finish()
+
+	calls := fake.messageCalls()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %+v, want placeholder draft + final sendMessage", calls)
+	}
+	if calls[0].method != "sendMessageDraft" || calls[0].text != "" {
+		t.Errorf("first call = %+v, want sendMessageDraft with empty text", calls[0])
+	}
+	if calls[1].method != "sendMessage" || calls[1].text != "你好" {
+		t.Errorf("second call = %+v, want sendMessage with 你好", calls[1])
+	}
+}
+
+// 草稿连续失败达到上限后放弃本轮草稿，但收尾仍把全文送达；之后不再产生草稿调用。
+func TestDraftReplyStopsAfterRepeatedFailures(t *testing.T) {
+	fake, stream := newDraftFixture(t)
+	stream.throttle = 0
+	fake.failures = 2
+
+	stream.push("你好") // 草稿失败 1
+	stream.push("世界") // 草稿失败 2 → 放弃
+	stream.push("！")  // 不再尝试
+	stream.finish()   // 落地全文
+
+	calls := fake.messageCalls()
+	if len(calls) != 3 {
+		t.Fatalf("calls = %+v, want two failed drafts + final sendMessage", calls)
+	}
+	if calls[0].method != "sendMessageDraft" || calls[1].method != "sendMessageDraft" {
+		t.Errorf("first two calls = %q / %q, want sendMessageDraft attempts", calls[0].method, calls[1].method)
+	}
+	if calls[2].method != "sendMessage" || calls[2].text != "你好世界！" {
+		t.Errorf("third call = %+v, want sendMessage with 你好世界！", calls[2])
+	}
+}
+
 // 草稿路径只用于私聊；群聊没有该接口，选择原地编辑。
 func TestNewReplyStreamSelectsByChatType(t *testing.T) {
 	tests := []struct {
