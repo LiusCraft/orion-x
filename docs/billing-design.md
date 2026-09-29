@@ -150,10 +150,14 @@ LIMIT 1
 
 扩展新维度（`channel` / `device` / `org`）只需加枚举值与一个 rank，不改表结构。若将来真出现**多维正交**条件（地区 × 渠道 × 套餐并存），"单链择一"就不够用，需要升级为 `price_bindings(price_id, scope_type, scope_id)` 或 conditions jsonb——在此之前属于提前优化。
 
-价格表上**没有 `enabled` 开关**，这是故意的：“这版价格生不生效”只能有一个来源，就是 `effective_from` / `effective_to` 这个区间。再加个布尔开关，两个字段说话不一致时没人知道该信谁。于是管理端的操作就两种：
+价格表上**没有 `enabled` 开关**，这是故意的：“这版价格生不生效”只能有一个来源，就是 `effective_from` / `effective_to` 这个区间。再加个布尔开关，两个字段说话不一致时没人知道该信谁。于是管理端的操作都绕着「版本」转：
 
 - 已经生效的价格要停用 → 把 `effective_to` 收到当前时刻（不删行，历史账单还指着它）。
 - 还没生效的价格要取消 → 直接删，它从来没匹配过任何事件，也没被任何流水引用。
+- 还没生效的价格要改 → 直接改（`PUT` 单价 / `unit_size` / 起步价 / 舍入 / 阶梯 / 生效时间）。它没有被任何用量事件匹配过，改是安全的。
+- 已经生效的价格要调价 → **不原地改**：按 `occurred_at` 匹配价格的机制下，原地改会改写这一版整个生效窗口（含已记录未结算的用量）。管理把它做成一个「调价」动作：以当前版本为模板新增一版，同时把旧版本的 `effective_to` 收到新版本生效时刻。
+
+管理端与价格公示页的「适用范围」列显示资源名（模型 / 厂商 / 音色）而不是内部 ID。名字由前端从 `/api/models`、`/api/providers`、`/api/voices/system + /api/voices/mine` 的现成列表解析，**`ListPrices` 不 join**：这些接口只返回「系统内置 + 当前用户」可见的资源，解析不到时回落到 ID，`billing_prices` 与业务表保持零耦合。（若以后要跨用户都显示名字，再评估在管理面接口里回填 `resource_name`。）
 
 若担心管理端误把协议价当目录价改，可按同一模型拆成 `billing_account_prices`（`account_id` 必填）与 `billing_prices`（`account_id` 恒空）两张表，匹配时先查前者、miss 再回退后者：语义不变，只是管理面隔离。
 
@@ -441,7 +445,7 @@ type ChargeRequest struct {
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET/POST/PUT | `/api/billing/items` | 计费项目录（系统内置项只读） |
-| GET/POST/PUT/DELETE | `/api/billing/prices` | 价格版本管理（改价 = 新增 `effective_from`，不覆盖历史；按 `account_id` + `resource_type/resource_id` 定位 scope） |
+| GET/POST/PUT/DELETE | `/api/billing/prices` | 价格版本管理（改价 = 新增 `effective_from`，不覆盖历史；未生效的版本可直接 PUT 修改价格字段；按 `account_id` + `resource_type/resource_id` 定位 scope） |
 | GET | `/api/billing/accounts` | 账户列表（余额、欠费、状态） |
 | POST | `/api/billing/accounts/:id/adjust` | 人工调整（赠送/扣减，写 `adjust` 流水，必须带备注） |
 | GET | `/api/billing/ledger` | 流水查询 |

@@ -1083,7 +1083,9 @@ export const billingApi = {
 	/** 按模型 × 计费项聚合的用量（模型监控页） */
 	modelUsage: (params?: BillingSummaryParams) =>
 		http.get<BillingModelUsage>("/billing/usage-by-model", { params }),
-	prices: () => http.get<BillingPriceList>("/billing/prices"),
+	/** 当前生效价格公示。管理员账号会被服务端分流到管理端列表（全部版本），带上筛选参数才收敛成公示口径。 */
+	prices: (params?: BillingPriceQueryParams) =>
+		http.get<BillingPriceList>("/billing/prices", { params }),
 	// 充值（支付渠道 → 余额）。没接支付渠道时回 503，和计费未启用同一个处理。
 	recharge: (data: BillingRechargeRequest) =>
 		http.post<BillingRechargeResult>("/billing/recharge", data),
