@@ -27,6 +27,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/channels"
 	"github.com/liuscraft/orion-x/internal/channels/tg"
+	"github.com/liuscraft/orion-x/internal/channels/wecom"
 	"github.com/liuscraft/orion-x/internal/channels/xiaozhi"
 )
 
@@ -154,6 +155,11 @@ func main() {
 	// from the manager and starts bot instances for devices with tokens.
 	tgCh := tg.NewTGChannel(deps, toolMgr, memorySvc)
 	chMgr.Register(tgCh)
+
+	// WeCom Smart Robot Channel — long connection to openws.work.weixin.qq.com,
+	// one connection per device with bot credentials (polled from the manager).
+	wecomCh := wecom.NewWeComChannel(deps, toolMgr, memorySvc)
+	chMgr.Register(wecomCh)
 
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()

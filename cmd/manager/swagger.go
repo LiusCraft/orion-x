@@ -153,30 +153,82 @@ func swaggerCreateDevice() {}
 // @Router /api/voicebots/{id}/devices/{did} [delete]
 func swaggerDeleteDevice() {}
 
-// swaggerSetTelegramChannel configures a Telegram channel.
-// @Summary Set Telegram channel
-// @Tags Devices
+// swaggerListChannels lists channel platforms and their config fields.
+// @Summary List channel platforms
+// @Tags Channels
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} object
+// @Failure 401 {object} errorResponse
+// @Router /api/channels [get]
+func swaggerListChannels() {}
+
+// swaggerSetChannel configures a device's channel for one platform.
+// @Summary Set device channel
+// @Tags Channels
 // @Accept json
 // @Produce json
 // @Security BearerAuth
 // @Param id path string true "Voicebot ID"
 // @Param did path string true "Device ID"
-// @Param request body object true "Telegram bot token"
+// @Param platform path string true "Platform name (e.g. telegram, wecom)"
+// @Param request body object true "Platform config, validated against GET /api/channels fields"
 // @Success 200 {object} object
 // @Failure 400,401,403,404 {object} errorResponse
-// @Router /api/voicebots/{id}/devices/{did}/channels/telegram [put]
-func swaggerSetTelegramChannel() {}
+// @Router /api/voicebots/{id}/devices/{did}/channels/{platform} [put]
+func swaggerSetChannel() {}
 
-// swaggerDeleteTelegramChannel removes a Telegram channel.
-// @Summary Remove Telegram channel
-// @Tags Devices
+// swaggerDeleteChannel removes a device's channel for one platform.
+// @Summary Remove device channel
+// @Tags Channels
 // @Security BearerAuth
 // @Param id path string true "Voicebot ID"
 // @Param did path string true "Device ID"
+// @Param platform path string true "Platform name (e.g. telegram, wecom)"
 // @Success 200 {object} object
 // @Failure 401,403,404 {object} errorResponse
-// @Router /api/voicebots/{id}/devices/{did}/channels/telegram [delete]
-func swaggerDeleteTelegramChannel() {}
+// @Router /api/voicebots/{id}/devices/{did}/channels/{platform} [delete]
+func swaggerDeleteChannel() {}
+
+// swaggerStartChannelQR starts a scan-to-bind session for a platform that supports it.
+// @Summary Start channel QR binding
+// @Tags Channels
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Voicebot ID"
+// @Param did path string true "Device ID"
+// @Param platform path string true "Platform name (wecom)"
+// @Success 200 {object} object
+// @Failure 400,401,403,404,502 {object} errorResponse
+// @Router /api/voicebots/{id}/devices/{did}/channels/{platform}/qr [post]
+func swaggerStartChannelQR() {}
+
+// swaggerGetChannelQR polls a scan-to-bind session; on success the channel is stored and returned.
+// @Summary Get channel QR binding status
+// @Tags Channels
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Voicebot ID"
+// @Param did path string true "Device ID"
+// @Param platform path string true "Platform name (wecom)"
+// @Param sid path string true "QR session ID"
+// @Success 200 {object} object
+// @Failure 401,403,404 {object} errorResponse
+// @Router /api/voicebots/{id}/devices/{did}/channels/{platform}/qr/{sid} [get]
+func swaggerGetChannelQR() {}
+
+// swaggerCancelChannelQR cancels a scan-to-bind session (idempotent).
+// @Summary Cancel channel QR binding
+// @Tags Channels
+// @Security BearerAuth
+// @Param id path string true "Voicebot ID"
+// @Param did path string true "Device ID"
+// @Param platform path string true "Platform name (wecom)"
+// @Param sid path string true "QR session ID"
+// @Success 200 {object} object
+// @Failure 401,403,404 {object} errorResponse
+// @Router /api/voicebots/{id}/devices/{did}/channels/{platform}/qr/{sid} [delete]
+func swaggerCancelChannelQR() {}
 
 // swaggerProviders documents provider collection operations.
 // @Summary List providers
@@ -921,13 +973,15 @@ func swaggerInternalSessionMessages() {}
 // @InternalRouter /internal/knowledge/search [get]
 func swaggerInternalKnowledgeSearch() {}
 
-// swaggerInternalTelegramBots lists devices configured with Telegram bots.
-// @Summary List Telegram bot devices
+// swaggerInternalChannelDevices lists devices configured for one channel platform.
+// @Summary List devices of a channel platform
 // @Tags Internal
 // @Produce json
+// @Param platform path string true "Platform name (e.g. telegram, wecom)"
 // @Success 200 {array} object
-// @InternalRouter /internal/devices/tg-bots [get]
-func swaggerInternalTelegramBots() {}
+// @Failure 404 {object} errorResponse
+// @InternalRouter /internal/channels/{platform}/devices [get]
+func swaggerInternalChannelDevices() {}
 
 // swaggerUploadAsset uploads a resource file.
 // @Summary Upload resource

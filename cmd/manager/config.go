@@ -27,6 +27,7 @@ type ManagerConfig struct {
 	Billing     BillingConfig     `yaml:"billing"`
 	Payment     PaymentConfig     `yaml:"payment"`
 	APIKey      APIKeyConfig      `yaml:"apikey"`
+	Channels    ChannelsConfig    `yaml:"channels"`
 }
 
 type ServerConfig struct {
@@ -64,6 +65,25 @@ type LoggingConfig struct {
 type InternalConfig struct {
 	Token string `yaml:"token"`
 }
+
+// ChannelsConfig 是通道配置面的运行参数。
+type ChannelsConfig struct {
+	QRBinding QRBindingConfig `yaml:"qr_binding"`
+}
+
+// QRBindingConfig 是「扫码开通」的开关与出网参数（docs/wecom-qr-onboarding-design.md）。
+//
+// 它调用的是一组企微网页端点、不是公开开发者 API：接口一变就可能整体失效，所以
+// 留一个显式开关，关掉后控制台只剩手动填写，其余能力不受影响。
+type QRBindingConfig struct {
+	Enabled *bool  `yaml:"enabled"`  // nil / true = 启用；显式 false 关闭
+	Source  string `yaml:"source"`   // 扫码会话的接入方标识，空 = orion-x
+	BaseURL string `yaml:"base_url"` // 覆盖企微端点根地址（测试/代理），空 = 官方地址
+	Timeout int    `yaml:"timeout"`  // 单次出网超时秒数，0 = 15
+}
+
+// Disabled 报告扫码开通是否被显式关闭。
+func (c QRBindingConfig) Disabled() bool { return c.Enabled != nil && !*c.Enabled }
 
 // BillingConfig 是计费控制面的运行参数（docs/billing-design.md §6 / §14）。
 // 零值可用：ServiceConfig 会拿 service.DefaultConfig() 兜底。

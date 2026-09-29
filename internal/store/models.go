@@ -47,14 +47,23 @@ type Voicebot struct {
 	BaseModel
 }
 
-// Device 注册到某个 voicebot 下的设备
+// Device 注册到某个 voicebot 下的设备。
+//
+// 通道凭证不在这里：它们存在 DeviceChannel，按平台一行（见 device_channel.go）。
+// 模型里已移除的 devices.tg_bot_token 列保留在库中作为回滚余地，不再读写。
 type Device struct {
 	ID         string `gorm:"primaryKey;type:varchar(128)" json:"id"` // 即 hello.DeviceID
 	VoicebotID string `gorm:"not null;index;type:varchar(36)" json:"voicebot_id"`
 	Name       string `gorm:"type:varchar(128)" json:"name"`
-	// TgBotToken is only exposed to the internal service-to-service endpoint.
-	// Public manager API responses use a masked channel status instead.
-	TgBotToken string `gorm:"type:varchar(256)" json:"-"` // 设备绑定的 TG Bot Token
+	BaseModel
+}
+
+// DeviceChannel 是设备在某个通道平台上的配置（凭证等）。
+// Config 的键集合由 internal/channels/platform 的平台声明定义，写入前必须过校验。
+type DeviceChannel struct {
+	DeviceID string            `gorm:"primaryKey;type:varchar(128)" json:"device_id"`
+	Platform string            `gorm:"primaryKey;type:varchar(32)" json:"platform"`
+	Config   datatypes.JSONMap `gorm:"type:jsonb;not null" json:"config"`
 	BaseModel
 }
 
