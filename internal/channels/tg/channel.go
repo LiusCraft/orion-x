@@ -13,6 +13,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/channels"
+	"github.com/liuscraft/orion-x/internal/channels/platform"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
@@ -87,11 +88,11 @@ func tgProviders(deps *channels.Dependencies) *providerpool.Pool {
 	return providerpool.NewPool()
 }
 
-func (c *TGChannel) Name() string { return "tg" }
+func (c *TGChannel) Name() string { return platform.Telegram }
 
 func (c *TGChannel) Info() channels.ChannelInfo {
 	return channels.NewChannelInfo(
-		"tg",
+		platform.Telegram,
 		"Telegram Bot",
 		channels.ChannelPolling,
 		[]channels.Capability{channels.CapText, channels.CapVoiceFile},
@@ -139,7 +140,7 @@ func (c *TGChannel) refreshLoop() {
 }
 
 func (c *TGChannel) refresh() {
-	devices, err := c.deps.DeviceCfgLoader.ListDevicesWithTGBot()
+	devices, err := c.deps.DeviceCfgLoader.ListDeviceChannels(platform.Telegram)
 	if err != nil {
 		logging.Errorf("tg channel: refresh failed: %v", err)
 		return
@@ -165,7 +166,12 @@ func (c *TGChannel) refresh() {
 }
 
 // ensureBotDevice starts a bot for a device if not already running.
-func (c *TGChannel) ensureBotDevice(dev channels.DeviceTGBotInfo) {
+func (c *TGChannel) ensureBotDevice(dev channels.DeviceChannelInfo) {
+	token := dev.Config["bot_token"]
+	if token == "" {
+		return
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -173,7 +179,7 @@ func (c *TGChannel) ensureBotDevice(dev channels.DeviceTGBotInfo) {
 		return // already running
 	}
 
-	bot, err := tgbotapi.NewBotAPI(dev.TgBotToken)
+	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		logging.Errorf("tg channel: init bot for device %q: %v", dev.DeviceID, err)
 		return

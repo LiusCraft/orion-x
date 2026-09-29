@@ -740,6 +740,39 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/channels": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Channels"
+                ],
+                "summary": "List channel platforms",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/data/knowledge/bots/{bot_id}/knowledge_bases": {
             "get": {
                 "security": [
@@ -3636,7 +3669,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/voicebots/{id}/devices/{did}/channels/telegram": {
+        "/api/voicebots/{id}/devices/{did}/channels/{platform}": {
             "put": {
                 "security": [
                     {
@@ -3650,9 +3683,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "Devices"
+                    "Channels"
                 ],
-                "summary": "Set Telegram channel",
+                "summary": "Set device channel",
                 "parameters": [
                     {
                         "type": "string",
@@ -3669,7 +3702,14 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Telegram bot token",
+                        "type": "string",
+                        "description": "Platform name (e.g. telegram, wecom)",
+                        "name": "platform",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Platform config, validated against GET /api/channels fields",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -3718,9 +3758,9 @@ const docTemplate = `{
                     }
                 ],
                 "tags": [
-                    "Devices"
+                    "Channels"
                 ],
-                "summary": "Remove Telegram channel",
+                "summary": "Remove device channel",
                 "parameters": [
                     {
                         "type": "string",
@@ -3733,6 +3773,13 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Device ID",
                         "name": "did",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Platform name (e.g. telegram, wecom)",
+                        "name": "platform",
                         "in": "path",
                         "required": true
                     }

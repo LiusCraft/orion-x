@@ -37,7 +37,7 @@ func newTestRouter(t *testing.T, billingSvc *service.Service, apikeySvc *apikey.
 		voicebots, devices = &store.VoicebotStore{}, &store.DeviceStore{}
 	}
 	return newRouter(secret,
-		nil, nil, voicebots, devices, nil, nil, nil, nil, nil, nil,
+		nil, nil, voicebots, devices, nil, nil, nil, nil, nil, nil, nil,
 		sign, nil, nil, nil, nil, nil, nil, nil, nil,
 		"internal-token", billingSvc, nil, apikeySvc, apikeyAdminOnly)
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/billing"
 	"github.com/liuscraft/orion-x/internal/billing/gateway/epay"
 	"github.com/liuscraft/orion-x/internal/billing/service"
+	"github.com/liuscraft/orion-x/internal/channels/platform"
 	"github.com/liuscraft/orion-x/internal/knowledge"
 	"github.com/liuscraft/orion-x/internal/knowledge/retriever"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/anthropic/messages"
@@ -66,6 +67,11 @@ func main() {
 		logging.Fatalf("open db: %v", err)
 	}
 
+	// 存量设备级凭证（devices.tg_bot_token）搬进 device_channels：一次性、幂等。
+	if _, err := store.BackfillTelegramChannels(db, platform.Telegram); err != nil {
+		logging.Fatalf("backfill device channels: %v", err)
+	}
+
 	// 同步代码中注册的 system providers/models/voices 到数据库。
 	// 使用 meta_hash 做增量对比，只更新有变化的记录。
 	if err := store.SyncSystemProviders(db); err != nil {
@@ -96,6 +102,7 @@ func main() {
 	bindings := store.NewOAuthBindingStore(db)
 	voicebots := store.NewVoicebotStore(db)
 	devices := store.NewDeviceStore(db)
+	deviceChannels := store.NewDeviceChannelStore(db)
 	providers := store.NewProviderStore(db)
 	models := store.NewAIModelStore(db)
 	voices := store.NewModelVoiceStore(db)
@@ -220,7 +227,7 @@ func main() {
 		}()
 	}
 
-	r := newRouter(secret, users, bindings, voicebots, devices, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc, paymentSvc, apikeySvc, cfg.APIKey.AdminOnly)
+	r := newRouter(secret, users, bindings, voicebots, devices, deviceChannels, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc, paymentSvc, apikeySvc, cfg.APIKey.AdminOnly)
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
 
 	go func() {

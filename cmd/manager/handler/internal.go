@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/liuscraft/orion-x/internal/channels/platform"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/llm"
 	"github.com/liuscraft/orion-x/internal/store"
@@ -28,13 +29,14 @@ func hasTopLevelProvider(configJSON string) bool {
 type InternalHandler struct {
 	voicebots *store.VoicebotStore
 	devices   *store.DeviceStore
+	channels  *store.DeviceChannelStore
 	models    *store.AIModelStore
 	voices    *store.ModelVoiceStore
 	mcpBinds  *store.VoicebotMCPBindingStore
 }
 
-func NewInternalHandler(voicebots *store.VoicebotStore, devices *store.DeviceStore, models *store.AIModelStore, voices *store.ModelVoiceStore, mcpBinds *store.VoicebotMCPBindingStore) *InternalHandler {
-	return &InternalHandler{voicebots: voicebots, devices: devices, models: models, voices: voices, mcpBinds: mcpBinds}
+func NewInternalHandler(voicebots *store.VoicebotStore, devices *store.DeviceStore, channels *store.DeviceChannelStore, models *store.AIModelStore, voices *store.ModelVoiceStore, mcpBinds *store.VoicebotMCPBindingStore) *InternalHandler {
+	return &InternalHandler{voicebots: voicebots, devices: devices, channels: channels, models: models, voices: voices, mcpBinds: mcpBinds}
 }
 
 // GET /internal/device-config?device_id=xxx
@@ -80,27 +82,39 @@ func (h *InternalHandler) DeviceConfig(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", []byte(v.ConfigJSON))
 }
 
-// GET /internal/devices/tg-bots — 返回所有配置了 TG Bot Token 的设备列表。
-func (h *InternalHandler) DeviceTGBots(c *gin.Context) {
-	devices, err := h.devices.ListWithTGBot()
+// GET /internal/channels/:platform/devices — 返回该平台上所有已配置的设备及其原始配置
+// （含敏感值）。平台名取自 internal/channels/platform。
+func (h *InternalHandler) ChannelDevices(c *gin.Context) {
+	platformName := c.Param("platform")
+	if _, ok := platform.Get(platformName); !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "unknown platform"})
+		return
+	}
+
+	rows, err := h.channels.ListByPlatform(platformName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	type tgBotDevice struct {
-		DeviceID     string `json:"device_id"`
-		DeviceName   string `json:"device_name"`
-		TgBotToken   string `json:"tg_bot_token"`
-		VoicebotID   string `json:"voicebot_id"`
-		VoicebotName string `json:"voicebot_name,omitempty"`
+
+	type deviceChannel struct {
+		DeviceID     string            `json:"device_id"`
+		DeviceName   string            `json:"device_name"`
+		VoicebotID   string            `json:"voicebot_id"`
+		VoicebotName string            `json:"voicebot_name,omitempty"`
+		Config       map[string]string `json:"config"`
 	}
-	result := make([]tgBotDevice, 0, len(devices))
-	for _, d := range devices {
-		entry := tgBotDevice{
+	result := make([]deviceChannel, 0, len(rows))
+	for _, row := range rows {
+		d, err := h.devices.GetByID(row.DeviceID)
+		if err != nil {
+			continue // 设备已删而通道行还在：不回给数据面，等设备删除路径清理
+		}
+		entry := deviceChannel{
 			DeviceID:   d.ID,
 			DeviceName: d.Name,
-			TgBotToken: d.TgBotToken,
 			VoicebotID: d.VoicebotID,
+			Config:     row.ConfigStrings(),
 		}
 		if v, err := h.voicebots.GetByID(d.VoicebotID); err == nil {
 			entry.VoicebotName = v.Name

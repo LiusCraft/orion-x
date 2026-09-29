@@ -29,16 +29,36 @@ export interface Voicebot {
 	creator: string;
 }
 
+export interface DeviceChannelStatus {
+	platform: string;
+	display_name: string;
+	enabled: boolean;
+	config?: Record<string, string>;
+}
+
+export interface ChannelField {
+	key: string;
+	label: string;
+	required: boolean;
+	secret: boolean;
+	hint?: string;
+}
+
+export interface ChannelPlatform {
+	name: string;
+	display_name: string;
+	type: string;
+	capabilities: string[];
+	fields: ChannelField[];
+}
+
 export interface Device {
 	id: string;
 	voicebot_id: string;
 	name: string;
 	created_at: string;
 	creator: string;
-	telegram: {
-		enabled: boolean;
-		token_hint?: string;
-	};
+	channels: DeviceChannelStatus[];
 }
 
 export interface OAuthBinding {
@@ -113,14 +133,24 @@ export const deviceApi = {
 		http.post<Device>(`/voicebots/${voicebotId}/devices`, { id, name }),
 	remove: (voicebotId: string, deviceId: string) =>
 		http.delete(`/voicebots/${voicebotId}/devices/${deviceId}`),
-	setTelegram: (voicebotId: string, deviceId: string, botToken: string) =>
-		http.put<Device>(
-			`/voicebots/${voicebotId}/devices/${deviceId}/channels/telegram`,
-			{ bot_token: botToken },
+};
+
+// 通道平台与配置 Schema：能配什么由服务端声明，前端不写平台分支。
+export const channelApi = {
+	listPlatforms: () => http.get<ChannelPlatform[]>("/channels"),
+	set: (
+		voicebotId: string,
+		deviceId: string,
+		platform: string,
+		config: Record<string, string>,
+	) =>
+		http.put<DeviceChannelStatus>(
+			`/voicebots/${voicebotId}/devices/${deviceId}/channels/${platform}`,
+			{ config },
 		),
-	clearTelegram: (voicebotId: string, deviceId: string) =>
-		http.delete<Device>(
-			`/voicebots/${voicebotId}/devices/${deviceId}/channels/telegram`,
+	remove: (voicebotId: string, deviceId: string, platform: string) =>
+		http.delete<DeviceChannelStatus>(
+			`/voicebots/${voicebotId}/devices/${deviceId}/channels/${platform}`,
 		),
 };
 

@@ -470,6 +470,26 @@ paths:
       summary: List available resources
       tags:
       - Resources
+  /api/channels:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: object
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: List channel platforms
+      tags:
+      - Channels
   /api/data/knowledge/bots/{bot_id}/knowledge_bases:
     get:
       parameters:
@@ -2295,7 +2315,7 @@ paths:
       summary: Delete device
       tags:
       - Devices
-  /api/voicebots/{id}/devices/{did}/channels/telegram:
+  /api/voicebots/{id}/devices/{did}/channels/{platform}:
     delete:
       parameters:
       - description: Voicebot ID
@@ -2306,6 +2326,11 @@ paths:
       - description: Device ID
         in: path
         name: did
+        required: true
+        type: string
+      - description: Platform name (e.g. telegram, wecom)
+        in: path
+        name: platform
         required: true
         type: string
       responses:
@@ -2327,9 +2352,9 @@ paths:
             $ref: '#/definitions/main.errorResponse'
       security:
       - BearerAuth: []
-      summary: Remove Telegram channel
+      summary: Remove device channel
       tags:
-      - Devices
+      - Channels
     put:
       consumes:
       - application/json
@@ -2344,7 +2369,12 @@ paths:
         name: did
         required: true
         type: string
-      - description: Telegram bot token
+      - description: Platform name (e.g. telegram, wecom)
+        in: path
+        name: platform
+        required: true
+        type: string
+      - description: Platform config, validated against GET /api/channels fields
         in: body
         name: request
         required: true
@@ -2375,9 +2405,9 @@ paths:
             $ref: '#/definitions/main.errorResponse'
       security:
       - BearerAuth: []
-      summary: Set Telegram channel
+      summary: Set device channel
       tags:
-      - Devices
+      - Channels
   /api/voicebots/{id}/mcps:
     get:
       parameters:

@@ -3,12 +3,15 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   voicebotApi,
   deviceApi,
+  channelApi,
   languageApi,
   availableResourcesApi,
   modelApi,
   mcpApi,
   knowledgeApi,
   type Device,
+  type DeviceChannelStatus,
+  type ChannelPlatform,
   type Language,
   type AvailableResources,
   type AIModel,
@@ -224,6 +227,16 @@ function Field({
 
 const inp = "h-9";
 
+// channelHint 取一个平台已配置值的回显（优先敏感字段的掩码值）。
+function channelHint(
+  platform: ChannelPlatform,
+  status: DeviceChannelStatus | undefined,
+): string {
+  if (!status?.config) return "";
+  const field = platform.fields.find((f) => f.secret) ?? platform.fields[0];
+  return field ? (status.config[field.key] ?? "") : "";
+}
+
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -264,10 +277,12 @@ export default function AgentDetailPage() {
   const [detailMcp, setDetailMcp] = useState<MCPServer | null>(null);
   const [devAdding, setDevAdding] = useState(false);
   const [devErr, setDevErr] = useState("");
-  const [channelDeviceID, setChannelDeviceID] = useState<string | null>(null);
-  const [telegramToken, setTelegramToken] = useState("");
-  const [telegramSaving, setTelegramSaving] = useState(false);
-  const [telegramErr, setTelegramErr] = useState("");
+  	const [channelDeviceID, setChannelDeviceID] = useState<string | null>(null);
+  	const [channelPlatforms, setChannelPlatforms] = useState<ChannelPlatform[]>([]);
+  	// 键是 `${deviceId}:${platform}:${field}`，保存后清空。
+  	const [channelInputs, setChannelInputs] = useState<Record<string, string>>({});
+  	const [channelSaving, setChannelSaving] = useState<string | null>(null);
+  	const [channelErr, setChannelErr] = useState("");
 
   // Knowledge base state
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
@@ -309,25 +324,27 @@ export default function AgentDetailPage() {
   useEffect(() => {
     if (!id) return;
     (async () => {
-      const [b, d, langs, llm, mcpSv, mcpBd] = await Promise.all([
-        voicebotApi.get(id),
-        deviceApi.list(id),
-        languageApi.list(),
-        modelApi.list(),
-        mcpApi.servers.list({
-          page: 1,
-          page_size: 9999,
-        }) /* ponytail: fetches all for binding visibility, paginated client-side */,
-        mcpApi.bindings.list(id),
-      ]);
+      		const [b, d, langs, llm, mcpSv, mcpBd, platforms] = await Promise.all([
+      			voicebotApi.get(id),
+      			deviceApi.list(id),
+      			languageApi.list(),
+      			modelApi.list(),
+      			mcpApi.servers.list({
+      				page: 1,
+      				page_size: 9999,
+      			}) /* ponytail: fetches all for binding visibility, paginated client-side */,
+      			mcpApi.bindings.list(id),
+      			channelApi.listPlatforms(),
+      		]);
       const parsed = parseCfg(b.data.config_json);
       setName(b.data.name);
       setCfg(parsed);
       setDevices(d.data);
       setLanguages(langs.data);
       setLlmModels(llm.data);
-      setMcpServers(mcpSv.data.data);
-      setMcpBindings(mcpBd.data.filter((m) => m.bound));
+      			setMcpServers(mcpSv.data.data);
+      			setMcpBindings(mcpBd.data.filter((m) => m.bound));
+      			setChannelPlatforms(platforms.data);
 
       const res = await availableResourcesApi.list(
         parsed.language || undefined,
@@ -515,52 +532,89 @@ export default function AgentDetailPage() {
     );
   });
 
-  const updateDevice = (device: Device) => {
-    setDevices((prev) => prev.map((d) => (d.id === device.id ? device : d)));
+  const updateDeviceChannels = (
+    deviceID: string,
+    platform: string,
+    status: DeviceChannelStatus,
+  ) => {
+    setDevices((prev) =>
+      prev.map((d) => {
+        if (d.id !== deviceID) return d;
+        const rest = d.channels.filter((c) => c.platform !== platform);
+        return {
+          ...d,
+          channels: status.enabled ? [...rest, status] : rest,
+        };
+      }),
+    );
   };
 
   const openChannelSettings = (deviceID: string) => {
     setChannelDeviceID((current) => (current === deviceID ? null : deviceID));
-    setTelegramToken("");
-    setTelegramErr("");
+    setChannelInputs({});
+    setChannelErr("");
   };
 
-  const handleSaveTelegram = async (deviceID: string) => {
-    if (!id || !telegramToken.trim()) return;
-    setTelegramSaving(true);
-    setTelegramErr("");
+  const channelInputKey = (
+    deviceID: string,
+    platform: string,
+    field: string,
+  ) => `${deviceID}:${platform}:${field}`;
+
+  const handleSaveChannel = async (
+    deviceID: string,
+    platform: ChannelPlatform,
+  ) => {
+    if (!id) return;
+    const config: Record<string, string> = {};
+    for (const field of platform.fields) {
+      const value = (
+        channelInputs[channelInputKey(deviceID, platform.name, field.key)] ?? ""
+      ).trim();
+      if (!value) continue;
+      config[field.key] = value;
+    }
+    if (Object.keys(config).length === 0) return;
+
+    setChannelSaving(`${deviceID}:${platform.name}`);
+    setChannelErr("");
     try {
-      const { data } = await deviceApi.setTelegram(
-        id,
-        deviceID,
-        telegramToken.trim(),
-      );
-      updateDevice(data);
-      setTelegramToken("");
+      const { data } = await channelApi.set(id, deviceID, platform.name, config);
+      updateDeviceChannels(deviceID, platform.name, data);
+      setChannelInputs((prev) => {
+        const next = { ...prev };
+        for (const field of platform.fields) {
+          delete next[channelInputKey(deviceID, platform.name, field.key)];
+        }
+        return next;
+      });
     } catch (e: unknown) {
-      setTelegramErr(
+      setChannelErr(
         (e as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? "保存 Telegram 配置失败",
+          ?.error ?? `保存 ${platform.display_name} 配置失败`,
       );
     } finally {
-      setTelegramSaving(false);
+      setChannelSaving(null);
     }
   };
 
-  const handleClearTelegram = async (deviceID: string) => {
-    if (!id || !confirm("确认断开此设备的 Telegram Bot？")) return;
-    setTelegramSaving(true);
-    setTelegramErr("");
+  const handleClearChannel = async (
+    deviceID: string,
+    platform: ChannelPlatform,
+  ) => {
+    if (!id || !confirm(`确认断开此设备的 ${platform.display_name}？`)) return;
+    setChannelSaving(`${deviceID}:${platform.name}`);
+    setChannelErr("");
     try {
-      const { data } = await deviceApi.clearTelegram(id, deviceID);
-      updateDevice(data);
+      const { data } = await channelApi.remove(id, deviceID, platform.name);
+      updateDeviceChannels(deviceID, platform.name, data);
     } catch (e: unknown) {
-      setTelegramErr(
+      setChannelErr(
         (e as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? "断开 Telegram Bot 失败",
+          ?.error ?? `断开 ${platform.display_name} 失败`,
       );
     } finally {
-      setTelegramSaving(false);
+      setChannelSaving(null);
     }
   };
 
@@ -1972,56 +2026,96 @@ export default function AgentDetailPage() {
                         </div>
                       </div>
                       {channelDeviceID === d.id && (
-                        <div className="border-t border-zinc-800 px-4 py-3 space-y-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Send className="w-4 h-4 text-sky-400 shrink-0" />
-                              <div>
-                                <p className="text-sm text-zinc-200">
-                                  Telegram Bot
-                                </p>
-                                <p className="text-xs text-zinc-500 mt-0.5">
-                                  {d.telegram.enabled
-                                    ? `已连接 ${d.telegram.token_hint ?? ""}`
-                                    : "未连接"}
-                                </p>
+                        <div className="border-t border-zinc-800 px-4 py-3 space-y-4">
+                          {channelPlatforms.map((platform) => {
+                            const status = d.channels.find(
+                              (c) => c.platform === platform.name,
+                            );
+                            const connected = status?.enabled ?? false;
+                            const saving =
+                              channelSaving === `${d.id}:${platform.name}`;
+                            const filled = platform.fields.every(
+                              (f) =>
+                                (
+                                  channelInputs[
+                                    channelInputKey(d.id, platform.name, f.key)
+                                  ] ?? ""
+                                ).trim() !== "",
+                            );
+                            return (
+                              <div key={platform.name} className="space-y-2">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <Send className="w-4 h-4 text-sky-400 shrink-0" />
+                                    <div>
+                                      <p className="text-sm text-zinc-200">
+                                        {platform.display_name}
+                                      </p>
+                                      <p className="text-xs text-zinc-500 mt-0.5">
+                                        {connected
+                                          ? `已连接 ${channelHint(platform, status)}`
+                                          : "未连接"}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  {connected && (
+                                    <Button
+                                      variant="outline"
+                                      onClick={() =>
+                                        handleClearChannel(d.id, platform)
+                                      }
+                                      disabled={saving}
+                                      className="h-8 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-red-300"
+                                    >
+                                      断开
+                                    </Button>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {platform.fields.map((field) => (
+                                    <Input
+                                      key={field.key}
+                                      type={field.secret ? "password" : "text"}
+                                      value={
+                                        channelInputs[
+                                          channelInputKey(
+                                            d.id,
+                                            platform.name,
+                                            field.key,
+                                          )
+                                        ] ?? ""
+                                      }
+                                      onChange={(e) =>
+                                        setChannelInputs((prev) => ({
+                                          ...prev,
+                                          [channelInputKey(
+                                            d.id,
+                                            platform.name,
+                                            field.key,
+                                          )]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder={
+                                        field.hint || field.label
+                                      }
+                                      className={`${inp} flex-1 min-w-[12rem]`}
+                                    />
+                                  ))}
+                                  <Button
+                                    onClick={() =>
+                                      handleSaveChannel(d.id, platform)
+                                    }
+                                    disabled={saving || !filled}
+                                    className="h-9 bg-violet-600 hover:bg-violet-500 text-white shrink-0"
+                                  >
+                                    {saving ? "保存中..." : "保存"}
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
-                            {d.telegram.enabled && (
-                              <Button
-                                variant="outline"
-                                onClick={() => handleClearTelegram(d.id)}
-                                disabled={telegramSaving}
-                                className="h-8 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-red-300"
-                              >
-                                断开
-                              </Button>
-                            )}
-                          </div>
-                          <div className="flex gap-2">
-                            <Input
-                              type="password"
-                              value={telegramToken}
-                              onChange={(e) => setTelegramToken(e.target.value)}
-                              placeholder={
-                                d.telegram.enabled
-                                  ? "输入新 Bot Token 以替换"
-                                  : "Bot Token"
-                              }
-                              className={inp}
-                            />
-                            <Button
-                              onClick={() => handleSaveTelegram(d.id)}
-                              disabled={telegramSaving || !telegramToken.trim()}
-                              className="h-9 bg-violet-600 hover:bg-violet-500 text-white shrink-0"
-                            >
-                              {telegramSaving ? "保存中..." : "保存"}
-                            </Button>
-                          </div>
-                          {telegramErr && (
-                            <p className="text-xs text-red-400">
-                              {telegramErr}
-                            </p>
+                            );
+                          })}
+                          {channelErr && (
+                            <p className="text-xs text-red-400">{channelErr}</p>
                           )}
                         </div>
                       )}

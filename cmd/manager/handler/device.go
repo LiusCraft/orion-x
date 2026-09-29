@@ -3,7 +3,6 @@ package handler
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,11 +15,7 @@ import (
 type DeviceHandler struct {
 	voicebots *store.VoicebotStore
 	devices   *store.DeviceStore
-}
-
-type telegramChannelStatus struct {
-	Enabled   bool   `json:"enabled"`
-	TokenHint string `json:"token_hint,omitempty"`
+	channels  *store.DeviceChannelStore
 }
 
 type deviceResponse struct {
@@ -30,42 +25,24 @@ type deviceResponse struct {
 	CreatedAt  time.Time             `json:"created_at"`
 	UpdatedAt  time.Time             `json:"updated_at"`
 	Creator    string                `json:"creator"`
-	Telegram   telegramChannelStatus `json:"telegram"`
+	Channels   []deviceChannelStatus `json:"channels"`
 }
 
-func maskTelegramToken(token string) string {
-	if len(token) <= 8 {
-		return "********"
-	}
-	return token[:4] + "..." + token[len(token)-4:]
-}
-
-func newDeviceResponse(d *store.Device) deviceResponse {
-	telegram := telegramChannelStatus{Enabled: d.TgBotToken != ""}
-	if telegram.Enabled {
-		telegram.TokenHint = maskTelegramToken(d.TgBotToken)
-	}
+func newDeviceResponse(d *store.Device, channelRows []store.DeviceChannel) deviceResponse {
 	return deviceResponse{
 		ID: d.ID, VoicebotID: d.VoicebotID, Name: d.Name,
-		CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt, Creator: d.Creator, Telegram: telegram,
+		CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt, Creator: d.Creator,
+		Channels: newDeviceChannelStatuses(channelRows),
 	}
 }
 
-func newDeviceResponses(devices []store.Device) []deviceResponse {
-	responses := make([]deviceResponse, 0, len(devices))
-	for i := range devices {
-		responses = append(responses, newDeviceResponse(&devices[i]))
-	}
-	return responses
+func NewDeviceHandler(voicebots *store.VoicebotStore, devices *store.DeviceStore, channels *store.DeviceChannelStore) *DeviceHandler {
+	return &DeviceHandler{voicebots: voicebots, devices: devices, channels: channels}
 }
 
-func NewDeviceHandler(voicebots *store.VoicebotStore, devices *store.DeviceStore) *DeviceHandler {
-	return &DeviceHandler{voicebots: voicebots, devices: devices}
-}
-
-// 校验当前用户是否拥有该 voicebot
-func (h *DeviceHandler) ownerVoicebot(c *gin.Context) (*store.Voicebot, bool) {
-	v, err := h.voicebots.GetByID(c.Param("id"))
+// ownerVoicebot 校验当前用户是否拥有该 voicebot。
+func ownerVoicebot(c *gin.Context, voicebots *store.VoicebotStore) (*store.Voicebot, bool) {
+	v, err := voicebots.GetByID(c.Param("id"))
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "voicebot not found"})
 		return nil, false
@@ -81,9 +58,30 @@ func (h *DeviceHandler) ownerVoicebot(c *gin.Context) (*store.Voicebot, bool) {
 	return v, true
 }
 
+// deviceForVoicebot 取路径上的设备并校验它属于该 voicebot 的 owner。
+func deviceForVoicebot(c *gin.Context, voicebots *store.VoicebotStore, devices *store.DeviceStore) (*store.Device, bool) {
+	if _, ok := ownerVoicebot(c, voicebots); !ok {
+		return nil, false
+	}
+	d, err := devices.GetByID(c.Param("did"))
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "device not found"})
+		return nil, false
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return nil, false
+	}
+	if d.VoicebotID != c.Param("id") {
+		c.JSON(http.StatusNotFound, gin.H{"error": "device not found"})
+		return nil, false
+	}
+	return d, true
+}
+
 // GET /api/voicebots/:id/devices
 func (h *DeviceHandler) List(c *gin.Context) {
-	if _, ok := h.ownerVoicebot(c); !ok {
+	if _, ok := ownerVoicebot(c, h.voicebots); !ok {
 		return
 	}
 	list, err := h.devices.ListByVoicebot(c.Param("id"))
@@ -91,7 +89,22 @@ func (h *DeviceHandler) List(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, newDeviceResponses(list))
+
+	ids := make([]string, 0, len(list))
+	for _, d := range list {
+		ids = append(ids, d.ID)
+	}
+	grouped, err := h.channels.ListByDevices(ids)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	responses := make([]deviceResponse, 0, len(list))
+	for i := range list {
+		responses = append(responses, newDeviceResponse(&list[i], grouped[list[i].ID]))
+	}
+	c.JSON(http.StatusOK, responses)
 }
 
 type createDeviceRequest struct {
@@ -101,7 +114,7 @@ type createDeviceRequest struct {
 
 // POST /api/voicebots/:id/devices
 func (h *DeviceHandler) Create(c *gin.Context) {
-	v, ok := h.ownerVoicebot(c)
+	v, ok := ownerVoicebot(c, h.voicebots)
 	if !ok {
 		return
 	}
@@ -123,77 +136,16 @@ func (h *DeviceHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, newDeviceResponse(d))
-}
-
-func (h *DeviceHandler) deviceForVoicebot(c *gin.Context) (*store.Device, bool) {
-	if _, ok := h.ownerVoicebot(c); !ok {
-		return nil, false
-	}
-	d, err := h.devices.GetByID(c.Param("did"))
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "device not found"})
-		return nil, false
-	}
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return nil, false
-	}
-	if d.VoicebotID != c.Param("id") {
-		c.JSON(http.StatusNotFound, gin.H{"error": "device not found"})
-		return nil, false
-	}
-	return d, true
-}
-
-type setTelegramChannelRequest struct {
-	BotToken string `json:"bot_token" binding:"required"`
-}
-
-// SetTelegramChannel PUT /api/voicebots/:id/devices/:did/channels/telegram
-func (h *DeviceHandler) SetTelegramChannel(c *gin.Context) {
-	d, ok := h.deviceForVoicebot(c)
-	if !ok {
-		return
-	}
-	var req setTelegramChannelRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bot_token is required"})
-		return
-	}
-	token := strings.TrimSpace(req.BotToken)
-	if token == "" || len(token) > 256 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid Telegram bot token"})
-		return
-	}
-	if err := h.devices.SetTgBotToken(d.ID, token); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	d.TgBotToken = token
-	c.JSON(http.StatusOK, newDeviceResponse(d))
-}
-
-// DeleteTelegramChannel DELETE /api/voicebots/:id/devices/:did/channels/telegram
-func (h *DeviceHandler) DeleteTelegramChannel(c *gin.Context) {
-	d, ok := h.deviceForVoicebot(c)
-	if !ok {
-		return
-	}
-	if err := h.devices.SetTgBotToken(d.ID, ""); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	d.TgBotToken = ""
-	c.JSON(http.StatusOK, newDeviceResponse(d))
+	c.JSON(http.StatusCreated, newDeviceResponse(d, nil))
 }
 
 // DELETE /api/voicebots/:id/devices/:did
 func (h *DeviceHandler) Delete(c *gin.Context) {
-	d, ok := h.deviceForVoicebot(c)
+	d, ok := deviceForVoicebot(c, h.voicebots, h.devices)
 	if !ok {
 		return
 	}
+	// 设备删除连带清掉它在各平台的通道配置（DeviceStore.Delete 内做）。
 	if err := h.devices.Delete(d.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

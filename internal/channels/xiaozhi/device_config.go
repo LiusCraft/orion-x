@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/channels"
+	"github.com/liuscraft/orion-x/internal/config"
 )
 
 // DeviceConfigLoader resolves a per-device AppConfig from the manager service.
@@ -64,22 +64,23 @@ func (l *HTTPDeviceConfigLoader) LoadConfig(deviceID string) (*config.AppConfig,
 	return cfg, nil
 }
 
-// ListDevicesWithTGBot returns all devices that have a tg_bot_token set.
-func (l *HTTPDeviceConfigLoader) ListDevicesWithTGBot() ([]channels.DeviceTGBotInfo, error) {
-	u := l.managerURL + "/internal/devices/tg-bots"
+// ListDeviceChannels returns all devices that have a configuration for the
+// given platform, with config values in plaintext (internal endpoint only).
+func (l *HTTPDeviceConfigLoader) ListDeviceChannels(platformName string) ([]channels.DeviceChannelInfo, error) {
+	u := l.managerURL + "/internal/channels/" + url.PathEscape(platformName) + "/devices"
 	resp, err := l.client.Get(u)
 	if err != nil {
-		return nil, fmt.Errorf("list tg bots: GET %s: %w", u, err)
+		return nil, fmt.Errorf("list %s channels: GET %s: %w", platformName, u, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list tg bots: unexpected status %d", resp.StatusCode)
+		return nil, fmt.Errorf("list %s channels: unexpected status %d", platformName, resp.StatusCode)
 	}
 
-	var list []channels.DeviceTGBotInfo
+	var list []channels.DeviceChannelInfo
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return nil, fmt.Errorf("list tg bots: decode: %w", err)
+		return nil, fmt.Errorf("list %s channels: decode: %w", platformName, err)
 	}
 	return list, nil
 }

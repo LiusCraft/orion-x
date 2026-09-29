@@ -46,11 +46,13 @@ var routeScopes = ScopeTable{
 	"POST /api/agent-templates/:id/use": {apikey.ScopeAgentWrite},
 
 	// ── 设备与通道 ──
-	"GET /api/voicebots/:id/devices":                           {apikey.ScopeDeviceRead},
-	"POST /api/voicebots/:id/devices":                          {apikey.ScopeDeviceWrite},
-	"DELETE /api/voicebots/:id/devices/:did":                   {apikey.ScopeDeviceWrite},
-	"PUT /api/voicebots/:id/devices/:did/channels/telegram":    {apikey.ScopeDeviceWrite},
-	"DELETE /api/voicebots/:id/devices/:did/channels/telegram": {apikey.ScopeDeviceWrite},
+	// 通道配置是平台无关的两个端点，能配什么由平台声明（GET /api/channels）决定。
+	"GET /api/channels":                                         {apikey.ScopeDeviceRead},
+	"GET /api/voicebots/:id/devices":                            {apikey.ScopeDeviceRead},
+	"POST /api/voicebots/:id/devices":                           {apikey.ScopeDeviceWrite},
+	"DELETE /api/voicebots/:id/devices/:did":                    {apikey.ScopeDeviceWrite},
+	"PUT /api/voicebots/:id/devices/:did/channels/:platform":    {apikey.ScopeDeviceWrite},
+	"DELETE /api/voicebots/:id/devices/:did/channels/:platform": {apikey.ScopeDeviceWrite},
 
 	// ── 供应商 / 模型 / 音色（音色克隆会扣费，所以它要 model:write） ──
 	"GET /api/providers":                 {apikey.ScopeModelRead},

@@ -25,19 +25,21 @@ type DeviceConfigLoader interface {
 	// LoadConfig 根据 device_id 获取 AppConfig。返回 nil 表示设备未注册。
 	LoadConfig(deviceID string) (*config.AppConfig, error)
 
-	// ListDevicesWithTGBot 返回所有配置了 tg_bot_token 的设备列表。
-	ListDevicesWithTGBot() ([]DeviceTGBotInfo, error)
+	// ListDeviceChannels 返回指定平台上所有已配置的设备及其原始配置（含敏感值）。
+	// platform 取 internal/channels/platform 的平台标识。
+	ListDeviceChannels(platform string) ([]DeviceChannelInfo, error)
 
 	// ManagerURL 返回 manager 服务的 base URL。
 	ManagerURL() string
 }
 
-// DeviceTGBotInfo 是设备的 TG Bot 信息，由 ListDevicesWithTGBot 返回。
-type DeviceTGBotInfo struct {
-	DeviceID   string `json:"device_id"`
-	DeviceName string `json:"device_name"`
-	TgBotToken string `json:"tg_bot_token"`
-	VoicebotID string `json:"voicebot_id"`
+// DeviceChannelInfo 是设备在一个通道平台上的配置，由 ListDeviceChannels 返回。
+// Config 的键集合由平台声明（internal/channels/platform）定义，值为明文凭证。
+type DeviceChannelInfo struct {
+	DeviceID   string            `json:"device_id"`
+	DeviceName string            `json:"device_name"`
+	VoicebotID string            `json:"voicebot_id"`
+	Config     map[string]string `json:"config"`
 }
 
 // Dependencies 是 Manager 注入给各 Channel 的共享依赖。

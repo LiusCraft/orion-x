@@ -24,6 +24,7 @@ func newRouter(
 	bindings *store.OAuthBindingStore,
 	voicebots *store.VoicebotStore,
 	devices *store.DeviceStore,
+	deviceChannels *store.DeviceChannelStore,
 	providers *store.ProviderStore,
 	models *store.AIModelStore,
 	voices *store.ModelVoiceStore,
@@ -70,7 +71,8 @@ func newRouter(
 
 	authH := handler.NewAuthHandler(users, bindings, signToken)
 	botH := handler.NewVoicebotHandler(voicebots)
-	devH := handler.NewDeviceHandler(voicebots, devices)
+	devH := handler.NewDeviceHandler(voicebots, devices, deviceChannels)
+	channelH := handler.NewChannelHandler(voicebots, devices, deviceChannels)
 	providerH := handler.NewProviderHandler(providers)
 	modelH := handler.NewModelHandler(models)
 	// 计费关闭（billing.enabled: false）时 billingSvc 为 nil：业务模块拿到的是 nil
@@ -82,7 +84,7 @@ func newRouter(
 	voiceH := handler.NewVoiceHandler(voices, models, assetSvc, billingMeter)
 	langH := handler.NewLanguageHandler()
 	mcpH := handler.NewMCPHandler(mcpMarket, mcpServers, mcpBindings, voicebots)
-	internalH := handler.NewInternalHandler(voicebots, devices, models, voices, mcpBindings)
+	internalH := handler.NewInternalHandler(voicebots, devices, deviceChannels, models, voices, mcpBindings)
 	oauthH := handler.NewOAuthHandler(users, bindings, signToken)
 	billingInternalH := handler.NewInternalBillingHandler(billingSvc)
 	billingAdminH := handler.NewBillingAdminHandler(billingSvc)
@@ -140,6 +142,9 @@ func newRouter(
 		apiKeys.GET("/scopes", apiKeyH.Scopes)
 		apiKeys.DELETE("/:id", apiKeyH.Revoke)
 
+		// 通道平台清单 + 配置字段 Schema：配置面只有这一处「有哪些平台」的权威。
+		api.GET("/channels", authMw, scopeMw, channelH.ListPlatforms)
+
 		bots := api.Group("/voicebots", authMw, scopeMw)
 		bots.GET("", botH.List)
 		bots.POST("", botH.Create)
@@ -150,8 +155,9 @@ func newRouter(
 		bots.GET("/:id/devices", devH.List)
 		bots.POST("/:id/devices", devH.Create)
 		bots.DELETE("/:id/devices/:did", devH.Delete)
-		bots.PUT("/:id/devices/:did/channels/telegram", devH.SetTelegramChannel)
-		bots.DELETE("/:id/devices/:did/channels/telegram", devH.DeleteTelegramChannel)
+		// 通道配置是平台无关的两个端点：能配什么由 GET /api/channels 的字段 Schema 决定。
+		bots.PUT("/:id/devices/:did/channels/:platform", channelH.SetChannel)
+		bots.DELETE("/:id/devices/:did/channels/:platform", channelH.DeleteChannel)
 
 		pvd := api.Group("/providers", authMw, scopeMw)
 		pvd.GET("", providerH.List)
@@ -308,7 +314,7 @@ func newRouter(
 		internal.GET("/devices/:device_id/sessions/:session_id", turnH.GetSessionMessages)
 
 		internal.GET("/knowledge/search", dataKnowH.Search)
-		internal.GET("/devices/tg-bots", internalH.DeviceTGBots)
+		internal.GET("/channels/:platform/devices", internalH.ChannelDevices)
 
 		internal.POST("/agent-templates", tplH.AdminCreate)
 		internal.PUT("/agent-templates/:id", tplH.AdminUpdate)
