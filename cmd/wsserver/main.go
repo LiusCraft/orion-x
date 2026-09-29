@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	apikeyclient "github.com/liuscraft/orion-x/internal/apikey/client"
 	billingclient "github.com/liuscraft/orion-x/internal/billing/client"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/anthropic/messages"
 	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
@@ -71,6 +72,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Invalid manager configuration: %v\n", err)
 		os.Exit(1)
 	}
+	if err := xiaozhi.ValidateAuthConfig(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid auth configuration: %v\n", err)
+		os.Exit(1)
+	}
 	cfg.Manager.URL = strings.TrimRight(strings.TrimSpace(cfg.Manager.URL), "/")
 
 	if err := logging.Init(logging.Config{
@@ -116,12 +121,27 @@ func main() {
 	// Shared dependencies for channels
 	deviceCfgLoader := xiaozhi.NewHTTPDeviceConfigLoader(cfg.Manager.URL)
 	sessions := session.NewManager()
+	// 握手鉴权（docs/wsserver-apikey-auth-design.md）：默认关闭，开启时每个 /ws
+	// 连接先由 manager 校验 Key + 设备归属。fail closed：verifier 非 nil 时校验
+	// 失败一律拒绝。
+	var keyVerifier channels.KeyVerifier
+	if cfg.Auth.AuthEnabled() {
+		keyVerifier = apikeyclient.New(apikeyclient.Config{
+			BaseURL: cfg.Manager.URL,
+			Token:   cfg.Manager.Token,
+			Timeout: cfg.Auth.Timeout,
+		})
+		logging.Infof("wsserver: handshake auth enabled (manager=%s)", cfg.Manager.URL)
+	} else {
+		logging.Infof("wsserver: handshake auth disabled")
+	}
 	deps := &channels.Dependencies{
 		DeviceCfgLoader: deviceCfgLoader,
 		Sessions:        sessions,
 		Tasks:           task.NewRegistry(sessions),
 		Providers:       provider.NewPool(),
 		Billing:         newBillingFactory(cfg),
+		KeyVerifier:     keyVerifier,
 	}
 
 	chMgr := channels.NewManager(deps)

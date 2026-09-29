@@ -97,3 +97,20 @@ func TestRouteScopesCoverTheAnchorRoutes(t *testing.T) {
 		}
 	}
 }
+
+// TestDataPlaneScopesAreRegistered 钉住覆盖性检查的第三个方向：数据面消费的 scope
+// （device:connect 由 /internal/apikey/verify 判定，没有 /api 路由）必须登记在册，
+// 否则反向检查会把目录里的它当成"给了但没生效"。
+func TestDataPlaneScopesAreRegistered(t *testing.T) {
+	if len(dataPlaneScopes) == 0 {
+		t.Fatal("dataPlaneScopes is empty; device:connect must be registered")
+	}
+	for _, scope := range dataPlaneScopes {
+		if !catalogHas(scope) {
+			t.Errorf("data plane consumes scope %q that is not in the catalog", scope)
+		}
+	}
+	if problems := ValidateCoverage(nil); len(problems) > 0 {
+		t.Fatalf("ValidateCoverage reported problems: %v", problems)
+	}
+}

@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"github.com/liuscraft/orion-x/internal/agent"
+	"github.com/liuscraft/orion-x/internal/apikey"
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/audio/codec"
 	"github.com/liuscraft/orion-x/internal/channels"
@@ -52,6 +55,10 @@ const (
 	maxPreBufferFrames     = 100
 	helloTimeout           = 10 * time.Second
 )
+
+// authUnavailableReason 是校验链路故障（网络/超时/401/404/decode 失败）时给设备的
+// 关帧 reason，本地新增，不属于 manager 的 reject_reason 词表（§3.1）。
+const authUnavailableReason = "auth_unavailable"
 
 // XiaozhiWSChannel implements channels.Channel for the Xiaozhi ESP32
 // WebSocket voice protocol. It manages an HTTP server for WebSocket upgrades
@@ -196,8 +203,20 @@ func (s *XiaozhiWSChannel) handleWS(w http.ResponseWriter, r *http.Request) {
 	deviceID := pick("Device-Id", "device-id")
 	clientID := pick("Client-Id", "client-id")
 
-	logging.Infof("xiaozhi-channel: incoming connection — Authorization=%q ProtocolVersion=%q DeviceId=%q ClientId=%q RemoteAddr=%s",
-		authorization, protocolVersion, deviceID, clientID, r.RemoteAddr)
+	// 日志只允许出现公开段（R3）：Authorization 可能是 ox_sk_ Key，也可能是别的
+	// 历史值，统一脱敏后再打印。
+	logging.Infof("xiaozhi-channel: incoming connection — auth=%s ProtocolVersion=%q DeviceId=%q ClientId=%q RemoteAddr=%s",
+		redactAuthorization(authorization), protocolVersion, deviceID, clientID, r.RemoteAddr)
+
+	token := accessToken(authorization)
+	// 鉴权开启时，无 Key 的连接在升级前就回 401：它没有 hello，也就没有可回
+	// 的 session_id（§3.2）。有 Key 但无效的仍走升级后的 1008（FR-2）。
+	if s.keyVerifier() != nil && token == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"missing api key"}`))
+		return
+	}
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -208,12 +227,43 @@ func (s *XiaozhiWSChannel) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.connWG.Add(1)
 	go func() {
 		defer s.connWG.Done()
-		s.handleConnection(conn)
+		s.handleConnection(conn, token)
 	}()
 }
 
+// accessToken 从 Authorization / access_token 里取出凭证。兼容 `Bearer x` 与裸串：
+// 设备侧两种都出现过，Header 优先于 query（§C：header 优先、query 仅为兼容）。
+func accessToken(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "Bearer ") {
+		return strings.TrimSpace(strings.TrimPrefix(raw, "Bearer "))
+	}
+	return raw
+}
+
+// redactAuthorization 给日志用的凭证摘要：能解析出公开段就只留公开段，其它值一律
+// <redacted>，没带就是 <none>。完整 Key 一旦进日志就是事故（§4 风险表）。
+func redactAuthorization(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "<none>"
+	}
+	if lookup := apikey.LookupOf(accessToken(raw)); lookup != "" {
+		return "lookup=" + lookup
+	}
+	return "<redacted>"
+}
+
+// keyVerifier 返回注入的握手校验器；nil = auth.enabled: false。
+func (s *XiaozhiWSChannel) keyVerifier() channels.KeyVerifier {
+	if s.deps == nil {
+		return nil
+	}
+	return s.deps.KeyVerifier
+}
+
 // handleConnection handles the full lifecycle of a single WebSocket connection.
-func (s *XiaozhiWSChannel) handleConnection(rawConn *websocket.Conn) {
+func (s *XiaozhiWSChannel) handleConnection(rawConn *websocket.Conn, token string) {
 	defer func() { _ = rawConn.Close() }()
 
 	hello, err := s.readHello(rawConn)
@@ -222,11 +272,19 @@ func (s *XiaozhiWSChannel) handleConnection(rawConn *websocket.Conn) {
 		return
 	}
 
-	c, err := s.newConnection(rawConn, hello)
+	// 握手鉴权在读 hello 之后、建任何会话资源之前：device_id 以 hello 为准，
+	// 避免 header/hello 不一致绕过（§1 D3）。
+	auth, rejected := s.verifyHandshake(token, hello)
+	if rejected != nil {
+		s.rejectConnection(rawConn, hello, rejected)
+		return
+	}
+
+	c, err := s.newConnection(rawConn, hello, auth)
 	if err != nil {
-		var rejected *sessionRejectedError
-		if errors.As(err, &rejected) {
-			s.rejectConnection(rawConn, hello, rejected)
+		var sessionRejected *sessionRejectedError
+		if errors.As(err, &sessionRejected) {
+			s.rejectConnection(rawConn, hello, sessionRejected)
 			return
 		}
 		logging.Errorf("xiaozhi-channel: connection setup failed: %v", err)
@@ -239,12 +297,77 @@ func (s *XiaozhiWSChannel) handleConnection(rawConn *websocket.Conn) {
 		return
 	}
 
+	if auth != nil {
+		logging.Infof("xiaozhi-channel[%s]: handshake authenticated (device_id=%q, key_id=%q, user_id=%q)",
+			c.sessionID, hello.DeviceID, auth.KeyID, auth.UserID)
+	}
 	logging.Infof("xiaozhi-channel[%s]: connection established (device_id=%q, mode=%s)", c.sessionID, hello.DeviceID, c.mode)
 	c.readLoop()
 	logging.Infof("xiaozhi-channel[%s]: connection closed", c.sessionID)
 }
 
-// sessionRejectedError 表示计费准入拒绝了这次会话。它要走一条特殊路径。
+// helloAuth 是握手校验通过后的身份（auth.enabled: false 时为 nil，行为与现状一致）。
+type helloAuth struct {
+	UserID string
+	KeyID  string
+}
+
+// verifyHandshake 校验握手凭证（§3.1）。返回 (nil, nil) 表示通过或鉴权关闭；
+// 第二个返回值非 nil 时调用方先回 hello 再 Close 1008（§E 失败路径）。
+//
+// fail closed（§1 D4）：传输/超时/401/404/decode 失败一律拒绝，reason 记
+// auth_unavailable——manager 一挂鉴权消失比拒新连接严重得多。
+func (s *XiaozhiWSChannel) verifyHandshake(token string, hello *wsproto.HelloMessage) (*helloAuth, *sessionRejectedError) {
+	verifier := s.keyVerifier()
+	if verifier == nil {
+		return nil, nil
+	}
+	ctx := s.rootCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// 校验失败发生在建 session 之前，这里给一个一次性 session_id 只为回 hello。
+	reject := func(reason string) *sessionRejectedError {
+		return &sessionRejectedError{SessionID: uuid.NewString(), DeviceID: hello.DeviceID, Reason: reason}
+	}
+	lookup := apikey.LookupOf(token)
+
+	resp, err := verifier.Verify(ctx, token, hello.DeviceID)
+	if err != nil {
+		logging.Errorf("xiaozhi-channel: handshake verify failed (device_id=%q, lookup=%q): %v",
+			hello.DeviceID, lookup, err)
+		return nil, reject(authUnavailableReason)
+	}
+	if !resp.Allowed {
+		reason := strings.TrimSpace(string(resp.RejectReason))
+		if reason == "" {
+			// allowed=false 却没有原因：按协议故障处理，别让设备收到一个空的
+			// 关帧 reason（§3.1：allowed 恒在，reject_reason 随拒绝必在）。
+			logging.Errorf("xiaozhi-channel: handshake rejected without a reason (device_id=%q, lookup=%q)", hello.DeviceID, lookup)
+			reason = authUnavailableReason
+		} else {
+			logging.Warnf("xiaozhi-channel: handshake rejected (device_id=%q, lookup=%q, reason=%s)",
+				hello.DeviceID, lookup, reason)
+		}
+		return nil, reject(reason)
+	}
+	return &helloAuth{UserID: resp.UserID, KeyID: resp.KeyID}, nil
+}
+
+// memoryUserID 选 memory 上下文的 user_id：鉴权开启时用 Key 的主人，关闭时保持
+// 现状（device_id）——FR-4 修掉"device_id 当账号用"。
+func memoryUserID(sessionID string, hello *wsproto.HelloMessage, auth *helloAuth) string {
+	if auth != nil && auth.UserID != "" {
+		return auth.UserID
+	}
+	if hello.DeviceID != "" {
+		return hello.DeviceID
+	}
+	return sessionID
+}
+
+// sessionRejectedError 表示这次会话在准入阶段被拒（握手鉴权或计费）。它要走一条
+// 特殊路径：先回 hello 再 Close 1008。
 type sessionRejectedError struct {
 	SessionID string
 	DeviceID  string
@@ -313,7 +436,8 @@ func (s *XiaozhiWSChannel) authorizeBilling(sessionID string, hello *wsproto.Hel
 }
 
 // newConnection builds all per-connection resources and the DAG pipeline.
-func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMessage) (*wsConnection, error) {
+// auth 是握手校验通过后的身份（鉴权关闭时为 nil）。
+func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto.HelloMessage, auth *helloAuth) (*wsConnection, error) {
 	if bps := hello.AudioParams.BitsPerSample; bps != 0 && bps != supportedBitsPerSample {
 		return nil, fmt.Errorf("unsupported bits_per_sample %d (only %d is supported)", bps, supportedBitsPerSample)
 	}
@@ -440,10 +564,7 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 	iotMgr := newIoTManager(safeConn, connMgr.Registry())
 	var devMCP *deviceMCPClient
 
-	userID := hello.DeviceID
-	if userID == "" {
-		userID = sessionID
-	}
+	userID := memoryUserID(sessionID, hello, auth)
 
 	memCtx := memory.WithContext(s.rootCtx, memory.Context{
 		UserID:    userID,

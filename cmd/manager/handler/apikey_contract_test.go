@@ -24,7 +24,7 @@ func TestAPIKeyCreateErrorBodies(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := NewAPIKeyHandler(apikey.New(newFakeAPIKeyStore(), apikey.Config{}), false)
+			h := newTestAPIKeyHandler(apikey.New(newFakeAPIKeyStore(), apikey.Config{}), false)
 			c, w := apiKeyRequest(http.MethodPost, "/api/api-keys", tc.body, "user-1", false, nil)
 			h.Create(c)
 			if w.Code != http.StatusBadRequest {
@@ -39,7 +39,7 @@ func TestAPIKeyCreateErrorBodies(t *testing.T) {
 
 // 未知 scope 不静默丢弃：把被拒的值列出来，否则用户会以为自己授了权。
 func TestAPIKeyCreateUnknownScopeListsValues(t *testing.T) {
-	h := NewAPIKeyHandler(apikey.New(newFakeAPIKeyStore(), apikey.Config{}), false)
+	h := newTestAPIKeyHandler(apikey.New(newFakeAPIKeyStore(), apikey.Config{}), false)
 
 	c, w := apiKeyRequest(http.MethodPost, "/api/api-keys",
 		`{"name":"ci","scopes":["agent:read","agent:blah","nope"]}`, "user-1", false, nil)

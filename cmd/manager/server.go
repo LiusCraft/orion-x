@@ -91,8 +91,13 @@ func newRouter(
 	// 回 503，前端不用为「这部署接没接支付」写分支。
 	paymentH := handler.NewPaymentHandler(paymentSvc)
 	// apikey.enabled: false 时 apikeySvc 为 nil：管理面回 503，key 中间件也拿不到
-	// service（key 请求一律 401，与没这个功能时一致，§7.3、FR-9）。
-	apiKeyH := handler.NewAPIKeyHandler(apikeySvc, apikeyAdminOnly)
+	// service（key 请求一律 401，与没这个功能时一致，§7.3、FR-9）。verify 的归属
+	// 判定要 owner，只在功能打开时装配。
+	var apikeyOwner handler.DeviceOwner
+	if apikeySvc != nil {
+		apikeyOwner = handler.NewStoreDeviceOwner(devices, voicebots)
+	}
+	apiKeyH := handler.NewAPIKeyHandler(apikeySvc, apikeyAdminOnly, apikeyOwner)
 
 	availableH := handler.NewAvailableHandler(providers, models, voices, assetSvc)
 	tplH := handler.NewAgentTemplateHandler(agentTemplates)
@@ -320,6 +325,15 @@ func newRouter(
 			internal.POST(strings.TrimPrefix(billing.PathAuthorize, "/internal"), internalAuth, billingInternalH.Authorize)
 			internal.POST(strings.TrimPrefix(billing.PathUsageEvents, "/internal"), internalAuth, billingInternalH.UsageEvents)
 			internal.POST(strings.TrimPrefix(billing.PathSettle, "/internal"), internalAuth, billingInternalH.Settle)
+		}
+
+		// 数据面握手校验（docs/wsserver-apikey-auth-design.md §3.2）：路径常量在
+		// internal/apikey，这里只把开头的 /internal 去掉（路由组已经带了）。
+		// 凭证功能关闭时不注册——不存在的端点该是 404，数据面据此记
+		// auth_unavailable 并拒绝（FR-7）。
+		if apikeySvc != nil {
+			internalAuth := middleware.InternalAuth(internalToken)
+			internal.POST(strings.TrimPrefix(apikey.PathVerify, "/internal"), internalAuth, apiKeyH.Verify)
 		}
 	}
 	return r

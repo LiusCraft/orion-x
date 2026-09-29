@@ -1,6 +1,6 @@
 # API Key（凭证）模块架构设计
 
-> 状态：已实现（阶段 1 + 阶段 2 合并落地；开关 `apikey.enabled` 默认关闭，灰度开启） | 日期：2026-09-25 | 范围：Manager 进程（`cmd/manager`）+ 控制台（`web/manager`）；数据面（`wsserver`/WS 协议）不在本期 | 关联代码：`internal/apikey/`、`cmd/manager/middleware/apikey.go`、`cmd/manager/middleware/scope_table.go`、`cmd/manager/handler/apikey.go`、`internal/store/api_key.go`、`web/manager/src/pages/ApiKeysPage.tsx`；关联文档：[计费设计](./billing-design.md) §19、[WS 协议设计](./wsserver-protocol-design.md)
+> 状态：已实现（阶段 1 + 阶段 2 合并落地；开关 `apikey.enabled` 默认关闭，灰度开启） | 日期：2026-09-25 | 范围：Manager 进程（`cmd/manager`）+ 控制台（`web/manager`）；数据面（`wsserver`/WS 协议）不在本期——其握手鉴权另见 [wsserver-apikey-auth-design](./wsserver-apikey-auth-design.md) | 关联代码：`internal/apikey/`、`cmd/manager/middleware/apikey.go`、`cmd/manager/middleware/scope_table.go`、`cmd/manager/handler/apikey.go`、`internal/store/api_key.go`、`web/manager/src/pages/ApiKeysPage.tsx`；关联文档：[计费设计](./billing-design.md) §19、[WS 协议设计](./wsserver-protocol-design.md)、[wsserver 握手鉴权设计](./wsserver-apikey-auth-design.md)
 
 ## 1. 结论
 
@@ -476,6 +476,7 @@ X-RateLimit-Reset: 1758795120
 | `agent:write` | 智能体的增删改、`POST /api/agent-templates/:id/use` | 改配置、从模板建智能体 |
 | `device:read` | `GET /api/voicebots/:id/devices` | 看设备与 TG 通道状态（不回 token） |
 | `device:write` | 设备的增删、TG 通道设置/删除 | |
+| `device:connect` | `/ws` 握手（wsserver，非 `/api` 路由） | 允许设备连接并开启语音会话，会**扣费**；不在默认/只读预设里，判定见 [wsserver 握手鉴权设计](./wsserver-apikey-auth-design.md) |
 | `model:read` | `/api/providers`、`/api/models`、`/api/voices/*`、`/api/available-resources`、`/api/languages` 的读 | 供应商/模型/音色 |
 | `model:write` | 上述资源的增删改、`POST /api/models/:id/voices/clone` | 音色克隆会**扣费**（`handler/voice_clone.go:329`）——只有 `model:read` 的 key 触发不了它 |
 | `data:read` | `/api/data/memory/*`、`/api/data/knowledge/*` 的读、`/api/assets` 读、`GET /api/sessions` | 记忆、知识库、资源 |
@@ -724,3 +725,4 @@ stateDiagram-v2
 | 2026-09-25 | 初稿 | 从控制台 mock 页（`web/manager/src/pages/ApiKeysPage.tsx`）反推后端设计；确认 P1 范围只到 `/api/*` |
 | 2026-09-25 | 依评审结论修订：① scope 清单确认为 P1 全量（Q1 关闭）；② 多副本从假设改为已确定的演进（Q5），限流接口化 + 两条演进路径 + 计数改增量写法；③ 针对"scope 会持续变多"新增 D9 与目录/预设设计（N9、FR-10、双向覆盖测试、新增 Q9/Q10）；④ 撤掉目录里的 `Costs` 字段；⑤ **补上 §5.3「HTTP API」一节**，按"curl 优先"写（索引表 + 4 个可执行示例 + 失败响应），并据此定下"凭证不能自我复制"：管理面只接 JWT，`/api/api-keys*` 进不可达白名单；⑥ 补 key 串形状规范（base58 字母表、CRC 计算口径、Digest 覆盖整串） | 评审反馈：scope 数量会增长；部署未来会多副本；凭证目录不该携带计费事实；**设计文档漏了 HTTP API 契约**；接口契约用可执行示例比表格好读 |
 | 2026-09-25 | 按本文（含上面第 ⑤⑥ 条）实现：`internal/apikey` + `internal/store/api_key.go` + `cmd/manager/middleware/{apikey,scope_table}.go` + `cmd/manager/handler/apikey.go` + 控制台页面，并跑 `make swagger` 把 4 个端点写进 `docs/manager/`。三处落地选择：① scope 目录接口额外下发 `groups`（分组展示名）与 `can_create`（灰度期可见性），新增 scope 或分组不需要前端发版；② 新增配置 `apikey.admin_only` 落地 §7.3 的"生产只对管理员开放创建"；③ `internal/apikey.Service` 依赖本包的 `Store` 接口（实现仍在 `internal/store/api_key.go`），以便无 DB 的单测内联假实现。①③ 都是"响应字段只增"与仓储可替换范围内的增量，不改授权语义、存储形态与撤销时效 | 实现与设计一致；接口字段的新增是设计允许的方向，单测与双向覆盖性测试已钉住行为 |
+| 2026-09-27 | 数据面延续：`/ws` 握手鉴权立项（[wsserver-apikey-auth-design](./wsserver-apikey-auth-design.md)）：复用账号 key + 设备归属 + 新增 `device:connect`，manager 加内部 verify 端点，wsserver 默认关闭。D1 的"WS 留扩展点"由此兑现；§8 Q4 的**设备凭证**仍待定（本文与 P2 边界不变） | 修 §2.1 F3 的数据面裸奔；账号 key 复用成本最低，设备凭证另立 P2 |

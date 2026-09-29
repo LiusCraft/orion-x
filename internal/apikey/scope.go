@@ -13,14 +13,18 @@ const (
 	ScopeAgentWrite  = "agent:write"
 	ScopeDeviceRead  = "device:read"
 	ScopeDeviceWrite = "device:write"
-	ScopeModelRead   = "model:read"
-	ScopeModelWrite  = "model:write"
-	ScopeDataRead    = "data:read"
-	ScopeDataWrite   = "data:write"
-	ScopeMCPRead     = "mcp:read"
-	ScopeMCPWrite    = "mcp:write"
-	ScopeMCPCall     = "mcp:call"
-	ScopeBillingRead = "billing:read"
+	// ScopeDeviceConnect 是数据面（wsserver /ws 握手）的消费项：允许设备用这把
+	// Key 连接并开启语音会话。只读 key 不该能消耗余额，所以它不是 Default
+	// （docs/wsserver-apikey-auth-design.md §1 D5）。
+	ScopeDeviceConnect = "device:connect"
+	ScopeModelRead     = "model:read"
+	ScopeModelWrite    = "model:write"
+	ScopeDataRead      = "data:read"
+	ScopeDataWrite     = "data:write"
+	ScopeMCPRead       = "mcp:read"
+	ScopeMCPWrite      = "mcp:write"
+	ScopeMCPCall       = "mcp:call"
+	ScopeBillingRead   = "billing:read"
 )
 
 // 创建时的校验错误，HTTP 层按它们回 400（§5.3）。
@@ -90,6 +94,10 @@ var catalog = []ScopeInfo{
 	{
 		Value: ScopeDeviceWrite, Group: "device", Title: "管理设备",
 		Description: "注册、删除设备，设置或解除 Telegram 通道",
+	},
+	{
+		Value: ScopeDeviceConnect, Group: "device", Title: "连接设备",
+		Description: "允许设备连接并开启语音会话；会话会产生费用",
 	},
 	{
 		Value: ScopeModelRead, Group: "model", Title: "查看模型与音色", Default: true,
