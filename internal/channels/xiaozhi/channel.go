@@ -78,7 +78,12 @@ type XiaozhiWSChannel struct {
 
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
-	connWG     sync.WaitGroup
+
+	// connMu 让 connWG 的 Add 与 Wait 有序：WaitGroup 要求「计数为 0 时的第一次
+	// Add」发生在 Wait 之前，两者并发会被 -race 判成数据竞争。关闭开始后不再登记。
+	connMu   sync.Mutex
+	connWG   sync.WaitGroup
+	stopping bool
 }
 
 // NewXiaozhiWSChannel creates a new Xiaozhi WS channel.
@@ -177,7 +182,7 @@ func (s *XiaozhiWSChannel) Stop(ctx context.Context) error {
 
 	done := make(chan struct{})
 	go func() {
-		s.connWG.Wait()
+		s.waitConns()
 		close(done)
 	}()
 
@@ -188,6 +193,25 @@ func (s *XiaozhiWSChannel) Stop(ctx context.Context) error {
 		return ctx.Err()
 	}
 	return nil
+}
+
+// trackConn 登记一条活连接；通道已开始关闭时返回 false，调用方应放弃这条连接。
+func (s *XiaozhiWSChannel) trackConn() bool {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.connWG.Add(1)
+	return true
+}
+
+// waitConns 先停止登记新连接，再等已登记的连接退出。
+func (s *XiaozhiWSChannel) waitConns() {
+	s.connMu.Lock()
+	s.stopping = true
+	s.connMu.Unlock()
+	s.connWG.Wait()
 }
 
 // handleWS upgrades an HTTP request to WebSocket and handles it asynchronously.
@@ -224,7 +248,11 @@ func (s *XiaozhiWSChannel) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.connWG.Add(1)
+	if !s.trackConn() {
+		logging.Warnf("xiaozhi-channel: shutting down, rejecting connection")
+		_ = conn.Close()
+		return
+	}
 	go func() {
 		defer s.connWG.Done()
 		s.handleConnection(conn, token)
