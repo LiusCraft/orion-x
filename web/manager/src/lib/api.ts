@@ -1051,6 +1051,8 @@ export interface BillingUsageParams extends BillingSummaryParams {
 export interface BillingPriceQueryParams {
 	item_code?: string;
 	account_id?: string;
+	/** "1" = 只要平台标准价（管理端列表才需要传，用户端本来就只回这个） */
+	platform_only?: string;
 	resource_type?: BillingResourceType;
 	resource_id?: string;
 	active_only?: string;

@@ -175,7 +175,10 @@ function SelectContent({
         data-slot="select-content"
         data-align-trigger={alignItemWithTrigger}
         className={cn(
-          "relative isolate z-50 max-h-(--available-height) w-[var(--anchor-width)] max-w-[var(--available-width)] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--foreground))] shadow-lg p-1 duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // 宽度按内容撑开（至少和触发器一样宽），否则触发器上的短文案会把下拉压得
+          // 放不下选项，长选项只能截断。上限之外的兜底用视口而不是 --available-width：
+          // 后者由浮动层的当前宽度反推，宽度随内容变化时会来回抖。
+          "relative isolate z-50 max-h-(--available-height) w-max min-w-[var(--anchor-width)] max-w-[min(var(--available-width),calc(100vw-2rem))] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--foreground))] shadow-lg p-1 duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className,
         )}
         {...props}

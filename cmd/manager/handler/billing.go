@@ -217,10 +217,11 @@ func (h *BillingAdminHandler) SetItem(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": code, "enabled": *req.Enabled})
 }
 
-// GET /api/billing/prices?item_code=&account_id=&resource_type=&resource_id=&active_only=1&page=&page_size=
+// GET /api/billing/prices?item_code=&account_id=&platform_only=1&resource_type=&resource_id=&active_only=1&page=&page_size=
 //
 // 管理端看的是全部价格版本（含还没生效的）。分页只给 limit/offset：价格表按 scope
-// 唯一，量级是“几十条版本”，不值得为它加一个 COUNT。
+// 唯一，量级是“几十条版本”，不值得为它加一个 COUNT。platform_only=1 只要平台标准价
+// （account_id 为空串），给消费方按公开口径回显价格用。
 func (h *BillingAdminHandler) ListPrices(c *gin.Context) {
 	if !billingReady(c, h.svc) {
 		return
@@ -229,6 +230,7 @@ func (h *BillingAdminHandler) ListPrices(c *gin.Context) {
 	q := store.PriceQuery{
 		ItemCode:     strings.TrimSpace(c.Query("item_code")),
 		AccountID:    strings.TrimSpace(c.Query("account_id")),
+		PlatformOnly: c.Query("platform_only") == "1",
 		ResourceType: strings.TrimSpace(c.Query("resource_type")),
 		ResourceID:   strings.TrimSpace(c.Query("resource_id")),
 		Limit:        pageSize,

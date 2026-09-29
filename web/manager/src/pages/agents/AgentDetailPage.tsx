@@ -205,6 +205,33 @@ function parseCfg(json: string): BotConfig {
   }
 }
 
+/**
+ * 把当前选择对齐到语言支持的清单：原来的 ASR 模型 / 音色不在清单里就换成清单里的第一个，
+ * 清单为空时保留原值——没有可选项总比悄悄把配置改空好。什么都没变时返回原对象。
+ */
+function alignToLanguage(cfg: BotConfig, res: AvailableResources): BotConfig {
+  const asrModelID = pickAvailable(
+    cfg.asr.model_id,
+    res.asr.map((m) => m.id),
+  );
+  const voiceID = pickAvailable(
+    cfg.tts.voice_id,
+    res.voices.map((v) => v.id),
+  );
+  if (asrModelID === cfg.asr.model_id && voiceID === cfg.tts.voice_id) return cfg;
+  return {
+    ...cfg,
+    asr: { ...cfg.asr, model_id: asrModelID },
+    tts: { ...cfg.tts, voice_id: voiceID },
+  };
+}
+
+/** 当前值还在清单里就保留，否则取清单第一个（清单为空时保留原值）。 */
+function pickAvailable(current: string, ids: string[]): string {
+  if (ids.includes(current)) return current;
+  return ids[0] ?? current;
+}
+
 function Field({
   label,
   children,
@@ -338,13 +365,21 @@ export default function AgentDetailPage() {
     })();
   }, [id]);
 
-  // Re-fetch resources when language changes (skip first load)
+  // 切语言后可选模型 / 音色的清单会变（首次加载跳过）。清单回来后把当前选择对齐一下：
+  // 原来的模型 / 音色不在新清单里，就落到这个语言的第一个，免得配置指向语言不支持的资源。
   useEffect(() => {
-    if (id && resources) {
-      availableResourcesApi
-        .list(cfg.language || undefined)
-        .then((r) => setResources(r.data));
-    }
+    if (!id || !resources) return;
+    let cancelled = false;
+    availableResourcesApi
+      .list(cfg.language || undefined)
+      .then((r) => {
+        if (cancelled) return;
+        setResources(r.data);
+        setCfg((c) => alignToLanguage(c, r.data));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [cfg.language]);
 
   const setAsr = (p: Partial<BotConfig["asr"]>) =>

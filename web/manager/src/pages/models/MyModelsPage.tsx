@@ -25,11 +25,24 @@ import {
   modelApi,
   providerApi,
   type AIModel,
+  type BillingPrice,
   type ModelType,
   type Provider,
 } from "@/lib/api";
+import {
+  loadPlatformPrices,
+  modelCategory,
+  modelPriceLines,
+  type ModelPriceLine,
+} from "@/lib/modelPrices";
 import { useDocumentTitle } from "@/lib/title";
 import { useAuthStore } from "@/lib/store";
+import {
+  ScopeFilter,
+  ViewToggle,
+  type ResourceScope,
+  type ViewMode,
+} from "@/pages/models/shared";
 
 const TYPE_BADGE: Record<string, string> = {
   text: "bg-violet-600/15 text-violet-400 border-violet-500/20",
@@ -47,6 +60,60 @@ const TYPE_LABEL: Record<string, string> = {
   embedding: "向量",
 };
 
+/** 官方模型的标记，和厂商管理页保持一致：图标 + 文字。 */
+function OfficialBadge() {
+  return (
+    <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border bg-violet-600/15 text-violet-400 border-violet-500/20 shrink-0">
+      <Shield className="w-2.5 h-2.5" />
+      官方
+    </span>
+  );
+}
+
+function TypeBadge({ type }: { type: ModelType }) {
+  return (
+    <span
+      className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${TYPE_BADGE[type]}`}
+    >
+      {TYPE_LABEL[type]}
+    </span>
+  );
+}
+
+/** 语音类模型再标一层 ASR / TTS，价格口径和维度不同。 */
+function VoiceCategoryBadge({ model }: { model: AIModel }) {
+  const category = modelCategory(model);
+  if (category === "tts")
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded border bg-pink-400/10 text-pink-400 border-pink-400/20 shrink-0">
+        TTS
+      </span>
+    );
+  if (category === "asr")
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded border bg-sky-400/10 text-sky-400 border-sky-400/20 shrink-0">
+        ASR
+      </span>
+    );
+  return null;
+}
+
+/** 价格行；null 表示这个模型没有可展示的计费项，调用方负责回落到「—」。 */
+function PriceLines({ lines }: { lines: ModelPriceLine[] | null }) {
+  if (lines === null) return <span className="text-zinc-600">—</span>;
+  if (lines.length === 0) return <span className="text-zinc-600">未定价</span>;
+  return (
+    <div className="space-y-0.5">
+      {lines.map((line) => (
+        <p key={line.label} className="text-xs text-zinc-300 font-mono">
+          <span className="font-sans text-zinc-500 mr-1">{line.label}</span>
+          {line.text}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 export default function MyModelsPage() {
   useDocumentTitle("我的模型");
 
@@ -54,12 +121,18 @@ export default function MyModelsPage() {
   const [models, setModels] = useState<AIModel[]>([]);
   const [modelTypes, setModelTypes] = useState<ModelType[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  // null = 价格拿不到（计费未启用 / 请求失败），空数组 = 价格表里一条都没配
+  const [prices, setPrices] = useState<BillingPrice[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editModel, setEditModel] = useState<AIModel | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [activeType, setActiveType] = useState<ModelType | "all">("all");
+  const [scope, setScope] = useState<ResourceScope>("all");
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    localStorage.getItem("modelViewMode") === "table" ? "table" : "grid",
+  );
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<{
     provider_id: string;
@@ -69,13 +142,24 @@ export default function MyModelsPage() {
     model_id: string;
   }>({ provider_id: "", name: "", type: "text", base_url: "", model_id: "" });
 
+  const toggleView = (mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem("modelViewMode", mode);
+  };
+
   const load = () => {
     setLoading(true);
-    Promise.all([modelApi.list(), providerApi.list(), modelApi.types()])
-      .then(([mr, pr, tr]) => {
+    Promise.all([
+      modelApi.list(),
+      providerApi.list(),
+      modelApi.types(),
+      loadPlatformPrices(),
+    ])
+      .then(([mr, pr, tr, priceList]) => {
         setModels(mr.data);
         setProviders(pr.data);
         setModelTypes(tr.data);
+        setPrices(priceList);
       })
       .finally(() => setLoading(false));
   };
@@ -148,8 +232,16 @@ export default function MyModelsPage() {
     setModels((prev) => prev.filter((m) => m.id !== id));
   };
 
+  // 页签上的计数跟着范围筛选走：选了「官方」时「文本」数的是官方文本模型。
+  const scoped = models.filter((m) =>
+    scope === "all" ? true : scope === "system" ? m.is_system : !m.is_system,
+  );
   const filtered =
-    activeType === "all" ? models : models.filter((m) => m.type === activeType);
+    activeType === "all" ? scoped : scoped.filter((m) => m.type === activeType);
+  const priceLinesOf = (model: AIModel): ModelPriceLine[] | null =>
+    prices ? modelPriceLines(model, prices) : null;
+  const countOf = (type: ModelType) =>
+    scoped.filter((m) => m.type === type).length;
 
   return (
     <div className="min-h-full">
@@ -181,156 +273,234 @@ export default function MyModelsPage() {
             value={activeType}
             onValueChange={(v) => setActiveType(v as ModelType | "all")}
           >
-            <TabsList className="bg-zinc-900 border border-zinc-800 h-9 p-0.5 mb-6 gap-0">
-              <TabsTrigger
-                value="all"
-                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
-              >
-                全部
-                <span className="ml-1.5 text-[10px] text-zinc-600">
-                  ({models.length})
-                </span>
-              </TabsTrigger>
-              {modelTypes.map((value) => (
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+              <TabsList className="bg-zinc-900 border border-zinc-800 h-9 p-0.5 gap-0">
                 <TabsTrigger
-                  key={value}
-                  value={value}
+                  value="all"
                   className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
                 >
-                  {TYPE_LABEL[value] ?? value}
+                  全部
                   <span className="ml-1.5 text-[10px] text-zinc-600">
-                    ({models.filter((m) => m.type === value).length})
+                    ({scoped.length})
                   </span>
                 </TabsTrigger>
-              ))}
-            </TabsList>
+                {modelTypes.map((value) => (
+                  <TabsTrigger
+                    key={value}
+                    value={value}
+                    className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
+                  >
+                    {TYPE_LABEL[value] ?? value}
+                    <span className="ml-1.5 text-[10px] text-zinc-600">
+                      ({countOf(value)})
+                    </span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              <div className="flex items-center gap-2">
+                <ScopeFilter value={scope} onChange={setScope} />
+                <ViewToggle value={viewMode} onChange={toggleView} />
+              </div>
+            </div>
 
-            {["all", ...modelTypes].map((value) => (
-              <TabsContent key={value} value={value}>
-                {filtered.length === 0 ? (
-                  <div className="flex flex-col items-center py-20">
-                    <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
-                      <Layers className="w-6 h-6 text-zinc-600" />
-                    </div>
-                    <p className="text-zinc-400 text-sm">
-                      还没有{TYPE_LABEL[value] ?? ""}模型
-                    </p>
-                    <p className="text-zinc-600 text-xs mt-1 mb-4">
-                      添加兼容 OpenAI 接口的{TYPE_LABEL[value] ?? ""}模型
-                    </p>
-                    <Button
-                      onClick={() =>
-                        openAdd(
-                          value === "all" ? undefined : (value as ModelType),
-                        )
-                      }
-                      className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-4 text-xs gap-1.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      添加{TYPE_LABEL[value] ?? ""}模型
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {filtered.map((model) => (
-                      <div
-                        key={model.id}
-                        className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-all group"
+            {["all", ...modelTypes].map((value) => {
+              const typeLabel = value === "all" ? "" : (TYPE_LABEL[value] ?? "");
+              const emptyTitle =
+                scope === "system"
+                  ? `还没有官方${typeLabel}模型`
+                  : scope === "mine"
+                    ? `你还没有添加${typeLabel}模型`
+                    : `还没有${typeLabel}模型`;
+              return (
+                <TabsContent key={value} value={value}>
+                  {filtered.length === 0 ? (
+                    <div className="flex flex-col items-center py-20">
+                      <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
+                        <Layers className="w-6 h-6 text-zinc-600" />
+                      </div>
+                      <p className="text-zinc-400 text-sm">{emptyTitle}</p>
+                      <p className="text-zinc-600 text-xs mt-1 mb-4">
+                        添加兼容 OpenAI 接口的{typeLabel}模型
+                      </p>
+                      <Button
+                        onClick={() =>
+                          openAdd(
+                            value === "all" ? undefined : (value as ModelType),
+                          )
+                        }
+                        className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-4 text-xs gap-1.5"
                       >
-                        <div className="flex items-start justify-between mb-3">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <p className="font-medium text-sm text-white">
-                                {model.name}
-                              </p>
-                              {model.is_system && (
-                                <span className="flex items-center gap-0.5 text-[10px] px-1 py-0.5 rounded border bg-violet-600/15 text-violet-400 border-violet-500/20">
-                                  <Shield className="w-2.5 h-2.5" />
-                                </span>
+                        <Plus className="w-3.5 h-3.5" />
+                        添加{typeLabel}模型
+                      </Button>
+                    </div>
+                  ) : viewMode === "grid" ? (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {filtered.map((model) => {
+                        const priceLines = priceLinesOf(model);
+                        return (
+                          <div
+                            key={model.id}
+                            className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-all group"
+                          >
+                            <div className="flex items-start justify-between mb-3">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-medium text-sm text-white">
+                                    {model.name}
+                                  </p>
+                                  {model.is_system && <OfficialBadge />}
+                                </div>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <TypeBadge type={model.type} />
+                                  {model.type === "speech" && (
+                                    <VoiceCategoryBadge model={model} />
+                                  )}
+                                  <span className="text-[11px] text-zinc-500">
+                                    {model.provider?.name}
+                                  </span>
+                                </div>
+                              </div>
+                              {(!model.is_system || isAdmin) && (
+                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button
+                                    onClick={() => openEdit(model)}
+                                    className="text-zinc-500 hover:text-zinc-300 p-1.5 rounded hover:bg-zinc-800 cursor-pointer transition-colors"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDelete(model.id)}
+                                    className="text-zinc-500 hover:text-red-400 p-1.5 rounded hover:bg-red-400/10 cursor-pointer transition-colors"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded border ${TYPE_BADGE[model.type]}`}
-                              >
-                                {TYPE_LABEL[model.type]}
+
+                            <div className="space-y-1.5">
+                              <div className="bg-zinc-800/60 rounded-lg px-3 py-2">
+                                <p className="text-[10px] text-zinc-600 mb-0.5">
+                                  Model ID
+                                </p>
+                                <p className="text-xs text-zinc-300 font-mono truncate">
+                                  {model.model_id}
+                                </p>
+                              </div>
+                              {priceLines !== null && (
+                                <div className="bg-zinc-800/60 rounded-lg px-3 py-2">
+                                  <p className="text-[10px] text-zinc-600 mb-0.5">
+                                    价格
+                                  </p>
+                                  <PriceLines lines={priceLines} />
+                                </div>
+                              )}
+                              <div className="bg-zinc-800/60 rounded-lg px-3 py-2">
+                                <p className="text-[10px] text-zinc-600 mb-0.5">
+                                  Base URL
+                                </p>
+                                <p className="text-xs text-zinc-500 font-mono truncate">
+                                  {model.base_url ||
+                                    model.provider?.base_url ||
+                                    "—"}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between mt-3">
+                              <span className="flex items-center gap-1 text-[11px] text-emerald-400">
+                                <CheckCircle2 className="w-3 h-3" />
+                                可用
                               </span>
-                              {model.type === "speech" &&
-                                (() => {
-                                  const slug = model.provider?.slug ?? "";
-                                  if (slug.startsWith("tts:"))
-                                    return (
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded border bg-pink-400/10 text-pink-400 border-pink-400/20">
-                                        TTS
-                                      </span>
-                                    );
-                                  if (slug.startsWith("asr:"))
-                                    return (
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded border bg-sky-400/10 text-sky-400 border-sky-400/20">
-                                        ASR
-                                      </span>
-                                    );
-                                  return null;
-                                })()}
-                              <span className="text-[11px] text-zinc-500">
-                                {model.provider?.name}
+                              <span className="text-[11px] text-zinc-600 font-mono">
+                                {model.created_at.slice(0, 10)}
                               </span>
                             </div>
                           </div>
-                          {(!model.is_system || isAdmin) && (
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button
-                                onClick={() => openEdit(model)}
-                                className="text-zinc-500 hover:text-zinc-300 p-1.5 rounded hover:bg-zinc-800 cursor-pointer transition-colors"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => handleDelete(model.id)}
-                                className="text-zinc-500 hover:text-red-400 p-1.5 rounded hover:bg-red-400/10 cursor-pointer transition-colors"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <div className="bg-zinc-800/60 rounded-lg px-3 py-2">
-                            <p className="text-[10px] text-zinc-600 mb-0.5">
-                              Model ID
-                            </p>
-                            <p className="text-xs text-zinc-300 font-mono truncate">
-                              {model.model_id}
-                            </p>
-                          </div>
-                          <div className="bg-zinc-800/60 rounded-lg px-3 py-2">
-                            <p className="text-[10px] text-zinc-600 mb-0.5">
-                              Base URL
-                            </p>
-                            <p className="text-xs text-zinc-500 font-mono truncate">
-                              {model.base_url ||
-                                model.provider?.base_url ||
-                                "—"}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between mt-3">
-                          <span className="flex items-center gap-1 text-[11px] text-emerald-400">
-                            <CheckCircle2 className="w-3 h-3" />
-                            可用
-                          </span>
-                          <span className="text-[11px] text-zinc-600 font-mono">
-                            {model.created_at.slice(0, 10)}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-            ))}
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-zinc-800 text-left text-[11px] text-zinc-500 uppercase tracking-wide">
+                            <th className="px-4 py-3 font-medium">模型</th>
+                            <th className="px-4 py-3 font-medium">厂商</th>
+                            <th className="px-4 py-3 font-medium">Model ID</th>
+                            <th className="px-4 py-3 font-medium">价格</th>
+                            <th className="px-4 py-3 font-medium">Base URL</th>
+                            <th className="px-4 py-3 font-medium">创建时间</th>
+                            <th className="px-4 py-3 font-medium w-20" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map((model) => (
+                            <tr
+                              key={model.id}
+                              className="border-b border-zinc-800/60 hover:bg-zinc-800/40 transition-colors"
+                            >
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm text-white">
+                                    {model.name}
+                                  </p>
+                                  {model.is_system && <OfficialBadge />}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-1">
+                                  <TypeBadge type={model.type} />
+                                  {model.type === "speech" && (
+                                    <VoiceCategoryBadge model={model} />
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-xs text-zinc-400">
+                                {model.provider?.name ?? "—"}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-zinc-300 font-mono">
+                                {model.model_id}
+                              </td>
+                              <td className="px-4 py-3">
+                                <PriceLines lines={priceLinesOf(model)} />
+                              </td>
+                              <td className="px-4 py-3 text-xs text-zinc-500 font-mono">
+                                <p className="max-w-56 truncate">
+                                  {model.base_url ||
+                                    model.provider?.base_url ||
+                                    "—"}
+                                </p>
+                              </td>
+                              <td className="px-4 py-3 text-xs text-zinc-600 font-mono">
+                                {model.created_at.slice(0, 10)}
+                              </td>
+                              <td className="px-4 py-3">
+                                {(!model.is_system || isAdmin) && (
+                                  <div className="flex gap-1">
+                                    <button
+                                      onClick={() => openEdit(model)}
+                                      className="text-zinc-500 hover:text-zinc-300 p-1.5 rounded hover:bg-zinc-800 cursor-pointer transition-colors"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDelete(model.id)}
+                                      className="text-zinc-500 hover:text-red-400 p-1.5 rounded hover:bg-red-400/10 cursor-pointer transition-colors"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </TabsContent>
+              );
+            })}
           </Tabs>
         )}
       </div>
