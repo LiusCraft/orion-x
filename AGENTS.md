@@ -1,118 +1,229 @@
-# AGENTS.md
 
-## Build & run
+## Go 代码风格规则
 
-```bash
-# Build (macOS needs ONNX Runtime + libopus via Homebrew: `brew install opus`)
-make build
+### 核心原则
 
-# Run the CLI harness (local mic/speaker)
-make run-voicebot
+清晰 > 简约 > 简洁 > 可维护 > 一致。
 
-# Run the WebSocket server (cmd/wsserver, one session per connection)
-make run-wsserver          # listens on :8080/ws by default; see -addr/-path flags
+```go
+// Good: 单次使用直接内联
+journal, _ := os.ReadFile(filepath.Join(dir, "journal.json"))
 
-# Build manually
-GOTOOLCHAIN=$(go env GOTOOLCHAIN) CGO_CFLAGS="-I$(brew --prefix)/include/onnxruntime" CGO_LDFLAGS="-L$(brew --prefix)/lib" go build -o bin/voicebot ./cmd/voicebot
+// Bad: 多余中间变量
+journalPath := filepath.Join(dir, "journal.json")
+journal, _ := os.ReadFile(journalPath)
 ```
 
-Config file: `data/voicebot.json` (template: `voicebot.example.json`). ASR/TTS/LLM keys are required on startup. `cmd/wsserver` shares the same config file.
+### 控制流
 
-## Test
+避免 `else`，优先提前返回。
 
-```bash
-make test              # go test ./...
-make test-audio        # go test ./internal/audio (needs audio device + ASR keys)
+```go
+// Good
+func foo(c bool) int {
+    if c { return 1 }
+    return 2
+}
+
+// Bad
+func foo(c bool) int {
+    if c { return 1 } else { return 2 }
+}
 ```
 
-No CI for Go -- only docs deploy in `.github/workflows/deploy-docs.yml`.
+### 变量
 
-**After writing code, you MUST run `golangci-lint run ./...` and fix all issues before completing.**
+优先 `:=`，避免不必要的 `var` 和 `else` 重赋值。
 
-## Architecture
+```go
+// Good
+foo := 1
+if c { foo = 2 }
 
-Pipeline: `ASR → Agent → TTS → <output>` built via `pipeline.NewBuilder()` (linear) or `pipeline.NewDAGBuilder()` (fan-out/fan-in, e.g. `asr` broadcasting to both `agent` and a `stt`-echoing output stage). TTS audio flows through the pipeline `Message` bus (`TTSStage` registers `TTSProcessor.OnChunk` internally and emits `audio.TTSChunk` messages) rather than a side-channel callback, so `cmd/voicebot` and `cmd/wsserver` each plug in their own output stage (`PortAudioOutputStage`, `stages.WSOutputStage`).
+// Bad
+var foo int
+if c { foo = 2 } else { foo = 1 }
+```
 
-Two entry points:
+### 复杂逻辑
 
-- `cmd/voicebot/` -- CLI harness: local mic/speaker, one process-wide session.
-- `cmd/wsserver/` -- WebSocket server: one independent session + DAG pipeline per connection (`asr`→`agent`→`tts`→`ws_output`, plus `asr`→`ws_output` for STT echo). Protocol (hello/listen/abort/stt/tts JSON control frames + binary audio frames) is defined in `internal/wsproto/`; it's inspired by xiaozhi-esp32-server's protocol but deliberately omits `iot`/`mcp`/`server` (device-control/remote-tool-call/ops concerns unrelated to plain voice chat). Supports `auto` (server VAD) and `manual` (client-driven `listen start/stop`, via `ASRProcessor.BeginTurn/EndTurn`) modes, negotiated at hello time and fixed for the connection's lifetime. Audio wire format defaults to Opus/16kHz when a client's hello omits `audio_params` (negotiable per-connection, PCM passthrough or Opus, `internal/audio/codec/`); TTS output is always synthesized at 16kHz server-side (== `audio.InternalSampleRate`, independent of `cmd/voicebot`'s 22050Hz) since that's a valid Opus rate.
+主函数读作 happy path，辅助函数放下面并按概念命名。
 
-| Package | Role |
-| --- | --- |
-| `internal/config/` | JSON config loader + validation |
-| `internal/logging/` | Zap wrapper; use `logging.Infof/Errorf/...` (not std lib `log`) |
-| `internal/agent/` | LLM agent with tool calling loop |
-| `internal/pipeline/` | Linear + DAG pipeline: `Stage` interface, `Builder`/`DAGBuilder`, `Message` bus |
-| `internal/audio/` | ASRProcessor (VAD+ASR), TTSProcessor (splitter+synthesis), resampler |
-| `internal/audio/codec/` | PCM passthrough / Opus codecs for WebSocket wire audio |
-| `internal/wsproto/` | WebSocket voice session protocol message types |
-| `internal/provider/` | ASR/TTS factory + Aliyun Dashscope impls |
-| `internal/llm/` | LLM types + OpenAI-compatible provider |
-| `internal/tools/` | Tool registry + MCP client |
-| `internal/memory/` | Session buffer + SQLite long-term memory |
-| `internal/session/` | Chat session / message tracking |
-| `internal/text/` | Text segmenter, markdown filter, emotion tags |
-| `internal/billing/` | 计费纯领域层（item / price / money / engine / estimate / wire + port），零依赖；另含充值链路的领域模型与 `PaymentGateway` port（`payment.go`） |
-| `internal/billing/service/` | 控制面：仓储、结算事务、worker、回收；另含充值链路的下单/回调/对账（`payment.go`）；唯一 import `internal/store` 的计费包 |
-| `internal/billing/client/` | 数据面：HTTP client + `Sink`（缓冲/重试/本地熔断）；唯一 import `net/http` 的计费包 |
-| `internal/billing/gateway/epay/` | 出站支付网关适配器（易支付 SDK），实现 `billing.PaymentGateway`；唯一 import 支付 SDK 的地方 |
-| `internal/store/billing_*.go` | 计费与充值共 11 张表的 GORM 模型与仓储，只被 `billing/service` 使用 |
-| `internal/apikey/` | 凭证领域层：key 串生成/解析/摘要、scope 目录与预设、限流桶与用量聚合；只认 `user_id`，不 import gin / `internal/billing` |
-| `internal/store/api_key.go` | `api_keys` 表的模型与仓储；明文不落库，只存 `hash` + `lookup` |
+```go
+// Good
+func LoadThing(input []byte) (*Thing, error) {
+    cfg, err := requireConfig(input)
+    if err != nil { return nil, err }
+    meta := readMetadata(input)
+    return createThing(cfg, meta), nil
+}
 
-### 计费（`docs/billing-design.md`）
+func requireConfig(input []byte) (*Config, error) { ... }
+```
 
-所有计费模式都归一为 `quantity × unit_price`，差异只落在计量点、舍入/阶梯、价格匹配范围三处。职责切得很硬，改代码前先看 §19：
+### 导入
 
-- **数据面（wsserver）只上报事实**：`internal/audio` / `internal/agent` 只吐原始量（合成了多少 rune、厂商报了多少秒、各糪 token），`item_code` 的映射在 `internal/channels/billing.go`。会话开始走 `authorize` 准入，过程中本地聚合，turn/会话边界 flush。
-- **控制面（manager）独占钱**：定价、价格匹配、金额计算、余额、流水、对账。用量事件先落库（append-only 事实），再由 worker 幂等派生账单。
-- 领域层是零依赖包，`depguard` 规则（`.golangci.yml` 的 `billing-domain`）会拦住它 import gorm / gin / store。该规则只匹配 `internal/billing/*.go`（直接子文件），`service/` / `client/` / `gateway/` 子包不受约束。
-- 新增一个计费项 = 一条目录 seed（`internal/billing/item.go` + `internal/store/billing_seed.go`，两边要同步）+ 一条价格行 + 一个数据面埋点，不改结算代码。
+必须 `gofmt`；不用点导入；避免别名导入。
 
-### 充值（`payment` 段配置，支付渠道 → 余额）
+```go
+// Good
+import (
+    "fmt"
+    "os"
 
-链路是 `下单(pending) → 网关收款 → 回调/对账(paid) → 入账(credited)`，不进 authorize/report/settle 那条用量链路：
+    "github.com/x/y"
+)
 
-- 数据面（wsserver）完全不参与充值，`internal/audio` / `internal/agent` 没有埋点。
-- 支付渠道是易支付（`github.com/liuscraft/epay-sdk-go`），适配器在 `internal/billing/gateway/epay`，只实现 `billing.PaymentGateway` 四件事：下单 / 查单 / 退款 / 验回调。换渠道只换这个包。
-- 入账一律调 `service.Service.Credit`（`kind = recharge`、`ref_type = order`），幂等键 `credit:order:<out_trade_no>`（`billing.RechargeIdempotencyKey`）。**回调金额只用来核对订单，入账金额永远取自订单行**。
-- 回调两条路由（`POST|GET /pay/epay/notify`、`GET /pay/epay/return`）是公网匿名路由，**不能挂任何鉴权中间件**；响应体必须是纯文本 `success`。
-- 充值不是计量项：不建 `billing_items` seed、不录价格行。赠款要送就走 `billing_grants`（§12）。
-- 网关的 `money` 只有两位小数 → 下单金额必须是整分（`amount_micro % billing.MicroPerCent == 0`），不整分直接拒。
-- `paid` 与 `credited` 分开落库；manager 里有个每分钟的 sweeper 扫 `paid` 未入账补账、扫过期未付主动查单。改动这两段时记得它们要幂等。
-- 退款（`POST /api/billing/recharge/:out_trade_no/refund`，仅 admin）是**先让网关退钱、再改自己的账**：顺序反了的话，网关调用挂了而账已经退了，钱就凭空多出来。整单退，不支持部分退款（那需要一张单独退款单表），幂等键 `refund:order:<out_trade_no>`（`billing.RefundIdempotencyKey`），出账走 `service.Service.Refund`（`kind = refund`）。
+// Bad
+import . "fmt"
+import z "github.com/x/y"
+```
 
-### 凭证（`apikey` 段配置，API Key）
+### 命名
 
-给 `/api/*` 加第二种凭证，让脚本/CI 不必借用人格化的 JWT（`docs/api-key-design.md`）。默认关闭：
+包名简短小写；接收者 1–2 字母；缩写全大写。
 
-- **key 串格式是冻结的**：`ox_sk_<lookup:10>_<secret:32>_<crc:6>`，base58 字母表，CRC 只盖 `lookup + "_" + secret`。改它 = 换一代凭证（只能靠新前缀 `ox_sk2_` 版本化）。
-- **只存摘要**：`hash = sha256(完整串)`、`lookup` 明文建唯一索引。明文只在创建响应里出现一次，**任何日志/错误里都不许出现完整串**（日志里只能用 `apikey.LookupOf` 得到的公开段）。
-- **授权是精确匹配**：scope 目录与预设的唯一事实源在 `internal/apikey/scope.go`，deny-by-default、不支持通配、预设只在创建时展开成显式列表落库。路由↔scope 的中央表在 `cmd/manager/middleware/scope_table.go`。
-- **新增一条 `/api/*` 路由必须同步 scope 表**，否则 `middleware.ValidateCoverage` 的双向覆盖测试（`cmd/manager/server_test.go`）会红——先看到测试红，而不是先被人用一把只读 key 调了写接口。
-- **管理面（`/api/api-keys*`）只接 JWT**，key 结构上到不了：机器凭证不能签发凭证（否则撤销原 key 挡不住持久化后门）。同理 `/api/auth/*`、`RequireAdmin` 的管理端、充值/退款。
-- 计数与最后使用时间是**内存聚合 + 定时刷库的非精确值**，不得用作计费或对账依据；撤销无缓存，下一个请求即失效。
+```go
+// Good
+package tabwriter
+type URLParser struct{}
+func (s *Server) Serve() {}
 
-Design docs in `docs/` -- read before modifying major modules.
+// Bad
+package tabWriter
+type UrlParser struct{}
+func (this *Server) Serve() {}
+```
 
-## Naming conventions
+### 注释
 
-我们自己定义的**标识值**（资源 ID、计费项 code、枚举值、命名空间、幂等键）用 `:` 拼接分段，不用 `.` / `_` / `/`：
+导出标识符必须有文档注释，首句以名称开头、句号结尾。
 
-- 计费项：`llm:tokens:input`、`tts:characters`、`voice:clone`
-- 枚举值：`voice:clone`（meter source）、`half:up`（rounding）、`usage:event`（ref type）
-- 幂等键：`settle:<event_id>`、`voice:clone:<voice_id>`、`credit:order:<out_trade_no>`、`refund:order:<out_trade_no>`
+```go
+// Good
+// ParseURL parses raw into a URL.
+func ParseURL(raw string) (*URL, error) {}
 
-不适用，保持原样：
+// Bad
+// this function parses url
+func ParseURL(raw string) (*URL, error) {}
+```
 
-- 数据库表名/列名（`billing_prices`、`item_code`）、Go / JSON 字段名
-- 文件路径、URL 路径、环境变量、HTTP header
-- 镜像第三方协议或标准的值：厂商 wire 值（`content_block_delta`、`tool_calls`）、设备协议字段（`sentence_start`）、语言码（`zh-CN`）、厂商 model id（`qwen-plus`）
-- 受外部格式约束的值：LLM function name 只允许 `[a-zA-Z0-9_-]`
+### 包与模块
 
-## Quirks
+包小而专注；内部实现放 `internal/`；`go.mod` 只含一个 `module` 指令，位于首行。
 
-- **Mock convention**: inline mock structs in `*_test.go` files, no mock generator.
-- **Provider pattern**: ASR/TTS use factory registration (`provider/asr/factory.go`, `provider/tts/factory.go`). LLM uses `llm/provider/` with blank import in `main.go`.
-- **前端是客户界面**（`web/manager`）：面向使用者的文案里不许出现我们自己的说法——配置项名（`payment` 段、`billing.enabled`）、表名、包名、幂等键、以及“网关 / 回调 / 流水 / 微元 / 服务端”这类实现词。只写“会发生什么”和“用户要做什么”。服务端的 `{error}` 是给我们排障用的（如 `billing: amount must be between ...`），不能原样贴到界面上——前端已经有 `userFacingError(err, fallback)` 拦这种内部前缀（`web/manager/src/lib/billing.ts`）；表单能用前端校验挡住的错（金额上下限、可选支付方式）就通过接口把参数下发下去，不要靠服务端报错来教用户。
+```
+module github.com/you/proj
+
+go 1.22
+
+require github.com/x/y v1.0.0
+```
+
+### 错误处理
+
+普通错误用 `return`；错误字符串小写、无结尾标点。
+
+```go
+// Good
+return fmt.Errorf("open config: %w", err)
+
+// Bad
+return errors.New("Failed to open config.")
+```
+
+### 并发与上下文
+
+`ctx` 是可能阻塞函数的第一个参数；含 `sync.Mutex` 的结构体方法用指针接收者。
+
+```go
+// Good
+func (s *Store) Get(ctx context.Context, id string) (*Item, error) {}
+
+// Bad
+func (s Store) Get(id string, ctx context.Context) (*Item, error) {}
+```
+
+### 测试
+
+不用 `assert` 库；失败输出 got 在前、want 在后。
+```go
+// Good
+if got := Add(1, 2); got != 3 {
+    t.Errorf("Add(1, 2) = %d, want %d", got, 3)
+}
+```
+
+测试行为，不以覆盖率为目标。只写关键等价类和边界 case；每个 case 必须能说明捕获什么回归。覆盖率只用于发现盲区，不设硬性百分比。
+```go
+// Good: 关键等价类和边界，而不是穷举
+tests := []struct {
+    name    string
+    in      string
+    want    int
+    wantErr bool
+}{
+    {"empty uses default", "", 10, false},
+    {"valid", "42", 42, false},
+    {"zero invalid", "0", 0, true},
+    {"negative invalid", "-1", 0, true},
+    {"not a number", "abc", 0, true},
+}
+
+// Bad: 穷举
+// Bad: 为覆盖率穷举，没有新增行为
+for _, s := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"} {
+    // ...
+}
+```
+
+### 数据与 Schema
+
+列名 `snake_case`，Go 字段 `CamelCase`，通过 struct tag 映射。
+
+```go
+// Good
+type Session struct {
+    ID        string `db:"id"`
+    ProjectID string `db:"project_id"`
+    CreatedAt int64  `db:"created_at"`
+}
+```
+
+### 其他
+
+空切片用 `var s []int`；安全敏感场景用 `crypto/rand`。
+
+```go
+// Good
+var items []Item
+
+// Bad
+items := []Item{}
+```
+
+## Branch Names
+
+Use a short branch name of at most three words, separated by hyphens. Do not use slashes or type prefixes such as `feat/` or `fix/`.
+
+Examples: `session-recovery`, `fix-scroll-state`, `regenerate-sdk`.
+
+## Commits and PR Titles
+
+Use conventional commit-style messages and PR titles: `type(scope): summary`.
+
+Valid types are `feat`, `fix`, `docs`, `chore`, `refactor`, and `test`. Scopes are optional; use the affected package or area when helpful, e.g. `core`, `opencode`, `tui`, `app`, `desktop`, `sdk`, or `plugin`.
+
+Examples: `fix(tui): simplify thinking toggle styling`, `docs: update contributing guide`, `chore(sdk): regenerate types`.
+
+
+## 标识值命名约定
+我们自己定义的标识值（资源 ID、计费项 code、枚举值、命名空间、幂等键）统一用 : 分段拼接，其余数据库/代码字段、路径/URL、环境变量、HTTP header、第三方协议值及受外部格式约束的值保持原样。
+```go
+// Good
+const UsageEventRefType = "usage:event"
+
+// Bad
+const UsageEventRefType = "usage_event"
+```
