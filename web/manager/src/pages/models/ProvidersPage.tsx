@@ -23,6 +23,12 @@ import { SimpleSelect } from "@/components/ui/select";
 import { providerApi, type Provider, type ProviderSlug } from "@/lib/api";
 import { useDocumentTitle } from "@/lib/title";
 import { useAuthStore } from "@/lib/store";
+import {
+  ScopeFilter,
+  ViewToggle,
+  type ResourceScope,
+  type ViewMode,
+} from "@/pages/models/shared";
 
 const CATEGORY_LABEL: Record<string, string> = {
   llm: "LLM 大语言模型",
@@ -30,6 +36,42 @@ const CATEGORY_LABEL: Record<string, string> = {
   tts: "TTS 语音合成",
   embedding: "Embedding 向量",
 };
+
+const CATEGORY_BADGE: Record<string, string> = {
+  llm: "bg-violet-600/15 text-violet-400 border-violet-500/20",
+  tts: "bg-pink-400/10 text-pink-400 border-pink-400/20",
+  asr: "bg-sky-400/10 text-sky-400 border-sky-400/20",
+  embedding: "bg-amber-400/10 text-amber-400 border-amber-400/20",
+};
+
+/** 官方厂商的标记，和「我的模型」页保持一致：图标 + 文字。 */
+function OfficialBadge() {
+  return (
+    <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border bg-violet-600/15 text-violet-400 border-violet-500/20 shrink-0">
+      <Shield className="w-2.5 h-2.5" />
+      官方
+    </span>
+  );
+}
+
+/** slug 的 `<category>:<vendor>` 两段标签。 */
+function SlugChips({ slug }: { slug: string }) {
+  const [category, vendor] = slug.split(":");
+  return (
+    <div className="flex items-center gap-1.5">
+      <span
+        className={`text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase ${CATEGORY_BADGE[category] ?? "bg-zinc-700/40 text-zinc-400 border-zinc-600/30"}`}
+      >
+        {category}
+      </span>
+      {vendor && (
+        <span className="text-[10px] px-1.5 py-0.5 rounded border bg-zinc-800 text-zinc-400 border-zinc-700 font-mono">
+          {vendor}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export default function ProvidersPage() {
   useDocumentTitle("厂商管理");
@@ -41,6 +83,10 @@ export default function ProvidersPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Provider | null>(null);
   const [showKey, setShowKey] = useState(false);
+  const [scope, setScope] = useState<ResourceScope>("all");
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    localStorage.getItem("providerViewMode") === "table" ? "table" : "grid",
+  );
   const [form, setForm] = useState({
     name: "",
     slug: "",
@@ -48,6 +94,11 @@ export default function ProvidersPage() {
     api_key: "",
   });
   const [saving, setSaving] = useState(false);
+
+  const toggleView = (mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem("providerViewMode", mode);
+  };
 
   const load = () => {
     setLoading(true);
@@ -117,6 +168,10 @@ export default function ProvidersPage() {
     setProviders((prev) => prev.filter((p) => p.id !== id));
   };
 
+  const filtered = providers.filter((p) =>
+    scope === "all" ? true : scope === "system" ? p.is_system : !p.is_system,
+  );
+
   return (
     <div className="min-h-full">
       <div className="border-b border-zinc-800/80 px-8 py-5">
@@ -127,13 +182,17 @@ export default function ProvidersPage() {
               管理 AI 服务厂商的接入配置和 API Key
             </p>
           </div>
-          <Button
-            onClick={openAdd}
-            className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
-          >
-            <Plus className="w-4 h-4" />
-            添加厂商
-          </Button>
+          <div className="flex items-center gap-2">
+            <ScopeFilter value={scope} onChange={setScope} />
+            <ViewToggle value={viewMode} onChange={toggleView} />
+            <Button
+              onClick={openAdd}
+              className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
+            >
+              <Plus className="w-4 h-4" />
+              添加厂商
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -142,12 +201,14 @@ export default function ProvidersPage() {
           <div className="flex items-center justify-center py-20">
             <div className="w-6 h-6 border-2 border-zinc-700 border-t-violet-500 rounded-full animate-spin" />
           </div>
-        ) : providers.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center py-20">
             <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
               <Building2 className="w-6 h-6 text-zinc-600" />
             </div>
-            <p className="text-zinc-400 text-sm">还没有厂商</p>
+            <p className="text-zinc-400 text-sm">
+              {scope === "mine" ? "你还没有添加厂商" : "还没有厂商"}
+            </p>
             <p className="text-zinc-600 text-xs mt-1 mb-4">
               添加厂商后即可在该厂商下创建模型
             </p>
@@ -159,9 +220,9 @@ export default function ProvidersPage() {
               添加厂商
             </Button>
           </div>
-        ) : (
+        ) : viewMode === "grid" ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {providers.map((p) => (
+            {filtered.map((p) => (
               <div
                 key={p.id}
                 className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-all group"
@@ -170,38 +231,10 @@ export default function ProvidersPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-medium text-sm text-white">{p.name}</p>
-                      {p.is_system && (
-                        <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border bg-violet-600/15 text-violet-400 border-violet-500/20">
-                          <Shield className="w-2.5 h-2.5" />
-                          官方
-                        </span>
-                      )}
+                      {p.is_system && <OfficialBadge />}
                     </div>
-                    <div className="flex items-center gap-1.5 mt-1">
-                      {(() => {
-                        const [cat, vendor] = p.slug.split(":");
-                        const catColor: Record<string, string> = {
-                          llm: "bg-violet-600/15 text-violet-400 border-violet-500/20",
-                          tts: "bg-pink-400/10 text-pink-400 border-pink-400/20",
-                          asr: "bg-sky-400/10 text-sky-400 border-sky-400/20",
-                          embedding:
-                            "bg-amber-400/10 text-amber-400 border-amber-400/20",
-                        };
-                        return (
-                          <>
-                            <span
-                              className={`text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase ${catColor[cat] ?? "bg-zinc-700/40 text-zinc-400 border-zinc-600/30"}`}
-                            >
-                              {cat}
-                            </span>
-                            {vendor && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded border bg-zinc-800 text-zinc-400 border-zinc-700 font-mono">
-                                {vendor}
-                              </span>
-                            )}
-                          </>
-                        );
-                      })()}
+                    <div className="mt-1">
+                      <SlugChips slug={p.slug} />
                     </div>
                   </div>
                   {!p.is_system && (
@@ -248,6 +281,71 @@ export default function ProvidersPage() {
                 </div>
               </div>
             ))}
+          </div>
+        ) : (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-800 text-left text-[11px] text-zinc-500 uppercase tracking-wide">
+                  <th className="px-4 py-3 font-medium">厂商</th>
+                  <th className="px-4 py-3 font-medium">类型</th>
+                  <th className="px-4 py-3 font-medium">Base URL</th>
+                  <th className="px-4 py-3 font-medium">状态</th>
+                  <th className="px-4 py-3 font-medium">创建时间</th>
+                  <th className="px-4 py-3 font-medium w-20" />
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((p) => (
+                  <tr
+                    key={p.id}
+                    className="border-b border-zinc-800/60 hover:bg-zinc-800/40 transition-colors"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm text-white">{p.name}</p>
+                        {p.is_system && <OfficialBadge />}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <SlugChips slug={p.slug} />
+                    </td>
+                    <td className="px-4 py-3 text-xs text-zinc-400 font-mono">
+                      <p className="max-w-72 truncate">{p.base_url}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="flex items-center gap-1 text-[11px] text-emerald-400">
+                        <CheckCircle2 className="w-3 h-3" />
+                        已配置
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-zinc-600 font-mono">
+                      {p.created_at.slice(0, 10)}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(!p.is_system || isAdmin) && (
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => openEdit(p)}
+                            className="text-zinc-500 hover:text-zinc-300 p-1.5 rounded hover:bg-zinc-800 cursor-pointer transition-colors"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          {!p.is_system && (
+                            <button
+                              onClick={() => handleDelete(p.id)}
+                              className="text-zinc-500 hover:text-red-400 p-1.5 rounded hover:bg-red-400/10 cursor-pointer transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
