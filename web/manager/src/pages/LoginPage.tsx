@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mic, Cpu, Zap, Globe } from "lucide-react";
 import { authApi, type OAuthProvider } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
+import { useDocumentTitle } from "@/lib/title";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -35,6 +36,9 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
+
+  // 登录页是控制台入口，标签页保持站点默认标题。
+  useDocumentTitle();
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
 
   // 拉取已注册的第三方登录平台（如 github），未配置的平台不展示入口

@@ -31,6 +31,7 @@ import {
 	type BillingRechargeResult,
 	type BillingSummary,
 } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 import {
 	formatMicro,
 	formatTime,
@@ -67,6 +68,8 @@ const POLL_INTERVAL_MS = 3000;
 const MICRO_PER_CENT = 10_000;
 
 export default function RechargePage() {
+	useDocumentTitle("余额充值");
+
 	const [summary, setSummary] = useState<BillingSummary | null>(null);
 	const [summaryLoading, setSummaryLoading] = useState(true);
 

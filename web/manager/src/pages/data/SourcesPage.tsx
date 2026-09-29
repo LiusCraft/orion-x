@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/components/ui/select";
+import { useDocumentTitle } from "@/lib/title";
 
 const DB_TYPES = [
   "PostgreSQL",
@@ -89,6 +90,8 @@ const STATUS_CFG = {
 };
 
 export default function SourcesPage() {
+  useDocumentTitle("数据源");
+
   const [sources, setSources] = useState<DataSource[]>(MOCK_SOURCES);
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState({

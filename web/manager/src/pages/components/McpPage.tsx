@@ -26,6 +26,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { mcpApi, type MCPMarketEntry, type MCPServer } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 import {
   McpServerDetail,
   ToolInputs,
@@ -197,6 +198,8 @@ function PaginationBar({
 }
 
 export default function McpPage() {
+  useDocumentTitle("MCP 管理");
+
   const [market, setMarket] = useState<MCPMarketEntry[]>([]);
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(true);

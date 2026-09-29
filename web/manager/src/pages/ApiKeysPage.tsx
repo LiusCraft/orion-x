@@ -40,6 +40,7 @@ import {
 	type ApiKeyScopeInfo,
 	type ApiKeyView,
 } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 import {
 	ADMIN_ONLY_HINT,
 	apiKeyErrorText,
@@ -76,6 +77,8 @@ interface ScopeSection {
 }
 
 export default function ApiKeysPage() {
+	useDocumentTitle("API Keys");
+
 	const [catalog, setCatalog] = useState<ApiKeyCatalog | null>(null);
 	const [keys, setKeys] = useState<ApiKeyView[]>([]);
 	const [loading, setLoading] = useState(true);

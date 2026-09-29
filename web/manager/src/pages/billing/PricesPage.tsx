@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Tag } from "lucide-react";
 import { billingApi, type BillingPrice } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 import {
 	BILLING_DISABLED_TITLE,
 	billingErrorMessage,
@@ -40,6 +41,8 @@ import {
 const METER_ORDER = ["llm", "tts", "asr", "voice:clone", "session", "mcp", "kb"];
 
 export default function PricesPage() {
+	useDocumentTitle("价格公示");
+
 	const [prices, setPrices] = useState<BillingPrice[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [disabled, setDisabled] = useState(false);

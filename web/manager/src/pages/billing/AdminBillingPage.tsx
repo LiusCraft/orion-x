@@ -5,6 +5,7 @@
 
 import { Coins } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useDocumentTitle } from "@/lib/title";
 import AccountsTab from "./admin/AccountsTab";
 import ItemsTab from "./admin/ItemsTab";
 import LedgerTab from "./admin/LedgerTab";
@@ -22,6 +23,8 @@ const TABS = [
 ];
 
 export default function AdminBillingPage() {
+	useDocumentTitle("计费管理");
+
 	return (
 		<div className="min-h-full">
 			<div className="border-b border-zinc-800/80 px-8 py-5">

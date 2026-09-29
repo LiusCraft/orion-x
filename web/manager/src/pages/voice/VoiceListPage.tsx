@@ -3,6 +3,7 @@ import { Mic2, Play, Pause, Trash2, Plus, Loader2, AlertCircle } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { voiceApi, type ModelVoice } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 
 const GRADIENTS = [
   "from-pink-500 to-rose-600",
@@ -35,6 +36,8 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 export default function VoiceListPage() {
+  useDocumentTitle("已有音色");
+
   const navigate = useNavigate();
   const audioRef = useRef<HTMLAudioElement | null>(null);
 

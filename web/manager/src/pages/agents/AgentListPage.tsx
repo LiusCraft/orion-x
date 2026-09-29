@@ -7,6 +7,7 @@ import {
   languageApi,
   type Voicebot,
 } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 import {
   Bot,
   Plus,
@@ -88,6 +89,8 @@ const MEMORY_LABEL: Record<string, string> = {
 };
 
 export default function AgentListPage() {
+  useDocumentTitle("我的智能体");
+
   const [bots, setBots] = useState<Voicebot[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);

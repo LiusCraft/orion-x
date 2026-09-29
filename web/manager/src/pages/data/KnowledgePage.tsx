@@ -33,6 +33,7 @@ import {
   type KnowledgeDocument,
   type AIModel,
 } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 
 const STATUS_MAP: Record<
   string,
@@ -70,6 +71,8 @@ function formatSize(chars: number) {
 }
 
 export default function KnowledgePage() {
+  useDocumentTitle("知识库");
+
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [loadingKBs, setLoadingKBs] = useState(true);
 

@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/components/ui/select";
 import { providerApi, type Provider, type ProviderSlug } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 import { useAuthStore } from "@/lib/store";
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -31,6 +32,8 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 export default function ProvidersPage() {
+  useDocumentTitle("厂商管理");
+
   const isAdmin = useAuthStore((state) => state.isAdmin);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [slugOptions, setSlugOptions] = useState<ProviderSlug[]>([]);

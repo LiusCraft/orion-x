@@ -27,6 +27,7 @@ import {
   type Language,
   type VoiceCloneModel,
 } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 
 type CloneStatus = "idle" | "uploading" | "cloning" | "done";
 
@@ -54,6 +55,8 @@ function formatSize(bytes: number): string {
 }
 
 export default function VoiceClonePage() {
+  useDocumentTitle("语音复刻");
+
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 

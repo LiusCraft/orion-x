@@ -17,6 +17,7 @@ import {
   type KnowledgeBase,
   type KnowledgeDocument,
 } from "@/lib/api";
+import { useDocumentTitle } from "@/lib/title";
 import {
   McpServerIcon,
   McpServerDetail,
@@ -229,6 +230,9 @@ export default function AgentDetailPage() {
 
   const [name, setName] = useState("");
   const [cfg, setCfg] = useState<BotConfig>(structuredClone(DC));
+
+  // 标题跟着智能体名字走：加载完成前先占一个通用名。
+  useDocumentTitle(name || "智能体详情");
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
