@@ -1,7 +1,9 @@
 package tg
 
 import (
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf16"
 
@@ -11,22 +13,130 @@ import (
 )
 
 const (
-	// streamThrottlePrivate / streamThrottleGroup 是流式刷新的最小间隔。Telegram
-	// 限制单聊约 1 条/秒、群聊 20 条/分钟（Bot FAQ），各自留出余量。
-	streamThrottlePrivate = 2 * time.Second
-	streamThrottleGroup   = 4 * time.Second
+	// draftThrottle 是私聊草稿更新的最小间隔。sendMessageDraft 的频率配额官方
+	// 未公开，先按单聊消息的 1 条/秒留出余量。
+	draftThrottle = 2 * time.Second
+	// editThrottleGroup 是群聊原地刷新的最小间隔：群聊没有草稿接口，且限制
+	// 20 条/分钟（Bot FAQ），4s 一次留出余量。
+	editThrottleGroup = 4 * time.Second
 
-	// maxMessageUnits 是单条消息的字符上限（Bot API 限制 4096，按 UTF-16 码元计）。
+	// maxMessageUnits 是单条消息与草稿的字符上限（Bot API 限制 4096，按 UTF-16 码元计）。
 	maxMessageUnits = 4096
 
 	// replyEmptyText 是 Agent 没有任何产出时的占位回复。
 	replyEmptyText = "（无响应）"
 )
 
-// streamReply 把 Agent 的流式文本增量刷进 Telegram：首个增量创建消息，之后按
-// 节流编辑同一条；超过单条上限时定稿当前消息、另起一条继续。只由处理该消息的
-// 单个 goroutine 使用，不是并发安全的。
-type streamReply struct {
+// replyStream 是一轮回复的流式输出面：push 追加文本增量，finish 收尾。
+type replyStream interface {
+	push(chunk string)
+	finish()
+}
+
+// newReplyStream 按聊天类型选择实现：草稿接口只支持私聊，其他聊天退回原地编辑。
+func newReplyStream(bot *tgbotapi.BotAPI, deviceID string, chat *tgbotapi.Chat) replyStream {
+	if chat.IsPrivate() {
+		return newDraftReply(bot, deviceID, chat)
+	}
+	return newEditReply(bot, deviceID, chat)
+}
+
+// draftSeq 给每轮回复分配非零 draft_id：同一个 id 的草稿更新在客户端带动画。
+var draftSeq atomic.Int64
+
+// draftReply 用 sendMessageDraft 把生成中的内容作为私聊草稿预览。草稿是临时的
+// 30 秒预览，不留在会话里，收尾时必须再用 sendMessage 把完整文本落地。
+// 只由处理该消息的单个 goroutine 使用，不是并发安全的。
+type draftReply struct {
+	bot      *tgbotapi.BotAPI
+	deviceID string
+	chatID   int64
+	draftID  int64
+	throttle time.Duration
+
+	text   strings.Builder // 本轮已产生的全部文本
+	shown  string          // 草稿里已展示的内容（按上限截断后的头部）
+	last   time.Time       // 上次成功更新草稿的时间
+	opened bool            // 是否已经成功发过草稿
+}
+
+// newDraftReply 创建私聊草稿流。
+func newDraftReply(bot *tgbotapi.BotAPI, deviceID string, chat *tgbotapi.Chat) *draftReply {
+	return &draftReply{
+		bot:      bot,
+		deviceID: deviceID,
+		chatID:   chat.ID,
+		draftID:  draftSeq.Add(1),
+		throttle: draftThrottle,
+	}
+}
+
+// push 追加一个文本增量：首块立即出草稿，其余按节流更新。
+func (s *draftReply) push(chunk string) {
+	if chunk == "" {
+		return
+	}
+	s.text.WriteString(chunk)
+	if s.opened && time.Since(s.last) < s.throttle {
+		return
+	}
+	s.flushDraft()
+}
+
+// finish 收尾：草稿不会留在会话里，用 sendMessage 把完整文本落地；超过单条上限
+// 时拆成多条发送。
+func (s *draftReply) finish() {
+	content := s.text.String()
+	if content == "" {
+		content = replyEmptyText
+	}
+	for content != "" {
+		if units(content) <= maxMessageUnits {
+			s.sendMessage(content)
+			return
+		}
+		head, tail := splitToUnits(content, maxMessageUnits)
+		if !s.sendMessage(head) {
+			return
+		}
+		content = tail
+	}
+}
+
+// flushDraft 把当前全文（头部截断到上限）作为草稿预览推给客户端；内容没变则跳过。
+// 草稿失败只记日志：下一块增量或收尾会重试，收尾的 sendMessage 保证文本最终送达。
+func (s *draftReply) flushDraft() {
+	content := truncateToUnits(s.text.String(), maxMessageUnits)
+	if content == s.shown {
+		return
+	}
+	params := tgbotapi.Params{
+		"chat_id":  strconv.FormatInt(s.chatID, 10),
+		"draft_id": strconv.FormatInt(s.draftID, 10),
+		"text":     content,
+	}
+	if _, err := s.bot.MakeRequest("sendMessageDraft", params); err != nil {
+		logging.Warnf("tg[%s]: draft reply to chat %d: %v", s.deviceID, s.chatID, err)
+		return
+	}
+	s.shown = content
+	s.last = time.Now()
+	s.opened = true
+}
+
+// sendMessage 发一条落地消息。
+func (s *draftReply) sendMessage(content string) bool {
+	if _, err := s.bot.Send(tgbotapi.NewMessage(s.chatID, content)); err != nil {
+		logging.Warnf("tg[%s]: send reply to chat %d: %v", s.deviceID, s.chatID, err)
+		return false
+	}
+	return true
+}
+
+// editReply 在群聊里用原地编辑刷新回复：首个增量创建消息，之后按节流编辑同一条；
+// 超过单条上限时定稿当前消息、另起一条继续。只由处理该消息的单个 goroutine 使用，
+// 不是并发安全的。
+type editReply struct {
 	bot      *tgbotapi.BotAPI
 	deviceID string
 	chatID   int64
@@ -38,17 +148,13 @@ type streamReply struct {
 	last      time.Time       // 上次成功发送/编辑的时间，节流用
 }
 
-// newStreamReply 按聊天类型选择节流间隔：群聊的发送配额更小。
-func newStreamReply(bot *tgbotapi.BotAPI, deviceID string, chat *tgbotapi.Chat) *streamReply {
-	throttle := streamThrottlePrivate
-	if chat.IsGroup() || chat.IsSuperGroup() {
-		throttle = streamThrottleGroup
-	}
-	return &streamReply{bot: bot, deviceID: deviceID, chatID: chat.ID, throttle: throttle}
+// newEditReply 创建群聊原地刷新流。
+func newEditReply(bot *tgbotapi.BotAPI, deviceID string, chat *tgbotapi.Chat) *editReply {
+	return &editReply{bot: bot, deviceID: deviceID, chatID: chat.ID, throttle: editThrottleGroup}
 }
 
 // push 追加一个文本增量：首块立即建消息，其余距上次刷新超过节流间隔才编辑。
-func (s *streamReply) push(chunk string) {
+func (s *editReply) push(chunk string) {
 	if chunk == "" {
 		return
 	}
@@ -60,7 +166,7 @@ func (s *streamReply) push(chunk string) {
 
 // finish 定稿：把剩余增量刷完；曾刷新失败时把未送达部分另起消息兜底；全程没有
 // 任何产出时补占位文案。
-func (s *streamReply) finish() {
+func (s *editReply) finish() {
 	s.flush()
 	if s.pending.Len() > 0 {
 		// 刷新失败（网络抖动、消息被删等）：已可见的内容留在原消息，剩余另起一条。
@@ -76,7 +182,7 @@ func (s *streamReply) finish() {
 
 // flush 把 pending 刷成可见内容：能放进当前消息就编辑，超出上限就先按上限切出
 // 一段定稿当前消息，剩余内容另起一条继续。失败时保留状态，等下一次触发重试。
-func (s *streamReply) flush() {
+func (s *editReply) flush() {
 	for s.pending.Len() > 0 {
 		content := s.sent + s.pending.String()
 		if units(content) > maxMessageUnits {
@@ -101,7 +207,7 @@ func (s *streamReply) flush() {
 
 // sendOrEdit 发送或编辑当前消息。内容与已可见内容相同则跳过：Telegram 会以
 // "message is not modified" 拒绝这类编辑。
-func (s *streamReply) sendOrEdit(content string) error {
+func (s *editReply) sendOrEdit(content string) error {
 	if s.messageID == 0 {
 		return s.sendNew(content)
 	}
@@ -116,7 +222,7 @@ func (s *streamReply) sendOrEdit(content string) error {
 }
 
 // sendNew 发一条新消息，并把它设为当前消息。
-func (s *streamReply) sendNew(content string) error {
+func (s *editReply) sendNew(content string) error {
 	msg, err := s.bot.Send(tgbotapi.NewMessage(s.chatID, content))
 	if err != nil {
 		return err
@@ -135,15 +241,21 @@ func units(s string) int {
 	return n
 }
 
-// splitToUnits 在不超过 max 个 UTF-16 码元处把 s 切成两段，不劈开 rune。
-func splitToUnits(s string, max int) (head, tail string) {
+// truncateToUnits 把 s 截到不超过 max 个 UTF-16 码元，不劈开 rune。
+func truncateToUnits(s string, max int) string {
 	n := 0
 	for i, r := range s {
 		size := utf16.RuneLen(r)
 		if n+size > max {
-			return s[:i], s[i:]
+			return s[:i]
 		}
 		n += size
 	}
-	return s, ""
+	return s
+}
+
+// splitToUnits 在不超过 max 个 UTF-16 码元处把 s 切成两段，不劈开 rune。
+func splitToUnits(s string, max int) (head, tail string) {
+	head = truncateToUnits(s, max)
+	return head, s[len(head):]
 }

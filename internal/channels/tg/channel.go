@@ -328,7 +328,7 @@ func (c *TGChannel) handleText(ctx context.Context, deviceID string, chat *tgbot
 		return
 	}
 
-	stream := newStreamReply(bot, deviceID, chat)
+	stream := newReplyStream(bot, deviceID, chat)
 	for event := range eventChan {
 		switch e := event.(type) {
 		case *agent.TextChunkEvent:
