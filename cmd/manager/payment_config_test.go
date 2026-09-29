@@ -68,3 +68,17 @@ func TestPaymentConfigServiceConfig(t *testing.T) {
 		t.Fatalf("Channels = %v", got.Channels)
 	}
 }
+
+func TestPaymentConfigServiceConfigEnabled(t *testing.T) {
+	enabled := true
+	if got := (PaymentConfig{Enabled: &enabled}).PaymentServiceConfig(nil); !got.Enabled {
+		t.Fatal("PaymentServiceConfig() with enabled: true must set Enabled")
+	}
+
+	disabled := false
+	for _, cfg := range []PaymentConfig{{}, {Enabled: &disabled}} {
+		if got := cfg.PaymentServiceConfig(nil); got.Enabled {
+			t.Fatalf("PaymentServiceConfig(Enabled: %v) set Enabled, want false", cfg.Enabled)
+		}
+	}
+}
