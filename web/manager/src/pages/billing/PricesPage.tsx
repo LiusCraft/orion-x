@@ -6,9 +6,6 @@
 // 「适用范围」显示资源名而不是内部 ID：名字从 /api/models、/api/providers、
 // /api/voices 现成列表解析（lib/billingResources.ts），解析不到（看不到的资源 /
 // 列表加载失败）就回落到 ID。价格都是 item 级时不去拉这几个列表。
-//
-// 底部的口径说明只提炼自 docs/billing-design.md §3.3（金额与舍入）与 §13（quantity
-// 数的是什么），没有写进文档的规则不要往这里加。
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Tag } from "lucide-react";
@@ -17,7 +14,6 @@ import { useDocumentTitle } from "@/lib/title";
 import {
 	BILLING_DISABLED_TITLE,
 	billingErrorMessage,
-	currencySymbol,
 	formatDate,
 	formatMicro,
 	formatTierPrice,
@@ -289,119 +285,7 @@ export default function PricesPage() {
 						</Panel>
 					))
 				)}
-
-				<BillingRules />
 			</div>
 		</div>
-	);
-}
-
-/**
- * 计费口径说明。三条来源：§3.3 金额与舍入、§13 quantity 数的是什么、§3.2 变价规则。
- * 没写进设计文档的规则不要加进来——公示页说错话比不写更糟。
- */
-function BillingRules() {
-	return (
-		<Panel title="计费口径说明" description="来源：docs/billing-design.md §3.2 / §3.3 / §13">
-			<div className="space-y-4 text-xs text-zinc-400 leading-relaxed">
-				<section>
-					<p className="text-zinc-300 font-medium mb-1">金额与舍入（§3.3）</p>
-					<ul className="list-disc pl-4 space-y-1">
-						<li>
-							金额全链路是整数微单位（1e-6 元），不用浮点；<span className="font-mono">qty × 单价 ÷ unit_size</span>{" "}
-							在<span className="text-zinc-300">一次结算内只舍入一次</span>，避免逐条舍入累积误差。
-						</li>
-						<li>
-							按时长计费的项默认<span className="text-zinc-300">向上取整</span>（ceil），按用量的项默认
-							<span className="text-zinc-300">精确</span>（丢弃不足 1 微元的部分）；起步价在舍入之后取{" "}
-							<span className="font-mono">max(用量价, 起步价)</span>。
-						</li>
-						<li>
-							单价必须是整数微元，精度不够就抬高 <span className="font-mono">unit_size</span>
-							（表里的"每百万 token ¥x"就是这个意思），而不是把单价舍成 0。
-						</li>
-					</ul>
-				</section>
-
-				<section>
-					<p className="text-zinc-300 font-medium mb-1">
-						每个计费项数的是什么（§13）
-					</p>
-					<ul className="list-disc pl-4 space-y-1">
-						<li>
-							任意两个计费项的 quantity 不重叠：LLM 输入已剔除缓存读写、输出已剔除推理 token，
-							缓存命中与缓存写入单独列项。
-						</li>
-						<li>
-							数量跟厂商计费的那个量对齐：token 用厂商报的 token 数，语音识别用厂商返回的时长，
-							语音合成按实际发给厂商的文本字符（rune）数。
-						</li>
-						<li>
-							被用户打断时，已经合成/已经产生的用量照常计费——厂商那边已经计过费了；
-							还没发给厂商的文本不算。
-						</li>
-						<li>
-							自带 key（BYOK）的调用不收平台费用，只记用量，明细里会标注「自带 key，不计费」。
-						</li>
-					</ul>
-				</section>
-
-				<section>
-					<p className="text-zinc-300 font-medium mb-1">互斥口径（§3.1 / §12）</p>
-					<ul className="list-disc pl-4 space-y-1">
-						<li>
-							<span className="font-mono">tts:characters</span> 与{" "}
-							<span className="font-mono">tts:audio:seconds</span> 互斥；
-							<span className="font-mono">asr:audio:seconds</span> 与按通话时长打包计价互斥。
-							同一部署只启用一组，否则同一份用量会被计两次。
-						</li>
-					</ul>
-				</section>
-
-				<section>
-					<p className="text-zinc-300 font-medium mb-1">变价与历史账单（§3.2）</p>
-					<ul className="list-disc pl-4 space-y-1">
-						<li>
-							价格是版本化的：改价 = 新增一版生效时间更晚的价格，不覆盖历史版本。
-						</li>
-						<li>
-							结算按<span className="text-zinc-300">事件发生时刻</span>的价格匹配，并把命中的价格快照写进用量事件；
-							历史账单永不因之后调价而变动。
-						</li>
-						<li>
-							已经生效的价格版本只能"停用"（把失效时间收到当前时刻，不删行）；只有还没生效的版本可以删除。
-						</li>
-					</ul>
-				</section>
-
-				<section>
-					<p className="text-zinc-300 font-medium mb-1">额度与准入（§3.3 / §3.5）</p>
-					<ul className="list-disc pl-4 space-y-1">
-						<li>
-							限定计费项的赠送额度优先消耗，顺序是{" "}
-							<span className="font-mono">grant → balance → credit_limit</span>。
-						</li>
-						<li>
-							准入判断是{" "}
-							<span className="font-mono">
-								amount ≤ 余额 + 信用额度 − 预冻结
-							</span>
-							；余额可以为负 = 后付欠款。
-						</li>
-					</ul>
-				</section>
-
-				<section>
-					<p className="text-zinc-300 font-medium mb-1">价格匹配优先级（§3.2）</p>
-					<p>
-						同一计费项可能同时存在多版价格，命中顺序是：账户协议价 → 音色 → 模型 → 厂商 →
-						计费项兜底；同一 scope 同一时刻只有一版价格。本页只公示
-						<span className="text-zinc-300">平台标准价</span>（
-						{currencySymbol("CNY")}
-						计价，单币种部署不做汇率），账户协议价按合同约定另行提供。
-					</p>
-				</section>
-			</div>
-		</Panel>
 	);
 }
