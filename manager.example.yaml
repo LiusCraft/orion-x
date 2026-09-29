@@ -54,6 +54,8 @@ internal:
 #   currency: "CNY"                 # 单币种部署，P1 不做汇率
 #   reserve_seconds: 600            # 会话预冻结覆盖的时长，也是下发给数据面的 max_session_seconds
 #   reserve_rate_micro: 0           # 每秒预留额（微元）；0 = 按 duration 类计费项的单价估算
+#   fallback_price_micro: 0         # 兜底单价（微元/单位）：给还没有生效价格的启用计费项插一条
+#                                   # 平台标准价。默认 0 = 免费档；-1 = 关闭（价格缺失即拒会话）
 #   settlement_mode: "async"        # sync | async（P1 默认 async）
 #   overdraft_policy: "deny"        # deny = 余额扣负就停服；allow = 挂账
 #   period_timezone: "Asia/Shanghai"  # 账期（自然月）的时区，默认 UTC

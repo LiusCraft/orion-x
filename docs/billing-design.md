@@ -184,7 +184,7 @@ LIMIT 1
 - **赠送额度按金额还是按量。** `billing_grants` 现在按 micro 金额存。如果对外宣传“送 60 分钟”，调价之后这 60 分钟就不准了。要么把 grant 改成按量（`granted_qty` + `item_code`），要么文案就不承诺时长、只写“送 ¥5”。建议后者。
 - **缓存命中先按 input 全价收。** 口径已经把 cache 拆开了（§13），所以这只是“这一版先这么收”；想改成半价就是插一版新价格，代码不动。但心里要有数：这一版是按全价收缓存命中，毛利比看上去好看。
 
-价格是运营数据，不该写死在代码里。但有一个**上线时必须人工做的步骤**：billing 一开、价格表为空的话，每个会话都会被 `price_missing` 拒掉（§14.3）。seed 里只放计费项目录和一条兜底价格，真实价格上线前用 admin API 录一遍。
+价格是运营数据，不该写死在代码里。**默认价格表是免费的**：启动时 seed 会给每个还没有生效价格的启用计费项插一条 item 级兜底价（`billing.fallback_price_micro`，默认 0 = 免费档），所以价格表为空的部署不会一上来就把所有会话按 `price_missing` 拒掉（§14.3）。要收费就用 admin API 录真实价格——同 scope 下后录的版本选价优先（§3.2），兜底行留着也不影响；想回到 fail closed（价格缺失即拒会话）把 `fallback_price_micro` 设为负数并删掉兜底行。
 
 ### 3.5 账户与账本
 
@@ -611,7 +611,7 @@ func asrSecondsOf(results []asr.Result) int64
 - 价格匹配要用的模型链由控制面查，不劳数据面：authorize 时按 `device_id` 取 voicebot 配置，拿到这次会话的 LLM / ASR / TTS 三个 `provider_id` / `model_id` / `voice_id`，再走 §3.2 那条匹配 SQL。数据面不需要知道价格是怎么来的。
 - `reserved_micro` P1 就简单取 `max_session_seconds × 各单价之和`，用 `billing.reserve_seconds` / `billing.reserve_rate_micro` 调。
 - `expires_at` = 现在 + `max_session_seconds` + 60 秒，而且**每收到这个会话的上报就顺延**（§14.4）。所以 `max_session_seconds` 的语义是“沉默多久算死”，不是“会话最多活多久”——还在说话的会话每轮都在上报，冻结永远不会被回收；崩掉或断网的会话停止上报，窗口一到才释放。
-- `reject_reason` 目前四个值：`insufficient_balance` / `account_suspended` / `no_account` / `price_missing`。最后那个要特别注意：**价格查不到时必须拒绝会话，不能按 0 元放行**。放行的后果是定价表漏配一条就给用户开了免费服务，而且不会有任何报错。
+- `reject_reason` 目前四个值：`insufficient_balance` / `account_suspended` / `no_account` / `price_missing`。最后那个要特别注意：**价格查不到时必须拒绝会话，不能隐式按 0 元放行**。放行的后果是定价表漏配一条就给用户开了免费服务，而且不会有任何报错。默认部署启动时会 seed 免费兜底价（§3.4），所以“查不到”只在兜底价被关闭（`fallback_price_micro` 为负）或删掉时才会发生。
 - **authorize 本身失败或超时要放行（fail open），但得有边界。** 超时定在 800ms——它卡在设备等 hello 的关键路径上，不能慢慢等。放行的会话由控制面补一条 `status='degraded'` 的 reservation（金额 0、无冻结、不预扣），这样落账仍然只有一条路径，代码里不用为降级单开分支。
 
   选 fail open 是因为：结算的一致性本来就不建立在 authorize 上（价格按 `occurred_at` 匹配，不依赖下发的快照），所以 fail closed 换来的“精确”是假的，代价却是 manager 抖一下、全屋设备变砖。唯一例外是**已被停服的账户**——本地留一个带 TTL 的标记，上次 authorize 返回过 `account_suspended` 的 device，即使 manager 不可达也拒。这不是 fail closed，是用已知的最后状态。
@@ -776,7 +776,7 @@ worker 就是 `cmd/manager` 里的一个 goroutine（`billing.NewWorker(db, cfg)
 - 会话当中余额被耗尽。数据面自己熔断；控制面按 `overdraft_policy` 处理，`deny` 的话账户置 `suspended` 并告警。
 - 数据面漏调 settle。冻结悬挂到 `expires_at`，回收任务收拾。
 - authorize 请求超时。降级放行（§14.3），这段窗口里没有预冻结也没有熔断，用量照记。
-- 某个 model 忘了配价格。直接拒绝会话（`price_missing`），不按 0 元放行。
+- 某个 model 忘了配价格。默认有 item 级兜底价（§3.4）就按兜底价算；关闭兜底时直接拒绝会话（`price_missing`），不按 0 元放行。
 - 复刻音色那种“厂商调成功了、扣费事务挂了”的情况。事件落 pending，worker 拿 `voice:clone:<voice_id>` 这个幂等键补扣。
 
 ## 18. 从哪儿开始写

@@ -82,3 +82,55 @@ func TestBillingSeedItems(t *testing.T) {
 		t.Fatal("seed is missing one of the mutually exclusive TTS items")
 	}
 }
+
+// TestSeedFallbackPrices 盯住默认价格表的行为：给启用项插 0 元兜底价（默认免费档）、
+// duration 类向上取整、禁用项不插、负值整体关闭（回到 fail closed）。
+func TestSeedFallbackPrices(t *testing.T) {
+	t.Run("seeds free prices for enabled items only", func(t *testing.T) {
+		s, rec := newDryRunBillingStore(t)
+		items := []BillingItem{
+			{Code: "llm:tokens:input", ChargeMode: "usage", Enabled: true},
+			{Code: "asr:audio:seconds", ChargeMode: "duration", Enabled: true},
+			{Code: "mcp:tool:call", ChargeMode: "count", Enabled: false},
+		}
+
+		created, err := seedFallbackPrices(s.db, items, 0)
+		if err != nil {
+			t.Fatalf("seedFallbackPrices: %v", err)
+		}
+		if created != 2 {
+			t.Fatalf("created = %d, want 2 (enabled items only)", created)
+		}
+
+		sql := rec.all()
+		for _, want := range []string{
+			`INSERT INTO "billing_prices"`,
+			`'llm:tokens:input'`,
+			`'asr:audio:seconds'`,
+			`'ceil'`,
+			`'system:fallback'`,
+		} {
+			if !strings.Contains(sql, want) {
+				t.Errorf("SQL is missing %q:\n%s", want, sql)
+			}
+		}
+		if strings.Contains(sql, "mcp:tool:call") {
+			t.Errorf("disabled item got a fallback price:\n%s", sql)
+		}
+	})
+
+	t.Run("negative disables seeding", func(t *testing.T) {
+		s, rec := newDryRunBillingStore(t)
+
+		created, err := SyncBillingFallbackPrices(s.db, -1)
+		if err != nil {
+			t.Fatalf("SyncBillingFallbackPrices: %v", err)
+		}
+		if created != 0 {
+			t.Fatalf("created = %d, want 0", created)
+		}
+		if sql := rec.all(); sql != "" {
+			t.Errorf("disabled fallback price must not touch the DB, got:\n%s", sql)
+		}
+	})
+}
