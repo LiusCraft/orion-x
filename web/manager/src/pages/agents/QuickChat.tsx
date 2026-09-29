@@ -11,7 +11,13 @@ interface ChatMsg {
   id: number;
 }
 
-const WS_URL = "ws://localhost:8080/ws";
+// 线上走同源 /ws（由网关反代到 wsserver）；只有本地开发（vite 5173）才直连
+// wsserver。写死 ws://localhost:8080 会让线上浏览器去连访问者自己电脑的 8080。
+const WS_URL =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1"
+    ? "ws://localhost:8080/ws"
+    : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
 
 export default function QuickChat({
   agentId,
