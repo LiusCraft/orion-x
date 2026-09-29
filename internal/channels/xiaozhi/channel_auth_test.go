@@ -52,13 +52,14 @@ func (f *fakeVerifier) snapshot() (calls int, rawKey, deviceID string) {
 // newAuthTestChannel 组装一个只关心握手路径的通道：verifier 由调用方注入，
 // tools/memory 为 nil（拒绝路径永远走不到它们）。
 //
-// 注册的 cleanup 会等所有连接 goroutine 退出：否则它们的日志会与下一个用例的
-// logging.Init 竞争全局 logger（-race 下必红）。
+// 注册的 cleanup 走 ch.waitConns：先置位再等，handler goroutine 的 connWG.Add
+// 与它有序（Add/Wait 并发会被 -race 判成竞争）；同时也保证连接 goroutine 已退出，
+// 否则它们的日志会与下一个用例的 logging.Init 竞争全局 logger（-race 下必红）。
 func newAuthTestChannel(t *testing.T, verifier channels.KeyVerifier) *XiaozhiWSChannel {
 	t.Helper()
 	deps := &channels.Dependencies{KeyVerifier: verifier}
 	ch := NewXiaozhiWSChannel(DefaultConfig(), deps, nil, nil)
-	t.Cleanup(func() { ch.connWG.Wait() })
+	t.Cleanup(ch.waitConns)
 	return ch
 }
 
@@ -307,7 +308,7 @@ func TestHandshakeNeverLogsTheFullKey(t *testing.T) {
 	}
 	// 先等连接 goroutine 退出，再恢复 logger：它的最后一条日志必须落在管道里，
 	// 也不能与下面的 Init 竞争。
-	ch.connWG.Wait()
+	ch.waitConns()
 
 	logging.Sync()
 	if err := writePipe.Close(); err != nil {
