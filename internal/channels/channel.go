@@ -23,6 +23,7 @@ type Capability string
 
 const (
 	CapText        Capability = "text"         // 文本消息
+	CapTextStream  Capability = "text:stream"  // 流式文本输出（回复随生成增量刷新同一条消息）
 	CapVoiceFile   Capability = "voice:file"   // 语音文件（离线 ASR）
 	CapAudioStream Capability = "audio:stream" // 实时音频流
 )
