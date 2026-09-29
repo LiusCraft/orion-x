@@ -123,11 +123,17 @@ func (r *Registry) mountedSessionIDs(taskID string) []string {
 	return append([]string(nil), t.MountedSessions...)
 }
 
+// Get returns a snapshot copy of a task. The clone must happen while the read
+// lock is held: the forwarding goroutine mutates the stored task under the
+// write lock, so copying it after unlocking would race with that writer.
 func (r *Registry) Get(id string) (*Task, bool) {
 	r.mu.RLock()
+	defer r.mu.RUnlock()
 	t, ok := r.tasks[id]
-	r.mu.RUnlock()
-	return cloneTask(t), ok
+	if !ok {
+		return nil, false
+	}
+	return cloneTask(t), true
 }
 
 func (r *Registry) Mount(taskID, sessionID string) bool { return r.setMount(taskID, sessionID, true) }
