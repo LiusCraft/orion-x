@@ -50,11 +50,11 @@ run-wsserver: build-wsserver
 
 build-manager:
 	mkdir -p bin
-	go build -o bin/manager$(BIN_EXT) ./cmd/manager
+	$(GO) build -o bin/manager$(BIN_EXT) ./cmd/manager
 
 build-tools:
 	mkdir -p bin
-	go build -o bin/tools$(BIN_EXT) ./cmd/tools
+	$(GO) build -o bin/tools$(BIN_EXT) ./cmd/tools
 
 # Regenerate Swagger/OpenAPI files after changing cmd/manager/swagger.go.
 swagger:
