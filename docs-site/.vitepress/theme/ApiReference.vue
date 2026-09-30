@@ -61,7 +61,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<div class="api-reference-shell">
+	<!-- vp-raw stops VitePress's router from calling preventDefault on Scalar's #/ links,
+	     which would make Scalar's sidebar navigation a no-op. -->
+	<div class="api-reference-shell vp-raw">
 		<div ref="apiReferenceRoot" class="api-reference-root" />
 		<div v-if="isLoading" class="api-reference-loading" role="status" aria-live="polite">
 			<span class="api-reference-spinner" aria-hidden="true" />
