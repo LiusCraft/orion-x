@@ -67,6 +67,22 @@ type DeviceChannel struct {
 	BaseModel
 }
 
+// ResourceSource 标识 provider / model / voice 记录由谁维护。
+//
+// is_system 与 source 是两回事：is_system=true 只表示「所有用户可见、后台不允许删除」，
+// 管理员从控制台创建、之后手工标成官方的记录同样是 is_system=true。只有 source=code
+// 才表示记录由代码注册表写入、归 SyncSystemProviders 管理；sync 清理时只删 source=code
+// 的记录（见 sync.go）。空值是 source 列上线前的历史行，Open 的 backfill 会凭 meta_hash
+// 把它们解析成 code / manual；解析前一律按非 code 对待（不删）。
+type ResourceSource string
+
+const (
+	// SourceCode 由代码注册表同步写入。
+	SourceCode ResourceSource = "code"
+	// SourceManual 管理端创建（含管理员标成官方的记录），sync 只读不删。
+	SourceManual ResourceSource = "manual"
+)
+
 // Provider AI 模型厂商
 //
 // Slug 只标识 provider 实现（协议适配器，如 llm/openai-responses），不是账号，不做唯一约束；
@@ -78,6 +94,7 @@ type Provider struct {
 	BaseURL   string            `gorm:"not null;type:varchar(512)" json:"base_url"`
 	APIKeyEnc string            `gorm:"not null;type:text" json:"-"`
 	IsSystem  bool              `gorm:"not null;default:false;index" json:"is_system"`
+	Source    ResourceSource    `gorm:"not null;default:'';type:varchar(16)" json:"source"`
 	MetaHash  string            `gorm:"type:varchar(64)" json:"-"`
 	Extra     datatypes.JSONMap `gorm:"type:jsonb" json:"extra,omitempty"`
 	BaseModel
@@ -111,6 +128,7 @@ type AIModel struct {
 	BaseURL    string            `gorm:"type:varchar(512)" json:"base_url"`
 	ModelID    string            `gorm:"not null;type:varchar(128)" json:"model_id"`
 	IsSystem   bool              `gorm:"not null;default:false;index" json:"is_system"`
+	Source     ResourceSource    `gorm:"not null;default:'';type:varchar(16)" json:"source"`
 	Langs      pq.StringArray    `gorm:"type:text[]" json:"langs,omitempty"`
 	MetaHash   string            `gorm:"type:varchar(64)" json:"-"`
 	Extra      datatypes.JSONMap `gorm:"type:jsonb" json:"extra,omitempty"`
@@ -141,6 +159,7 @@ type ModelVoice struct {
 	Langs          pq.StringArray    `gorm:"type:text[]" json:"langs,omitempty"`
 	Emotions       datatypes.JSONMap `gorm:"type:jsonb" json:"emotions,omitempty"`
 	IsSystem       bool              `gorm:"not null;default:false;index" json:"is_system"`
+	Source         ResourceSource    `gorm:"not null;default:'';type:varchar(16)" json:"source"`
 	IsCloned       bool              `gorm:"not null;default:false" json:"is_cloned"`
 	SourceAssetID  string            `gorm:"type:varchar(36);index" json:"source_asset_id,omitempty"`
 	SourceAudioURL string            `gorm:"type:varchar(512)" json:"source_audio_url,omitempty"`

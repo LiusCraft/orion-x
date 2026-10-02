@@ -2309,6 +2309,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "创建模型。is_system=true 为官方（所有用户可见、平台维护），仅管理员可用且要求该厂商也是官方，否则 403 / 400。",
                 "consumes": [
                     "application/json"
                 ],
@@ -2345,6 +2346,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/main.errorResponse"
                         }
@@ -2984,6 +2991,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "创建厂商。is_system=true 为官方（所有用户可见、平台维护），仅管理员可用，否则 403。",
                 "consumes": [
                     "application/json"
                 ],
@@ -3020,6 +3028,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/main.errorResponse"
                         }

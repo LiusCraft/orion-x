@@ -11,6 +11,19 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    services:
+      # store 里有一个需要真实 Postgres 的 sync 测试（外键/删除顺序，DryRun 造不出来）。
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -43,3 +56,8 @@ jobs:
 
       - name: go test
         run: go test -race -count=1 ./...
+
+      - name: go test (postgres-backed store tests)
+        env:
+          ORION_TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test -race -count=1 ./internal/store

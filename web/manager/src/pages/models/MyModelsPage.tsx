@@ -21,6 +21,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   modelApi,
   providerApi,
@@ -140,7 +141,15 @@ export default function MyModelsPage() {
     type: ModelType;
     base_url: string;
     model_id: string;
-  }>({ provider_id: "", name: "", type: "text", base_url: "", model_id: "" });
+    is_system: boolean;
+  }>({
+    provider_id: "",
+    name: "",
+    type: "text",
+    base_url: "",
+    model_id: "",
+    is_system: false,
+  });
 
   const toggleView = (mode: ViewMode) => {
     setViewMode(mode);
@@ -175,6 +184,7 @@ export default function MyModelsPage() {
       type: type ?? ((activeType === "all" ? "text" : activeType) as ModelType),
       base_url: "",
       model_id: "",
+      is_system: false,
     });
     setShowKey(false);
     setAddOpen(true);
@@ -188,6 +198,7 @@ export default function MyModelsPage() {
       type: model.type,
       base_url: model.base_url ?? "",
       model_id: model.model_id,
+      is_system: model.is_system,
     });
     setEditOpen(true);
   };
@@ -202,6 +213,7 @@ export default function MyModelsPage() {
         type: form.type,
         base_url: form.base_url || undefined,
         model_id: form.model_id,
+        is_system: form.is_system,
       });
       setAddOpen(false);
       load();
@@ -560,14 +572,47 @@ export default function MyModelsPage() {
                   .filter((p) => {
                     const isVoice =
                       p.slug.startsWith("tts:") || p.slug.startsWith("asr:");
-                    return form.type === "speech" ? isVoice : !isVoice;
+                    const typeMatch = form.type === "speech" ? isVoice : !isVoice;
+                    // 官方模型必须挂在官方厂商下（服务端同样校验）。
+                    return typeMatch && (!form.is_system || p.is_system);
                   })
                   .map((provider) => ({
                     value: provider.id,
                     label: `${provider.name} · ${provider.slug}`,
                   }))}
               />
+              {form.is_system && (
+                <p className="text-[11px] text-zinc-500">
+                  官方模型只能选官方厂商；列表为空时先在「厂商管理」上架。
+                </p>
+              )}
             </div>
+            {isAdmin && (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2">
+                <div>
+                  <p className="text-sm text-zinc-200">官方</p>
+                  <p className="text-[11px] text-zinc-500">
+                    所有用户可见、仅管理员可修改；不开则仅自己可见
+                  </p>
+                </div>
+                <Switch
+                  checked={form.is_system}
+                  onCheckedChange={(checked: boolean) =>
+                    setForm((f) => ({
+                      ...f,
+                      is_system: checked,
+                      // 切成官方时，清掉不满足「官方模型→官方厂商」的已选厂商。
+                      provider_id: checked
+                        ? (providers.find(
+                            (p) => p.id === f.provider_id && p.is_system,
+                          )?.id ?? "")
+                        : f.provider_id,
+                    }))
+                  }
+                  aria-label="官方模型"
+                />
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
                 Model ID

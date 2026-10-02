@@ -37,7 +37,9 @@ func (s *AIModelStore) GetByID(id string) (*AIModel, error) {
 	return &m, nil
 }
 
-func (s *AIModelStore) Create(providerID, name string, modelType ModelType, baseURL, modelID, creator string, extra datatypes.JSONMap) (*AIModel, error) {
+// Create 写入用户/管理员创建的模型。isSystem=true 表示官方：所有用户可见、由人
+// 维护（source=manual），不参与代码注册表同步（见 sync.go）。
+func (s *AIModelStore) Create(providerID, name string, modelType ModelType, baseURL, modelID, creator string, isSystem bool, extra datatypes.JSONMap) (*AIModel, error) {
 	m := &AIModel{
 		ID:         uuid.NewString(),
 		ProviderID: providerID,
@@ -45,7 +47,8 @@ func (s *AIModelStore) Create(providerID, name string, modelType ModelType, base
 		Type:       modelType,
 		BaseURL:    baseURL,
 		ModelID:    modelID,
-		IsSystem:   false,
+		IsSystem:   isSystem,
+		Source:     SourceManual,
 		Extra:      extra,
 		BaseModel:  BaseModel{Creator: creator},
 	}

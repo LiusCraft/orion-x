@@ -108,6 +108,7 @@ func (s *ModelVoiceStore) Create(p CreateVoiceParams) (*ModelVoice, error) {
 		Langs:       p.Langs,
 		Emotions:    p.Emotions,
 		IsSystem:    false,
+		Source:      SourceManual,
 		IsCloned:    false,
 		Extra:       p.Extra,
 		BaseModel:   BaseModel{Creator: p.Creator},
@@ -135,6 +136,7 @@ func (s *ModelVoiceStore) CreateSystem(p CreateVoiceParams) (*ModelVoice, error)
 		Langs:       p.Langs,
 		Emotions:    p.Emotions,
 		IsSystem:    true,
+		Source:      SourceManual,
 		IsCloned:    false,
 		Extra:       p.Extra,
 		BaseModel:   BaseModel{Creator: p.Creator},
@@ -170,6 +172,7 @@ func (s *ModelVoiceStore) CreateCloned(p CloneVoiceParams) (*ModelVoice, error) 
 		SourceAudioURL: p.SourceAudioURL,
 		Langs:          p.Langs,
 		IsSystem:       false,
+		Source:         SourceManual,
 		IsCloned:       true,
 		BaseModel:      BaseModel{Creator: p.Creator},
 	}

@@ -29,14 +29,17 @@ func (s *ProviderStore) GetByID(id string) (*Provider, error) {
 	return &p, nil
 }
 
-func (s *ProviderStore) Create(name, slug, baseURL, apiKeyEnc, creator string, extra datatypes.JSONMap) (*Provider, error) {
+// Create 写入用户/管理员创建的厂商。isSystem=true 表示官方：所有用户可见、由人
+// 维护（source=manual），不参与代码注册表同步（见 sync.go）。
+func (s *ProviderStore) Create(name, slug, baseURL, apiKeyEnc, creator string, isSystem bool, extra datatypes.JSONMap) (*Provider, error) {
 	p := &Provider{
 		ID:        uuid.NewString(),
 		Name:      name,
 		Slug:      slug,
 		BaseURL:   baseURL,
 		APIKeyEnc: apiKeyEnc,
-		IsSystem:  false,
+		IsSystem:  isSystem,
+		Source:    SourceManual,
 		Extra:     extra,
 		BaseModel: BaseModel{Creator: creator},
 	}
