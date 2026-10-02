@@ -76,7 +76,7 @@ func newRouter(
 	devH := handler.NewDeviceHandler(voicebots, devices, deviceChannels)
 	channelH := handler.NewChannelHandler(voicebots, devices, deviceChannels, qrBinders)
 	providerH := handler.NewProviderHandler(providers)
-	modelH := handler.NewModelHandler(models)
+	modelH := handler.NewModelHandler(models, providers)
 	// 计费关闭（billing.enabled: false）时 billingSvc 为 nil：业务模块拿到的是 nil
 	// 接口（不是“非 nil 接口 + nil 指针”，那样每个方法都会 panic），所有计费路由回 503。
 	var billingMeter billing.Meter

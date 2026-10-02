@@ -33,12 +33,41 @@ func Open(dsn string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("store: migrate legacy identifiers: %w", err)
 	}
 
+	// 同样必须在 SyncSystemProviders 之前：把 source 列上线前的历史记录解析成
+	// code / manual（凭 meta_hash），否则 sync 要么不敢清理自己名下的 stale
+	// 记录，要么把管理员手工标成官方的记录误删。
+	if err := backfillResourceSources(db); err != nil {
+		return nil, fmt.Errorf("store: backfill resource sources: %w", err)
+	}
+
 	return db, nil
 }
 
 func ensureTurnFTSIndex(db *gorm.DB) error {
 	return db.Exec(`CREATE INDEX IF NOT EXISTS idx_turns_fts ON session_turns
 		USING gin(to_tsvector('simple', coalesce(user_text,'') || ' ' || coalesce(assistant_text,'')))`).Error
+}
+
+// backfillResourceSources 把 provider / model / voice 历史行从「未知」解析成明确的
+// source 标记。
+//
+// source 列上线前，只有 SyncSystemProviders 会写 meta_hash：meta_hash 非空 ==
+// 这条记录由代码注册表写过 → code；其余（管理员从后台创建）→ manual。
+//
+// 幂等，每次启动都跑：从新版本回滚到旧 binary 期间写出来的行（旧代码不认 source
+// 列，落库是空值）也会在下次启动被解析。管理员编辑记录不会写 meta_hash；显式标成
+// code / manual 的行不会被覆盖，把某条 code 记录交还给人工维护的做法是有效的。
+func backfillResourceSources(db *gorm.DB) error {
+	for _, table := range []string{"providers", "ai_models", "model_voices"} {
+		res := db.Exec("UPDATE " + table + " SET source = CASE WHEN meta_hash <> '' THEN 'code' ELSE 'manual' END WHERE source = ''")
+		if res.Error != nil {
+			return fmt.Errorf("%s: %w", table, res.Error)
+		}
+		if res.RowsAffected > 0 {
+			logging.Infof("store: resolved %d legacy %s row(s) to source=code/manual", res.RowsAffected, table)
+		}
+	}
+	return nil
 }
 
 // migrateLegacyIdentifiers 把历史标识值迁移到命名约定（`:` 分段，见 AGENTS.md）。

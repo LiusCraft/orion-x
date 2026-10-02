@@ -242,6 +242,7 @@ export const providerApi = {
 		slug: string;
 		base_url: string;
 		api_key?: string;
+		is_system?: boolean;
 		extra?: Record<string, unknown>;
 	}) => http.post<Provider>("/providers", data),
 	update: (
@@ -267,6 +268,7 @@ export const modelApi = {
 		type: ModelType;
 		base_url?: string;
 		model_id: string;
+		is_system?: boolean;
 		extra?: Record<string, unknown>;
 	}) => http.post<AIModel>("/models", data),
 	update: (

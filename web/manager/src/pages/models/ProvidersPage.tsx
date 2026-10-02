@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { providerApi, type Provider, type ProviderSlug } from "@/lib/api";
 import { useDocumentTitle } from "@/lib/title";
 import { useAuthStore } from "@/lib/store";
@@ -43,6 +44,9 @@ const CATEGORY_BADGE: Record<string, string> = {
   asr: "bg-sky-400/10 text-sky-400 border-sky-400/20",
   embedding: "bg-amber-400/10 text-amber-400 border-amber-400/20",
 };
+
+/** 内置 slug 选择框里的「自定义」伪选项，不进 form.slug。 */
+const CUSTOM_SLUG = "__custom__";
 
 /** 官方厂商的标记，和「我的模型」页保持一致：图标 + 文字。 */
 function OfficialBadge() {
@@ -92,7 +96,10 @@ export default function ProvidersPage() {
     slug: "",
     base_url: "",
     api_key: "",
+    is_system: false,
   });
+  // slug 输入法：从内置注册表选，还是手写自定义 slug（如 llm:deepseek）。
+  const [customSlug, setCustomSlug] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const toggleView = (mode: ViewMode) => {
@@ -125,15 +132,23 @@ export default function ProvidersPage() {
   };
 
   const openAdd = () => {
-    setForm({ name: "", slug: "", base_url: "", api_key: "" });
+    setForm({ name: "", slug: "", base_url: "", api_key: "", is_system: false });
     setEditTarget(null);
+    setCustomSlug(false);
     setShowKey(false);
     setAddOpen(true);
   };
 
   const openEdit = (p: Provider) => {
-    setForm({ name: p.name, slug: p.slug, base_url: p.base_url, api_key: "" });
+    setForm({
+      name: p.name,
+      slug: p.slug,
+      base_url: p.base_url,
+      api_key: "",
+      is_system: p.is_system,
+    });
     setEditTarget(p);
+    setCustomSlug(false);
     setShowKey(false);
     setAddOpen(true);
   };
@@ -154,6 +169,7 @@ export default function ProvidersPage() {
           slug: form.slug,
           base_url: form.base_url,
           api_key: form.api_key,
+          is_system: form.is_system,
         });
       }
       setAddOpen(false);
@@ -369,19 +385,62 @@ export default function ProvidersPage() {
                   disabled
                   className="text-sm font-mono disabled:opacity-40"
                 />
+              ) : customSlug ? (
+                <div className="space-y-1.5">
+                  <Input
+                    value={form.slug}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, slug: e.target.value }))
+                    }
+                    placeholder="llm:deepseek"
+                    className="text-sm font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomSlug(false);
+                      setForm((f) => ({ ...f, slug: "" }));
+                    }}
+                    className="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer transition-colors"
+                  >
+                    从内置列表选择
+                  </button>
+                </div>
               ) : (
                 <SimpleSelect
                   value={form.slug}
-                  onValueChange={handleSlugChange}
+                  onValueChange={(value) => {
+                    if (value === CUSTOM_SLUG) {
+                      setCustomSlug(true);
+                      setForm((f) => ({ ...f, slug: "" }));
+                      return;
+                    }
+                    handleSlugChange(value);
+                  }}
                   className="font-mono"
                   placeholder="选择厂商类型"
-                  options={slugOptions.map((option) => ({
-                    value: option.slug,
-                    label: `${option.name} (${option.slug})`,
-                    group: CATEGORY_LABEL[option.category] ?? option.category,
-                  }))}
+                  options={[
+                    ...slugOptions.map((option) => ({
+                      value: option.slug,
+                      label: `${option.name} (${option.slug})`,
+                      group: CATEGORY_LABEL[option.category] ?? option.category,
+                    })),
+                    { value: CUSTOM_SLUG, label: "自定义…" },
+                  ]}
                 />
               )}
+              {!editTarget && customSlug && (
+                <p className="text-[11px] text-zinc-500">
+                  自定义 slug 形如 llm:deepseek；未注册的 llm 厂商按 OpenAI 兼容协议接入。
+                </p>
+              )}
+              {!editTarget &&
+                form.is_system &&
+                slugOptions.some((option) => option.slug === form.slug) && (
+                  <p className="text-[11px] text-amber-400/80">
+                    该 slug 已有内置记录；上架会新建一条独立记录，通常直接编辑内置记录即可。
+                  </p>
+                )}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -442,6 +501,23 @@ export default function ProvidersPage() {
                 </button>
               </div>
             </div>
+            {!editTarget && isAdmin && (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2">
+                <div>
+                  <p className="text-sm text-zinc-200">官方</p>
+                  <p className="text-[11px] text-zinc-500">
+                    所有用户可见、仅管理员可修改；不开则仅自己可见
+                  </p>
+                </div>
+                <Switch
+                  checked={form.is_system}
+                  onCheckedChange={(checked: boolean) =>
+                    setForm((f) => ({ ...f, is_system: checked }))
+                  }
+                  aria-label="官方厂商"
+                />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button

@@ -49,11 +49,12 @@ func (h *ProviderHandler) Get(c *gin.Context) {
 }
 
 type createProviderRequest struct {
-	Name    string            `json:"name" binding:"required"`
-	Slug    string            `json:"slug" binding:"required"`
-	BaseURL string            `json:"base_url" binding:"required"`
-	APIKey  string            `json:"api_key"`
-	Extra   datatypes.JSONMap `json:"extra"`
+	Name     string            `json:"name" binding:"required"`
+	Slug     string            `json:"slug" binding:"required"`
+	BaseURL  string            `json:"base_url" binding:"required"`
+	APIKey   string            `json:"api_key"`
+	IsSystem bool              `json:"is_system"`
+	Extra    datatypes.JSONMap `json:"extra"`
 }
 
 // POST /api/providers
@@ -63,8 +64,15 @@ func (h *ProviderHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// 官方（is_system）＝所有用户可见、平台维护：只有管理员能创建。API key 鉴权
+	// 永不设置 admin（见 middleware/apikey.go），所以一把泄漏的 key 不能向全平台
+	// 投放资源。
+	if req.IsSystem && !middleware.IsAdmin(c) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
+		return
+	}
 	userID := middleware.UserID(c)
-	p, err := h.providers.Create(req.Name, req.Slug, req.BaseURL, req.APIKey, userID, req.Extra)
+	p, err := h.providers.Create(req.Name, req.Slug, req.BaseURL, req.APIKey, userID, req.IsSystem, req.Extra)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -76,8 +76,10 @@ func main() {
 
 	// 同步代码中注册的 system providers/models/voices 到数据库。
 	// 使用 meta_hash 做增量对比，只更新有变化的记录。
+	// 失败只告警：同步不完整（数据挡着清理、DB 抖动）必须让服务先起来，
+	// 不能像 2026-09-30 那样把整站拖进崩溃循环。
 	if err := store.SyncSystemProviders(db); err != nil {
-		logging.Fatalf("sync system providers: %v", err)
+		logging.Warnf("sync system providers: %v", err)
 	}
 
 	// 同步系统智能体模板种子数据

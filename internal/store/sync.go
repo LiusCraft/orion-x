@@ -16,14 +16,23 @@ import (
 	llmprovider "github.com/liuscraft/orion-x/internal/llm/provider"
 )
 
-// SyncSystemProviders 对比代码中注册的 ProviderMeta 与数据库中 IsSystem=true 的记录，
+// SyncSystemProviders 对比代码中注册的 ProviderMeta 与数据库中 source=code 的记录，
 // 使用 meta_hash 判断是否需要更新，并自动新增/更新 Provider、Model、Voice。
 //
+// 管理边界：只有 source=code（代码注册表写入）的记录归 sync 管。is_system=true 只表示
+// 记录对所有用户可见、后台不允许删除；管理员从控制台创建后标成官方的记录
+// （source=manual）不在清理范围内，即使其 slug 不在代码注册表里也不能删。
+// 匹配（按 slug / model_id）同样跳过 source=manual：同名的管理员上架记录不会被
+// 更新或接管，它与内置记录算两条独立记录（同一 slug 多账号，见 models.go）。
+//
 // 规则：
-//   - 新增：代码中有但数据库中没有 → CREATE
+//   - 新增：代码中有但数据库中没有 → CREATE（source=code）
 //   - 更新：hash 不一致 → UPDATE
 //   - 保留：hash 一致 → 跳过
-//   - 删除：数据库中 IsSystem=true 但代码中没有 → DELETE（级联删除其 Models 和 Voices）
+//   - 删除：source=code 但代码中没有 → DELETE（先 voices、再 models、最后 providers）
+//
+// 清理是尽力而为的收尾动作：记录仍被引用（音色挂在模型下、模型挂在 provider 下）
+// 或删除失败时只告警跳过，不返回错误、不阻断启动。
 func SyncSystemProviders(db *gorm.DB) error {
 	logging.Infof("store: syncing system providers...")
 
@@ -140,17 +149,28 @@ func SyncSystemProviders(db *gorm.DB) error {
 		return fmt.Errorf("sync: query system voices: %w", err)
 	}
 
-	// 建立索引
+	// 建立匹配索引。source=manual 的行（管理员上架的官方记录）不参与匹配：sync 不
+	// 更新、不接管它们，同 slug / 同 model_id 下各算一条独立记录。source='' 是
+	// source 列上线前的遗留行，当 sync 自己的记录处理。
 	dbProvBySlug := make(map[string]*Provider, len(dbProviders))
 	for i := range dbProviders {
+		if dbProviders[i].Source == SourceManual {
+			continue
+		}
 		dbProvBySlug[dbProviders[i].Slug] = &dbProviders[i]
 	}
 	dbModelByKey := make(map[string]*AIModel, len(dbModels)) // key = "providerID|modelID"
 	for i := range dbModels {
+		if dbModels[i].Source == SourceManual {
+			continue
+		}
 		dbModelByKey[dbModels[i].ProviderID+"|"+dbModels[i].ModelID] = &dbModels[i]
 	}
 	dbVoiceByKey := make(map[string]*ModelVoice, len(dbVoices)) // key = "modelID|voiceID"
 	for i := range dbVoices {
+		if dbVoices[i].Source == SourceManual {
+			continue
+		}
 		dbVoiceByKey[dbVoices[i].ModelID+"|"+dbVoices[i].VoiceID] = &dbVoices[i]
 	}
 
@@ -168,11 +188,12 @@ func SyncSystemProviders(db *gorm.DB) error {
 		var provID string
 		if existing, ok := dbProvBySlug[cp.slug]; ok {
 			provID = existing.ID
-			if existing.MetaHash != cp.metaHash || existing.Name != cp.name || existing.BaseURL != cp.baseURL {
+			if existing.MetaHash != cp.metaHash || existing.Name != cp.name || existing.BaseURL != cp.baseURL || existing.Source != SourceCode {
 				if err := db.Model(&Provider{}).Where("id = ?", provID).Updates(map[string]any{
 					"name":      cp.name,
 					"base_url":  cp.baseURL,
 					"meta_hash": cp.metaHash,
+					"source":    SourceCode,
 				}).Error; err != nil {
 					return fmt.Errorf("sync: update provider %s: %w", cp.slug, err)
 				}
@@ -187,6 +208,7 @@ func SyncSystemProviders(db *gorm.DB) error {
 				Slug:     cp.slug,
 				BaseURL:  cp.baseURL,
 				IsSystem: true,
+				Source:   SourceCode,
 				MetaHash: cp.metaHash,
 				BaseModel: BaseModel{
 					Creator: "system",
@@ -207,12 +229,13 @@ func SyncSystemProviders(db *gorm.DB) error {
 			var modelID string
 			if existing, ok := dbModelByKey[modelKey]; ok {
 				modelID = existing.ID
-				if existing.MetaHash != cm.metaHash || existing.Name != cm.name {
+				if existing.MetaHash != cm.metaHash || existing.Name != cm.name || existing.Source != SourceCode {
 					if err := db.Model(&AIModel{}).Where("id = ?", modelID).Updates(map[string]any{
 						"name":      cm.name,
 						"base_url":  cm.baseURL,
 						"langs":     pq.StringArray(cm.langs),
 						"meta_hash": cm.metaHash,
+						"source":    SourceCode,
 					}).Error; err != nil {
 						return fmt.Errorf("sync: update model %s: %w", cm.modelID, err)
 					}
@@ -229,6 +252,7 @@ func SyncSystemProviders(db *gorm.DB) error {
 					BaseURL:    cm.baseURL,
 					ModelID:    cm.modelID,
 					IsSystem:   true,
+					Source:     SourceCode,
 					Langs:      cm.langs,
 					MetaHash:   cm.metaHash,
 					BaseModel: BaseModel{
@@ -251,7 +275,7 @@ func SyncSystemProviders(db *gorm.DB) error {
 				voiceHash := vi.MetaHash()
 
 				if existing, ok := dbVoiceByKey[voiceKey]; ok {
-					if existing.MetaHash != voiceHash || existing.Name != vi.Name {
+					if existing.MetaHash != voiceHash || existing.Name != vi.Name || existing.Source != SourceCode {
 						updates := map[string]any{
 							"name":        vi.Name,
 							"description": vi.Description,
@@ -260,6 +284,7 @@ func SyncSystemProviders(db *gorm.DB) error {
 							"tags":        pq.StringArray(vi.Tags),
 							"langs":       voiceLangArray(vi.Languages),
 							"meta_hash":   voiceHash,
+							"source":      SourceCode,
 						}
 						if len(vi.Emotions) > 0 {
 							updates["emotions"] = datatypes.JSONMap{"list": vi.Emotions}
@@ -281,6 +306,7 @@ func SyncSystemProviders(db *gorm.DB) error {
 						Tags:        pq.StringArray(vi.Tags),
 						Langs:       voiceLangArray(vi.Languages),
 						IsSystem:    true,
+						Source:      SourceCode,
 						MetaHash:    voiceHash,
 						BaseModel: BaseModel{
 							Creator: "system",
@@ -298,47 +324,96 @@ func SyncSystemProviders(db *gorm.DB) error {
 		}
 	}
 
-	// ── 4. 删除数据库中多余的 system 记录 ──
+	// ── 4. 清理多余的 code 记录：先子后父（voices → models → providers）──
+	// 顺序反了在有引用时必撞外键；仍被引用或删除失败只告警跳过——清理是
+	// 收尾动作，不能拖垮启动（2026-09-30 的启动 FATAL 就是删 provider 撞上的）。
+	plan := planStaleCleanup(dbProviders, dbModels, dbVoices, codeProvSlugs, codeModelKeys, codeVoiceKeys)
+	var removedProvs, removedModels, removedVoices int
 
-	// 删除 providers
-	for _, existing := range dbProviders {
-		if !codeProvSlugs[existing.Slug] {
-			if err := db.Where("id = ?", existing.ID).Delete(&Provider{}).Error; err != nil {
-				return fmt.Errorf("sync: delete stale provider %s: %w", existing.Slug, err)
-			}
-			logging.Infof("store: sync removed stale provider %s", existing.Slug)
+	for _, existing := range plan.voices {
+		if err := db.Where("id = ?", existing.ID).Delete(&ModelVoice{}).Error; err != nil {
+			logging.Warnf("store: sync keeps stale voice %s/%s: delete: %v", existing.ModelID, existing.VoiceID, err)
+			continue
 		}
+		removedVoices++
+		logging.Infof("store: sync removed stale voice %s", existing.VoiceID)
 	}
 
-	// 删除 models
-	for _, existing := range dbModels {
-		key := existing.ProviderID + "|" + existing.ModelID
-		if !codeModelKeys[key] {
-			// 级联删除关联的 voices
-			if err := db.Where("model_id = ?", existing.ID).Delete(&ModelVoice{}).Error; err != nil {
-				return fmt.Errorf("sync: delete stale model voices %s: %w", existing.ModelID, err)
-			}
-			if err := db.Where("id = ?", existing.ID).Delete(&AIModel{}).Error; err != nil {
-				return fmt.Errorf("sync: delete stale model %s: %w", existing.ModelID, err)
-			}
-			logging.Infof("store: sync removed stale model %s", existing.ModelID)
+	for _, existing := range plan.models {
+		// 还有音色挂着（外键会挡住，而且多半是管理员自建的）时不删模型。
+		var voices int64
+		if err := db.Model(&ModelVoice{}).Where("model_id = ?", existing.ID).Count(&voices).Error; err != nil {
+			logging.Warnf("store: sync keeps stale model %s: count voices: %v", existing.ModelID, err)
+			continue
 		}
+		if voices > 0 {
+			logging.Warnf("store: sync keeps stale model %s: still referenced by %d voice(s)", existing.ModelID, voices)
+			continue
+		}
+		if err := db.Where("id = ?", existing.ID).Delete(&AIModel{}).Error; err != nil {
+			logging.Warnf("store: sync keeps stale model %s: delete: %v", existing.ModelID, err)
+			continue
+		}
+		removedModels++
+		logging.Infof("store: sync removed stale model %s", existing.ModelID)
 	}
 
-	// 删除 voices
-	for _, existing := range dbVoices {
-		key := existing.ModelID + "|" + existing.VoiceID
-		if !codeVoiceKeys[key] {
-			if err := db.Where("id = ?", existing.ID).Delete(&ModelVoice{}).Error; err != nil {
-				return fmt.Errorf("sync: delete stale voice %s: %w", existing.VoiceID, err)
-			}
-			logging.Infof("store: sync removed stale voice %s", existing.VoiceID)
+	for _, existing := range plan.providers {
+		// 还有模型挂着（多半是管理员自建的）时不删 provider：删了会撞外键，
+		// 也等于静默剁掉管理员的数据。
+		var models int64
+		if err := db.Model(&AIModel{}).Where("provider_id = ?", existing.ID).Count(&models).Error; err != nil {
+			logging.Warnf("store: sync keeps stale provider %s: count models: %v", existing.Slug, err)
+			continue
 		}
+		if models > 0 {
+			logging.Warnf("store: sync keeps stale provider %s: still referenced by %d model(s)", existing.Slug, models)
+			continue
+		}
+		if err := db.Where("id = ?", existing.ID).Delete(&Provider{}).Error; err != nil {
+			logging.Warnf("store: sync keeps stale provider %s: delete: %v", existing.Slug, err)
+			continue
+		}
+		removedProvs++
+		logging.Infof("store: sync removed stale provider %s", existing.Slug)
 	}
 
-	logging.Infof("store: sync done — providers (+%d ~%d) models (+%d ~%d) voices (+%d ~%d)",
-		addedProvs, updatedProvs, addedModels, updatedModels, addedVoices, updatedVoices)
+	logging.Infof("store: sync done — providers (+%d ~%d -%d) models (+%d ~%d -%d) voices (+%d ~%d -%d)",
+		addedProvs, updatedProvs, removedProvs,
+		addedModels, updatedModels, removedModels,
+		addedVoices, updatedVoices, removedVoices)
 	return nil
+}
+
+// staleRecords 是按删除顺序（先子后父）组织的一批待清理记录。
+type staleRecords struct {
+	voices    []ModelVoice
+	models    []AIModel
+	providers []Provider
+}
+
+// planStaleCleanup 挑出「归代码注册表管（source=code）但代码中已不存在」的记录。
+//
+// is_system=true 只表示对所有用户可见，管理员从后台创建、之后标成官方的记录
+// （source=manual）不归 sync 管：哪怕 slug/model_id 不在注册表里也一概保留。
+func planStaleCleanup(providers []Provider, models []AIModel, voices []ModelVoice, codeProvSlugs, codeModelKeys, codeVoiceKeys map[string]bool) staleRecords {
+	var plan staleRecords
+	for _, p := range providers {
+		if p.Source == SourceCode && !codeProvSlugs[p.Slug] {
+			plan.providers = append(plan.providers, p)
+		}
+	}
+	for _, m := range models {
+		if m.Source == SourceCode && !codeModelKeys[m.ProviderID+"|"+m.ModelID] {
+			plan.models = append(plan.models, m)
+		}
+	}
+	for _, v := range voices {
+		if v.Source == SourceCode && !codeVoiceKeys[v.ModelID+"|"+v.VoiceID] {
+			plan.voices = append(plan.voices, v)
+		}
+	}
+	return plan
 }
 
 func mapVoiceGender(g string) VoiceGender {

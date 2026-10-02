@@ -242,13 +242,14 @@ func swaggerListProviders() {}
 
 // swaggerCreateProvider creates a provider.
 // @Summary Create provider
+// @Description 创建厂商。is_system=true 为官方（所有用户可见、平台维护），仅管理员可用，否则 403。
 // @Tags Providers
 // @Accept json
 // @Produce json
 // @Security BearerAuth
 // @Param request body object true "Provider fields"
 // @Success 201 {object} object
-// @Failure 400,401 {object} errorResponse
+// @Failure 400,401,403 {object} errorResponse
 // @Router /api/providers [post]
 func swaggerCreateProvider() {}
 
@@ -308,13 +309,14 @@ func swaggerListModels() {}
 
 // swaggerCreateModel creates a model.
 // @Summary Create model
+// @Description 创建模型。is_system=true 为官方（所有用户可见、平台维护），仅管理员可用且要求该厂商也是官方，否则 403 / 400。
 // @Tags Models
 // @Accept json
 // @Produce json
 // @Security BearerAuth
 // @Param request body object true "Model fields"
 // @Success 201 {object} object
-// @Failure 400,401 {object} errorResponse
+// @Failure 400,401,403 {object} errorResponse
 // @Router /api/models [post]
 func swaggerCreateModel() {}
 
