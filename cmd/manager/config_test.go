@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/liuscraft/orion-x/internal/apikey"
 	"github.com/liuscraft/orion-x/internal/billing"
 	"github.com/liuscraft/orion-x/internal/billing/service"
@@ -165,5 +167,37 @@ func TestAPIKeyConfigServiceConfig(t *testing.T) {
 				t.Fatalf("ServiceConfig() = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestManagerConfigAuthYAML 钉住 auth / smtp 段的 yaml 键名：这两段直接复用模块
+// 配置类型（handler.AuthConfig / mailer.Config），键名写错不会有编译错误。
+func TestManagerConfigAuthYAML(t *testing.T) {
+	var cfg ManagerConfig
+	err := yaml.Unmarshal([]byte(`
+auth:
+  email_verify: true
+  verify_url_base: https://console.example.com
+smtp:
+  host: smtp.example.com
+  port: 465
+  tls: implicit
+  username: no-reply@example.com
+  from: no-reply@example.com
+`), &cfg)
+	if err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !cfg.Auth.EmailVerify {
+		t.Error("auth.email_verify = false, want true")
+	}
+	if cfg.Auth.VerifyURLBase != "https://console.example.com" {
+		t.Errorf("auth.verify_url_base = %q, want https://console.example.com", cfg.Auth.VerifyURLBase)
+	}
+	if cfg.SMTP.Host != "smtp.example.com" || cfg.SMTP.Port != 465 || cfg.SMTP.TLS != "implicit" {
+		t.Errorf("smtp = %+v, want host/port/tls from yaml", cfg.SMTP)
+	}
+	if cfg.SMTP.From != "no-reply@example.com" {
+		t.Errorf("smtp.from = %q, want no-reply@example.com", cfg.SMTP.From)
 	}
 }

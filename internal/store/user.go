@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -13,9 +14,19 @@ type UserStore struct{ db *gorm.DB }
 
 func NewUserStore(db *gorm.DB) *UserStore { return &UserStore{db: db} }
 
-// Create creates a user with email as the primary identity.
-// username is optional; pass "" to auto-generate from email.
+// Create creates a user with email as the primary identity and marks the
+// email verified. username is optional; pass "" to auto-generate from email.
 func (s *UserStore) Create(email, username, passwordHash, creator string) (*User, error) {
+	return s.create(email, username, passwordHash, creator, true)
+}
+
+// CreateUnverified 与 Create 相同，但邮箱保持未验证（auth.email_verify
+// 开启时的邮箱密码注册路径）。
+func (s *UserStore) CreateUnverified(email, username, passwordHash, creator string) (*User, error) {
+	return s.create(email, username, passwordHash, creator, false)
+}
+
+func (s *UserStore) create(email, username, passwordHash, creator string, verified bool) (*User, error) {
 	if username == "" {
 		username = emailToUsername(email)
 	}
@@ -26,6 +37,10 @@ func (s *UserStore) Create(email, username, passwordHash, creator string) (*User
 		PasswordHash: passwordHash,
 		BaseModel:    BaseModel{Creator: creator},
 	}
+	if verified {
+		now := time.Now()
+		u.EmailVerifiedAt = &now
+	}
 	if err := s.db.Create(u).Error; err != nil {
 		return nil, fmt.Errorf("user store: create: %w", err)
 	}
@@ -34,14 +49,17 @@ func (s *UserStore) Create(email, username, passwordHash, creator string) (*User
 
 // CreateWithOAuth creates a user linked to a third-party OAuth account.
 // email is the primary identity; username is auto-derived if empty.
-// OAuth 绑定关系写入 OAuthBinding 表，由调用方负责。
+// OAuth 平台保证邮箱已验证（internal/oauth/github 只取 verified 邮箱），
+// 所以创建时直接标记为已验证。OAuth 绑定关系写入 OAuthBinding 表，由调用方负责。
 func (s *UserStore) CreateWithOAuth(email, oauthUID, creator string) (*User, error) {
 	username := emailToUsername(email)
+	now := time.Now()
 	u := &User{
-		ID:        uuid.NewString(),
-		Email:     email,
-		Username:  username,
-		BaseModel: BaseModel{Creator: creator},
+		ID:              uuid.NewString(),
+		Email:           email,
+		Username:        username,
+		EmailVerifiedAt: &now,
+		BaseModel:       BaseModel{Creator: creator},
 	}
 	if err := s.db.Create(u).Error; err != nil {
 		return nil, fmt.Errorf("user store: create with oauth: %w", err)
@@ -87,6 +105,13 @@ func (s *UserStore) GetByID(id string) (*User, error) {
 
 func (s *UserStore) UpdatePassword(id, newHash string) error {
 	return s.db.Model(&User{}).Where("id = ?", id).Update("password_hash", newHash).Error
+}
+
+// MarkEmailVerified 把用户标记为邮箱已验证；已标记的用户不改时间（幂等）。
+func (s *UserStore) MarkEmailVerified(id string) error {
+	return s.db.Model(&User{}).
+		Where("id = ? AND email_verified_at IS NULL", id).
+		Update("email_verified_at", time.Now()).Error
 }
 
 func (s *UserStore) UpdateEmail(id, email string) error {

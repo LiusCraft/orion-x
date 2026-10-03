@@ -11,6 +11,35 @@ admin:
   username: "admin"
   password: "admin123"   # 仅首次启动时创建用户，之后此字段可删除
 
+# 注册邮箱验证（docs/auth-email-verification-design.md）。
+#
+# 开启后，邮箱密码注册的账号必须先点击验证邮件里的链接才能登录；GitHub 创建/
+# 匹配的账号免验证。默认关闭：行为与开启前完全一致。
+# 开启时必须同时配置下面的 smtp 段和 verify_url_base，否则进程启动失败（fail
+# closed）——这是显式打开的开关，缺件运行只会让新注册的用户全卡在未验证。
+auth:
+  email_verify: false               # true = 非 GitHub 注册需要邮箱验证
+  verify_url_base: ""               # 控制台地址，如 https://console.example.com
+                                    # 邮件链接形如 <verify_url_base>/login?verify_token=…
+
+# 验证邮件的 SMTP 发信配置。整段可以删掉：只有 auth.email_verify: true 时才需要。
+# 密码是敏感值：注意配置文件权限，不要提交到仓库。
+#
+# tls: starttls（默认，587）| implicit（465 直连 TLS）| none（仅本机/内网中继，
+# 不允许带账号密码）。QQ/163 等邮箱的「密码」填授权码而不是登录密码。
+smtp:
+  host: ""                          # 如 smtp.example.com
+  port: 0                           # 0 = 按 tls 取默认端口（starttls 587 / implicit 465）
+  tls: "starttls"
+  username: ""
+  password: ""
+  from: ""                          # 发件人，如 "Orion-X <no-reply@example.com>"
+
+redis:
+  addr: "127.0.0.1:6379"                          # 如 127.0.0.1:6379
+  password: ""
+  db: 0
+
 github_oauth:
   client_id: ""           # GitHub OAuth App Client ID
   client_secret: ""        # GitHub OAuth App Client Secret

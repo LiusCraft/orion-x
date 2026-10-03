@@ -100,10 +100,19 @@ export const authApi = {
 			{ email, password },
 		),
 	register: (email: string, password: string, username?: string) =>
-		http.post<{ token: string; user_id: string; email: string; username: string; is_admin: boolean }>(
-			"/auth/register",
-			{ email, password, username },
-		),
+		http.post<{
+			token?: string;
+			user_id?: string;
+			email?: string;
+			username?: string;
+			is_admin?: boolean;
+			message?: string;
+			verification_sent?: boolean;
+		}>("/auth/register", { email, password, username }),
+	verifyEmail: (token: string) =>
+		http.post<{ message: string }>("/auth/verify-email", { token }),
+	resendVerification: (email: string) =>
+		http.post<{ message: string }>("/auth/resend-verification", { email }),
 	oauthProviders: () =>
 		http.get<{ providers: OAuthProvider[] }>("/auth/oauth/providers"),
 	oauthLoginUrl: (provider: string) => {
