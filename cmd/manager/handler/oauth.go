@@ -20,18 +20,18 @@ import (
 // internal/oauth 注册表。平台行为（授权 URL、token 换取、用户信息）由
 // Provider 实现，账号匹配/绑定逻辑在此统一处理。
 type OAuthHandler struct {
-	users     *store.UserStore
-	bindings  *store.OAuthBindingStore
-	signToken func(userID string, isAdmin bool) (string, error)
-	state     *oauth.StateStore
+	users    *store.UserStore
+	bindings *store.OAuthBindingStore
+	secret   []byte
+	state    *oauth.StateStore
 }
 
-func NewOAuthHandler(users *store.UserStore, bindings *store.OAuthBindingStore, signToken func(userID string, isAdmin bool) (string, error)) *OAuthHandler {
+func NewOAuthHandler(users *store.UserStore, bindings *store.OAuthBindingStore, secret []byte) *OAuthHandler {
 	return &OAuthHandler{
-		users:     users,
-		bindings:  bindings,
-		signToken: signToken,
-		state:     oauth.NewStateStore(),
+		users:    users,
+		bindings: bindings,
+		secret:   secret,
+		state:    oauth.NewStateStore(),
 	}
 }
 
@@ -159,6 +159,12 @@ func (h *OAuthHandler) Callback(c *gin.Context) {
 			h.redirectError(redirectTo, c, "绑定失败")
 			return
 		}
+		// 平台邮箱已验证且与账号邮箱一致：这次绑定也证明了邮箱归属。
+		if u.EmailVerifiedAt == nil {
+			if err := h.users.MarkEmailVerified(u.ID); err != nil {
+				logging.Errorf("oauth %s: mark user %s email verified: %v", provider.Name(), u.ID, err)
+			}
+		}
 		logging.Infof("oauth %s: bound %s (%s) to user %q", provider.Name(), info.ProviderUID, info.Email, u.Username)
 		h.redirectWithToken(redirectTo, c, u)
 		return
@@ -232,7 +238,7 @@ func (h *OAuthHandler) Unbind(c *gin.Context) {
 // ---------------------------------------------------------------------------
 
 func (h *OAuthHandler) redirectWithToken(redirectTo string, c *gin.Context, u *store.User) {
-	token, err := h.signToken(u.ID, u.IsAdmin)
+	token, err := signToken(h.secret, u.ID, u.IsAdmin)
 	if err != nil {
 		h.redirectError(redirectTo, c, "token 生成失败")
 		return

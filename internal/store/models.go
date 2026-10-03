@@ -22,6 +22,10 @@ type User struct {
 	Email        string `gorm:"uniqueIndex;not null;type:varchar(128)" json:"email"`
 	Username     string `gorm:"type:varchar(64)" json:"username,omitempty"`
 	PasswordHash string `gorm:"not null" json:"-"`
+	// EmailVerifiedAt 为 NULL 表示邮箱未验证；非空为验证时间。
+	// auth.email_verify 开启时，未验证账号不能密码登录；
+	// GitHub 创建/匹配的账号、配置创建的管理员均视为已验证。
+	EmailVerifiedAt *time.Time `gorm:"index" json:"email_verified_at,omitempty"`
 	// GithubID 已废弃：OAuth 绑定统一存入 OAuthBinding 表，此列仅保留历史数据。
 	GithubID string `gorm:"uniqueIndex;type:varchar(64)" json:"-"`
 	IsAdmin  bool   `gorm:"not null;default:false;index" json:"is_admin"`

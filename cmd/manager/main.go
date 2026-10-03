@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -149,9 +148,6 @@ func main() {
 		logging.Fatalf("migrate github bindings: %v", err)
 	}
 
-	secret := []byte(cfg.JWT.Secret)
-	sign := func(userID string, isAdmin bool) (string, error) { return signToken(secret, userID, isAdmin) }
-
 	// Knowledge base service — always created, users must configure embedding model to use it.
 	kbRet, err := retriever.NewPGVector(db, 1536)
 	if err != nil {
@@ -235,15 +231,11 @@ func main() {
 	// 失败兜底是控制台的手动填写，装配与否由 channels.qr_binding 决定。
 	qrBinders := newQRBinders(workerCtx, cfg.Channels)
 
-	r := newRouter(secret, users, bindings, voicebots, devices, deviceChannels, providers, models, voices, mcpMarket, mcpServers, mcpBindings, sign, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, cfg.Internal.Token, billingSvc, paymentSvc, apikeySvc, cfg.APIKey.AdminOnly, qrBinders)
-	srv := &http.Server{Addr: cfg.Server.Addr, Handler: r}
-
-	go func() {
-		logging.Infof("manager listening on %s", cfg.Server.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logging.Fatalf("listen: %v", err)
-		}
-	}()
+	srv, err := NewManagerServer(cfg, users, bindings, voicebots, devices, deviceChannels, providers, models, voices, mcpMarket, mcpServers, mcpBindings, memStore, turnStore, kbSvc, kbStore, docStore, voicebotKBs, agentTemplates, assetSvc, billingSvc, paymentSvc, apikeySvc, qrBinders)
+	if err != nil {
+		logging.Fatalf("manager server: %v", err)
+	}
+	srv.Start()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

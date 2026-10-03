@@ -26,6 +26,17 @@ const FEATURES = [
   },
 ];
 
+/** readErrorBody 从 axios 错误里取服务端的 {error, code}，取不到就返回空对象。 */
+function readErrorBody(err: unknown): { error?: string; code?: string } {
+  if (err && typeof err === "object" && "response" in err) {
+    const axiosErr = err as {
+      response?: { data?: { error?: string; code?: string } };
+    };
+    return axiosErr.response?.data ?? {};
+  }
+  return {};
+}
+
 export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -33,6 +44,10 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [noticeOk, setNoticeOk] = useState(true);
+  const [verificationEmail, setVerificationEmail] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
   const [loading, setLoading] = useState(false);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
@@ -49,9 +64,29 @@ export default function LoginPage() {
       .catch(() => {});
   }, []);
 
-  // Handle GitHub OAuth redirect — read token/error from URL params
+  // Handle email verification and GitHub OAuth redirects — read from URL params
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+
+    // 邮箱验证链接：/login?verify_token=… 由前端 POST 消费，避免邮件网关预取即验证
+    const verifyToken = params.get("verify_token");
+    if (verifyToken) {
+      authApi
+        .verifyEmail(verifyToken)
+        .then(() => {
+          setNoticeOk(true);
+          setNotice("邮箱验证成功，请登录");
+        })
+        .catch((err: unknown) => {
+          setNoticeOk(false);
+          setNotice(readErrorBody(err).error || "验证链接无效或已过期");
+        })
+        .finally(() => {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        });
+      return;
+    }
+
     const token = params.get("token");
     const userId = params.get("user_id");
     const usernameParam = params.get("username");
@@ -71,26 +106,53 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setNotice("");
     setLoading(true);
     try {
-      let res;
       if (mode === "login") {
-        res = await authApi.login(email, password);
-      } else {
-        res = await authApi.register(email, password, username || undefined);
+        const { data } = await authApi.login(email, password);
+        setAuth(data.token, data.user_id, data.username, data.is_admin);
+        navigate("/agents");
+        return;
       }
-      const { data } = res;
-      setAuth(data.token, data.user_id, data.username, data.is_admin);
-      navigate("/agents");
+
+      const { data } = await authApi.register(email, password, username || undefined);
+      if (data.token && data.user_id) {
+        setAuth(data.token, data.user_id, data.username || "", data.is_admin || false);
+        navigate("/agents");
+        return;
+      }
+      // 邮箱验证开启：注册只发验证邮件，不发登录态
+      setVerificationEmail(email);
+      setNoticeOk(data.verification_sent !== false);
+      setNotice(data.message || "验证邮件已发送，请查收");
+      setMode("login");
     } catch (err: unknown) {
-      if (err && typeof err === "object" && "response" in err) {
-        const axiosErr = err as { response?: { data?: { error?: string } } };
-        setError(axiosErr.response?.data?.error || (mode === "login" ? "邮箱或密码错误" : "注册失败"));
+      const body = readErrorBody(err);
+      if (body.code === "email_unverified") {
+        setVerificationEmail(email);
+        setNoticeOk(false);
+        setNotice(body.error || "邮箱未验证，请先完成邮箱验证");
       } else {
-        setError(mode === "login" ? "邮箱或密码错误" : "注册失败");
+        setError(body.error || (mode === "login" ? "邮箱或密码错误" : "注册失败"));
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (!verificationEmail || resending) return;
+    setResending(true);
+    try {
+      await authApi.resendVerification(verificationEmail);
+      setNoticeOk(true);
+      setNotice("验证邮件已发送，请查收（1 分钟内不会重复发送）");
+    } catch (err: unknown) {
+      setNoticeOk(false);
+      setNotice(readErrorBody(err).error || "发送失败，请稍后重试");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -216,6 +278,8 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => {
                     setError("");
+                    setNotice("");
+                    setVerificationEmail(null);
                     setEmail(e.target.value);
                   }}
                   className="h-11 transition-[border-color,box-shadow] duration-150"
@@ -306,6 +370,29 @@ export default function LoginPage() {
                 </div>
               )}
 
+              {notice && (
+                <div
+                  role="status"
+                  className={
+                    noticeOk
+                      ? "flex items-start gap-2 text-xs text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 rounded-lg px-3 py-2.5"
+                      : "flex items-start gap-2 text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2.5"
+                  }
+                >
+                  <span className="flex-1">{notice}</span>
+                  {verificationEmail && (
+                    <button
+                      type="button"
+                      onClick={handleResend}
+                      disabled={resending}
+                      className="shrink-0 text-violet-400 hover:text-violet-300 disabled:opacity-50 cursor-pointer"
+                    >
+                      {resending ? "发送中..." : "重发验证邮件"}
+                    </button>
+                  )}
+                </div>
+              )}
+
               <Button
                 type="submit"
                 className="w-full bg-violet-600 hover:bg-violet-500 active:scale-[0.98] text-white h-11 font-medium transition-all duration-150 cursor-pointer shadow-md shadow-violet-600/20 mt-1"
@@ -383,6 +470,8 @@ export default function LoginPage() {
                     onClick={() => {
                       setMode("register");
                       setError("");
+                      setNotice("");
+                      setVerificationEmail(null);
                     }}
                     className="text-violet-400 hover:text-violet-300 cursor-pointer"
                   >
@@ -397,6 +486,8 @@ export default function LoginPage() {
                     onClick={() => {
                       setMode("login");
                       setError("");
+                      setNotice("");
+                      setVerificationEmail(null);
                     }}
                     className="text-violet-400 hover:text-violet-300 cursor-pointer"
                   >

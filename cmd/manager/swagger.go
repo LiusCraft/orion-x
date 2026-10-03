@@ -19,14 +19,51 @@ type errorResponse struct {
 
 // swaggerLogin documents the login endpoint.
 // @Summary Log in
+// @Description When auth.email_verify is enabled, unverified password accounts get 403 with code=email_unverified.
 // @Tags Authentication
 // @Accept json
 // @Produce json
 // @Param request body object true "Username and password"
 // @Success 200 {object} object
-// @Failure 400,401 {object} errorResponse
+// @Failure 400,401,403 {object} errorResponse
 // @Router /api/auth/login [post]
 func swaggerLogin() {}
+
+// swaggerRegister documents email/password registration.
+// @Summary Register
+// @Description When auth.email_verify is enabled the account is created unverified and no token is returned; a verification email is sent instead (response has verification_sent).
+// @Tags Authentication
+// @Accept json
+// @Produce json
+// @Param request body object true "Email, password, optional username"
+// @Success 201 {object} object
+// @Failure 400,409 {object} errorResponse
+// @Router /api/auth/register [post]
+func swaggerRegister() {}
+
+// swaggerVerifyEmail consumes the token from the verification email.
+// @Summary Verify email
+// @Description Invalid, expired, and already consumed tokens all return the same 400 message.
+// @Tags Authentication
+// @Accept json
+// @Produce json
+// @Param request body object true "Verification token"
+// @Success 200 {object} object
+// @Failure 400 {object} errorResponse
+// @Router /api/auth/verify-email [post]
+func swaggerVerifyEmail() {}
+
+// swaggerResendVerification resends the verification email.
+// @Summary Resend verification email
+// @Description Always returns the same message (does not disclose whether the email exists); at most one email per account per minute.
+// @Tags Authentication
+// @Accept json
+// @Produce json
+// @Param request body object true "Email address"
+// @Success 200 {object} object
+// @Failure 400 {object} errorResponse
+// @Router /api/auth/resend-verification [post]
+func swaggerResendVerification() {}
 
 // swaggerChangePassword documents password updates.
 // @Summary Change password

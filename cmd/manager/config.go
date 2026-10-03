@@ -9,25 +9,30 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/liuscraft/orion-x/cmd/manager/handler"
 	"github.com/liuscraft/orion-x/internal/apikey"
 	"github.com/liuscraft/orion-x/internal/billing"
 	"github.com/liuscraft/orion-x/internal/billing/service"
+	"github.com/liuscraft/orion-x/internal/mailer"
 	"github.com/liuscraft/orion-x/internal/storage"
 )
 
 type ManagerConfig struct {
-	Server      ServerConfig      `yaml:"server"`
-	Database    DatabaseConfig    `yaml:"database"`
-	JWT         JWTConfig         `yaml:"jwt"`
-	Admin       AdminConfig       `yaml:"admin"`
-	GithubOAuth GithubOAuthConfig `yaml:"github_oauth"`
-	Logging     LoggingConfig     `yaml:"logging"`
-	Storage     storage.Config    `yaml:"storage"`
-	Internal    InternalConfig    `yaml:"internal"`
-	Billing     BillingConfig     `yaml:"billing"`
-	Payment     PaymentConfig     `yaml:"payment"`
-	APIKey      APIKeyConfig      `yaml:"apikey"`
-	Channels    ChannelsConfig    `yaml:"channels"`
+	Server      ServerConfig       `yaml:"server"`
+	Database    DatabaseConfig     `yaml:"database"`
+	JWT         JWTConfig          `yaml:"jwt"`
+	Admin       AdminConfig        `yaml:"admin"`
+	Auth        handler.AuthConfig `yaml:"auth"`
+	GithubOAuth GithubOAuthConfig  `yaml:"github_oauth"`
+	SMTP        mailer.Config      `yaml:"smtp"`
+	Redis       RedisConfig        `yaml:"redis"`
+	Logging     LoggingConfig      `yaml:"logging"`
+	Storage     storage.Config     `yaml:"storage"`
+	Internal    InternalConfig     `yaml:"internal"`
+	Billing     BillingConfig      `yaml:"billing"`
+	Payment     PaymentConfig      `yaml:"payment"`
+	APIKey      APIKeyConfig       `yaml:"apikey"`
+	Channels    ChannelsConfig     `yaml:"channels"`
 }
 
 type ServerConfig struct {
@@ -51,6 +56,14 @@ type GithubOAuthConfig struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
 	RedirectURL  string `yaml:"redirect_url"` // GitHub OAuth 回调地址
+}
+
+// RedisConfig 是邮箱验证短期状态（一次性令牌 / 重发冷却）的 Redis 连接配置。
+// auth.email_verify 开启时必填；需要 Redis 6.2+（消费令牌用 GETDEL 原子完成）。
+type RedisConfig struct {
+	Addr     string `yaml:"addr"`     // host:port，如 127.0.0.1:6379
+	Password string `yaml:"password"` // 敏感值：注意配置文件权限，不要提交到仓库
+	DB       int    `yaml:"db"`
 }
 
 type LoggingConfig struct {
@@ -324,6 +337,8 @@ func loadManagerConfig(path string) (*ManagerConfig, error) {
 	return cfg, nil
 }
 
+// TODO: 计划移除 applyManagerEnv：所有配置统一从配置文件加载；私密值（DB、密钥、
+// SMTP 密码等）后续由独立的加解密方案注入，不再通过环境变量覆盖。
 func applyManagerEnv(cfg *ManagerConfig) {
 	if v := strings.TrimSpace(os.Getenv("DB_DSN")); v != "" {
 		cfg.Database.DSN = v
