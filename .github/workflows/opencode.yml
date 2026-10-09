@@ -77,6 +77,16 @@ jobs:
           config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
           mkdir -p "$config_dir"
           cp .github/opencode-instructions.md "$config_dir/AGENTS.md"
+          # 全局配置：CI 无人应答权限确认，放行 /tmp 下的临时文件并禁用交互式提问工具。
+          cat > "$config_dir/opencode.json" <<'EOF'
+          {
+            "$schema": "https://opencode.ai/config.json",
+            "permission": {
+              "external_directory": { "/tmp/*": "allow" },
+              "question": "deny"
+            }
+          }
+          EOF
 
       # GITHUB_TOKEN 模式下 opencode 不会配置 git 身份，这里预先配置，保证 /oc 修复类指令能提交。
       - name: Configure git identity
