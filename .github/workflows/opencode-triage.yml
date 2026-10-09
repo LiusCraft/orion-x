@@ -1,0 +1,78 @@
+# 新 issue 自动分诊：摘要、打标签、给出初步答复或补充信息清单。
+# 仅处理有写权限成员创建的 issue；需要仓库 secret OPENCODE_API_KEY。
+# 运行期间维护一条状态评论（原地更新、结束清理），见 .github/opencode-instructions.md。
+name: opencode triage
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: opencode-triage-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    if: |
+      !endsWith(github.event.issue.user.login, '[bot]') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # 运行期间保留一条状态评论，由智能体按运行约定原地更新，结束后删除。
+      - name: Create progress comment
+        id: progress
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body='⏳ opencode 正在分诊这个 issue…（[运行日志](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})）'
+          id=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+            -f body="$body" --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      # 以全局 AGENTS.md 形式注入本次运行的约定（进度评论、安全边界），不改动仓库文件。
+      - name: Prepare opencode run instructions
+        run: |
+          config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+          mkdir -p "$config_dir"
+          cp .github/opencode-instructions.md "$config_dir/AGENTS.md"
+
+      - uses: anomalyco/opencode/github@latest
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_PROGRESS_COMMENT_ID: ${{ steps.progress.outputs.id }}
+        with:
+          model: opencode-go/deepseek-v4.1-flash
+          variant: max
+          use_github_token: true
+          prompt: |
+            你是 Orion-X 仓库的 issue 分诊助手。Orion-X 是面向多设备、多通道的实时语音智能体平台：Manager（Go + Gin + PostgreSQL，控制面）、wsserver（Go，实时语音 / Telegram 运行时）、Web 管理控制台（React），文档见 README.md 和 docs/。
+
+            请处理这个新 issue，最终输出一条发布到 issue 下的中文评论：
+            1. 阅读 issue 内容；必要时在仓库中检索相关代码和文档，判断它是缺陷、使用问题、功能请求还是文档问题。
+            2. 用 `gh label list` 查看现有标签，选择合适的用 `gh issue edit ${{ github.event.issue.number }} --add-label "<标签>"` 打上（最多 3 个，不确定就不加）。常用：bug、enhancement、documentation、question、duplicate、service:manager、service:web-ui、service:voicebot-server、type:feature、phase:mvp。
+            3. 评论控制在 5 行以内，友好、克制：
+               - 一句话复述你理解的问题；
+               - 使用 / 配置类问题：给出文档路径或排查方向；
+               - 信息不足：列出需要补充的内容（版本或 commit、部署方式、相关配置、日志、复现步骤）；
+               - 确认缺陷：指出可能涉及的模块，欢迎提交 PR。
+            4. 不要修改代码，不要创建分支或 PR，不要关闭 issue；只允许按运行约定维护状态评论。
+
+      - name: Remove progress comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ steps.progress.outputs.id }}" ]; then
+            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/${{ steps.progress.outputs.id }}" || true
+          fi
