@@ -17,6 +17,7 @@ func Open(dsn string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: open db: %w", err)
 	}
+
 	if err := db.AutoMigrate(&User{}, &Voicebot{}, &Device{}, &DeviceChannel{}, &Provider{}, &AIModel{}, &ModelVoice{}, &MCPMarketEntry{}, &MCPServer{}, &VoicebotMCPBinding{}, &MemoryEntry{}, &SessionTurn{}, &KnowledgeBase{}, &Document{}, &Chunk{}, &VoicebotKB{}, &OAuthBinding{}, &AgentTemplate{}, &Asset{}, &APIKey{}, &BillingItem{}, &BillingPrice{}, &BillingAccount{}, &BillingLedger{}, &BillingUsageEvent{}, &BillingReservation{}, &BillingGrant{}, &BillingPeriodState{}, &BillingDailyStat{}, &PaymentOrder{}, &PaymentNotification{}); err != nil {
 		return nil, fmt.Errorf("store: migrate: %w", err)
 	}

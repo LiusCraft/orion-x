@@ -203,6 +203,8 @@ Manager API 默认位于 `http://localhost:9090`：
 - `GET /api-docs`：API 索引
 - `GET /swagger/index.html`：Swagger UI
 - `POST /api/auth/login`：获取 JWT
+- `POST /api/auth/register`：注册（开启 `auth.email_verify` 时需先点邮件链接完成验证）
+- `POST /api/auth/verify-email`、`POST /api/auth/resend-verification`：邮箱验证与重发
 - `/api/voicebots`、`/api/providers`、`/api/models`、`/api/mcp`：认证后的管理 API
 - `/api/data/memory`、`/api/data/knowledge`：记忆与知识库 API
 - `/api/assets`：资源上传、浏览与预签名访问（需配置对象存储）

@@ -405,6 +405,8 @@ paths:
     post:
       consumes:
       - application/json
+      description: When auth.email_verify is enabled, unverified password accounts
+        get 403 with code=email_unverified.
       parameters:
       - description: Username and password
         in: body
@@ -425,6 +427,10 @@ paths:
             $ref: '#/definitions/main.errorResponse'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "403":
+          description: Forbidden
           schema:
             $ref: '#/definitions/main.errorResponse'
       summary: Log in
@@ -450,6 +456,92 @@ paths:
       security:
       - BearerAuth: []
       summary: Get current profile
+      tags:
+      - Authentication
+  /api/auth/register:
+    post:
+      consumes:
+      - application/json
+      description: When auth.email_verify is enabled the account is created unverified
+        and no token is returned; a verification email is sent instead (response has
+        verification_sent).
+      parameters:
+      - description: Email, password, optional username
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      summary: Register
+      tags:
+      - Authentication
+  /api/auth/resend-verification:
+    post:
+      consumes:
+      - application/json
+      description: Always returns the same message (does not disclose whether the
+        email exists); at most one email per account per minute.
+      parameters:
+      - description: Email address
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      summary: Resend verification email
+      tags:
+      - Authentication
+  /api/auth/verify-email:
+    post:
+      consumes:
+      - application/json
+      description: Invalid, expired, and already consumed tokens all return the same
+        400 message.
+      parameters:
+      - description: Verification token
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.errorResponse'
+      summary: Verify email
       tags:
       - Authentication
   /api/available-resources:

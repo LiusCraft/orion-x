@@ -631,6 +631,7 @@ const docTemplate = `{
         },
         "/api/auth/login": {
             "post": {
+                "description": "When auth.email_verify is enabled, unverified password accounts get 403 with code=email_unverified.",
                 "consumes": [
                     "application/json"
                 ],
@@ -670,6 +671,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/main.errorResponse"
                         }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
                     }
                 }
             }
@@ -703,6 +710,132 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/register": {
+            "post": {
+                "description": "When auth.email_verify is enabled the account is created unverified and no token is returned; a verification email is sent instead (response has verification_sent).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Register",
+                "parameters": [
+                    {
+                        "description": "Email, password, optional username",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/resend-verification": {
+            "post": {
+                "description": "Always returns the same message (does not disclose whether the email exists); at most one email per account per minute.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Resend verification email",
+                "parameters": [
+                    {
+                        "description": "Email address",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/verify-email": {
+            "post": {
+                "description": "Invalid, expired, and already consumed tokens all return the same 400 message.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Verify email",
+                "parameters": [
+                    {
+                        "description": "Verification token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/main.errorResponse"
                         }

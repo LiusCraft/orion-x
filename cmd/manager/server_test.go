@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
 	"github.com/liuscraft/orion-x/internal/apikey"
@@ -23,23 +24,31 @@ func newBillingTestRouter(t *testing.T, billingSvc *service.Service, internalTok
 	return newTestRouter(t, billingSvc, nil, false)
 }
 
-// newTestRouter 是 newRouter 的测试入口：store 全为 nil，apikey 按需给。verify 的
-// owner 解析要 store 才能装配，所以 apikey 打开时补两个空 store——只用于构造，这些
-// 测试不真读库。
+// newTestRouter 是 NewManagerServer 的测试入口：store 全为 nil，apikey 按需给。
+// verify 的 owner 解析要 store 才能装配，所以 apikey 打开时补两个空 store——只用于
+// 构造，这些测试不真读库。
 func newTestRouter(t *testing.T, billingSvc *service.Service, apikeySvc *apikey.Service, apikeyAdminOnly bool) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	secret := []byte("test-secret")
-	sign := func(userID string, isAdmin bool) (string, error) { return signToken(secret, userID, isAdmin) }
+	cfg := &ManagerConfig{
+		Server:   ServerConfig{Addr: ":0"},
+		JWT:      JWTConfig{Secret: "test-secret"},
+		Internal: InternalConfig{Token: "internal-token"},
+		APIKey:   APIKeyConfig{AdminOnly: apikeyAdminOnly},
+	}
 	var voicebots *store.VoicebotStore
 	var devices *store.DeviceStore
 	if apikeySvc != nil {
 		voicebots, devices = &store.VoicebotStore{}, &store.DeviceStore{}
 	}
-	return newRouter(secret,
+	srv, err := NewManagerServer(cfg,
 		nil, nil, voicebots, devices, nil, nil, nil, nil, nil, nil, nil,
-		sign, nil, nil, nil, nil, nil, nil, nil, nil,
-		"internal-token", billingSvc, nil, apikeySvc, apikeyAdminOnly, nil)
+		nil, nil, nil, nil, nil, nil, nil, nil,
+		billingSvc, nil, apikeySvc, nil)
+	if err != nil {
+		t.Fatalf("NewManagerServer: %v", err)
+	}
+	return srv.engine
 }
 
 // TestChannelQRRoutesRegistered 钉住扫码开通的三条路由：不依赖是否装配了 Binder
@@ -69,6 +78,21 @@ func hasRoute(r *gin.Engine, method, path string) bool {
 	return false
 }
 
+// signTestToken 生成 JWT 中间件能验过的测试 token，声明与 handler 签发的生产
+// token 一致（sub / is_admin / exp）。
+func signTestToken(t *testing.T, secret []byte, userID string, isAdmin bool) string {
+	t.Helper()
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":      userID,
+		"is_admin": isAdmin,
+		"exp":      jwt.NewNumericDate(time.Now().Add(time.Hour)),
+	}).SignedString(secret)
+	if err != nil {
+		t.Fatalf("sign test token: %v", err)
+	}
+	return tok
+}
+
 func TestBillingRoutesWhenDisabled(t *testing.T) {
 	// 计费关闭（billing.enabled: false）：内部接口根本不注册（不存在的端点该是 404，
 	// 而不是一个永远回 503 的空壳），/api 上的接口仍然注册着并回 503。
@@ -80,10 +104,7 @@ func TestBillingRoutesWhenDisabled(t *testing.T) {
 		}
 	}
 
-	token, err := signToken([]byte("test-secret"), "user-1", false)
-	if err != nil {
-		t.Fatalf("signToken() error = %v", err)
-	}
+	token := signTestToken(t, []byte("test-secret"), "user-1", false)
 	request := httptest.NewRequest(http.MethodGet, "/api/billing/summary", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
@@ -145,10 +166,7 @@ func TestBillingRoutesWhenEnabled(t *testing.T) {
 	}
 
 	// 管理端口径：普通用户的 JWT 进不去（中间件先拦，不会碰到 store）。
-	userToken, err := signToken([]byte("test-secret"), "user-1", false)
-	if err != nil {
-		t.Fatalf("signToken() error = %v", err)
-	}
+	userToken := signTestToken(t, []byte("test-secret"), "user-1", false)
 	adminOnly := []struct {
 		method string
 		path   string
@@ -247,10 +265,7 @@ func TestAPIKeyEndToEnd(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	jwtToken, err := signToken([]byte("test-secret"), "user-1", false)
-	if err != nil {
-		t.Fatalf("signToken() error = %v", err)
-	}
+	jwtToken := signTestToken(t, []byte("test-secret"), "user-1", false)
 
 	// G1：同一条请求，key 与 JWT 的响应逐字节一致。
 	viaJWT := routeRequest(r, http.MethodGet, "/api/sessions", jwtToken)
@@ -309,10 +324,7 @@ func TestAPIKeyRoutesWhenDisabled(t *testing.T) {
 		t.Error("DELETE /api/api-keys/:id must stay registered")
 	}
 
-	token, err := signToken([]byte("test-secret"), "user-1", false)
-	if err != nil {
-		t.Fatalf("signToken() error = %v", err)
-	}
+	token := signTestToken(t, []byte("test-secret"), "user-1", false)
 	response := routeRequest(r, http.MethodGet, "/api/api-keys", token)
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("GET /api/api-keys with apikey disabled = %d, want 503 (body %s)",

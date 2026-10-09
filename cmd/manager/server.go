@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
@@ -16,11 +22,23 @@ import (
 	"github.com/liuscraft/orion-x/internal/billing/service"
 	"github.com/liuscraft/orion-x/internal/channels/qrbind"
 	"github.com/liuscraft/orion-x/internal/knowledge"
+	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/mailer"
 	"github.com/liuscraft/orion-x/internal/store"
 )
 
-func newRouter(
-	jwtSecret []byte,
+// ManagerServer 是 manager 的 HTTP 服务：持有 gin 引擎与 http.Server，生命周期
+// 由实例自己维护。
+type ManagerServer struct {
+	engine *gin.Engine
+	http   *http.Server
+	redis  *redis.Client // nil = 未配置；仅用于退出时释放连接
+}
+
+// NewManagerServer 装配 manager 的 HTTP 服务：mailer 单例、auth 门禁等依赖在这里
+// 初始化，缺件配置在构造期报错（fail closed）。
+func NewManagerServer(
+	cfg *ManagerConfig,
 	users *store.UserStore,
 	bindings *store.OAuthBindingStore,
 	voicebots *store.VoicebotStore,
@@ -32,7 +50,6 @@ func newRouter(
 	mcpMarket *store.MCPMarketStore,
 	mcpServers *store.MCPServerStore,
 	mcpBindings *store.VoicebotMCPBindingStore,
-	signToken func(userID string, isAdmin bool) (string, error),
 	memStore *store.MemoryEntryStore,
 	turnStore *store.TurnStore,
 	kbSvc *knowledge.Service,
@@ -41,13 +58,45 @@ func newRouter(
 	voicebotKBs *store.VoicebotKBStore,
 	agentTemplates *store.AgentTemplateStore,
 	assetSvc *assets.Service,
-	internalToken string,
 	billingSvc *service.Service,
 	paymentSvc *service.PaymentService,
 	apikeySvc *apikey.Service,
-	apikeyAdminOnly bool,
 	qrBinders map[string]qrbind.Binder,
-) *gin.Engine {
+) (*ManagerServer, error) {
+	// mailer 是进程级单例：smtp.host 为空表示未配置（nil），开启邮箱验证却缺件
+	// 时由 NewAuthHandler 拒绝启动。
+	mailSender, err := mailer.New(cfg.SMTP)
+	if err != nil {
+		return nil, fmt.Errorf("smtp config: %w", err)
+	}
+	if mailSender != nil {
+		logging.Infof("smtp: mailer ready (host=%s tls=%q)", cfg.SMTP.Host, cfg.SMTP.TLS)
+	}
+	if cfg.Auth.EmailVerify {
+		logging.Infof("auth: email verification enabled (verify_url_base=%s)", cfg.Auth.VerifyURLBase)
+	}
+
+	// 邮箱验证的短期状态（一次性令牌 / 重发冷却）存 Redis：未配置 redis.addr 时为
+	// nil，开启邮箱验证却缺件时由 NewAuthHandler 拒绝启动；开启验证时启动期探活，
+	// 避免进程起来了才发现验证链接根本发不出去。
+	var rdb *redis.Client
+	var verifyStore *handler.VerifyStore
+	if addr := strings.TrimSpace(cfg.Redis.Addr); addr != "" {
+		rdb = redis.NewClient(&redis.Options{Addr: addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB})
+		verifyStore = handler.NewVerifyStore(rdb)
+		if cfg.Auth.EmailVerify {
+			pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			err := verifyStore.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				return nil, fmt.Errorf("redis: %w", err)
+			}
+			logging.Infof("redis: verify store ready (addr=%s db=%d)", addr, cfg.Redis.DB)
+		}
+	}
+
+	secret := []byte(cfg.JWT.Secret)
+
 	r := gin.New()
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
@@ -71,7 +120,10 @@ func newRouter(
 		c.Next()
 	})
 
-	authH := handler.NewAuthHandler(users, bindings, signToken)
+	authH, err := handler.NewAuthHandler(users, bindings, secret, cfg.Auth, mailSender, verifyStore)
+	if err != nil {
+		return nil, fmt.Errorf("auth handler: %w", err)
+	}
 	botH := handler.NewVoicebotHandler(voicebots)
 	devH := handler.NewDeviceHandler(voicebots, devices, deviceChannels)
 	channelH := handler.NewChannelHandler(voicebots, devices, deviceChannels, qrBinders)
@@ -87,7 +139,7 @@ func newRouter(
 	langH := handler.NewLanguageHandler()
 	mcpH := handler.NewMCPHandler(mcpMarket, mcpServers, mcpBindings, voicebots)
 	internalH := handler.NewInternalHandler(voicebots, devices, deviceChannels, models, voices, mcpBindings)
-	oauthH := handler.NewOAuthHandler(users, bindings, signToken)
+	oauthH := handler.NewOAuthHandler(users, bindings, secret)
 	billingInternalH := handler.NewInternalBillingHandler(billingSvc)
 	billingAdminH := handler.NewBillingAdminHandler(billingSvc)
 	billingUserH := handler.NewBillingUserHandler(billingSvc)
@@ -101,7 +153,7 @@ func newRouter(
 	if apikeySvc != nil {
 		apikeyOwner = handler.NewStoreDeviceOwner(devices, voicebots)
 	}
-	apiKeyH := handler.NewAPIKeyHandler(apikeySvc, apikeyAdminOnly, apikeyOwner)
+	apiKeyH := handler.NewAPIKeyHandler(apikeySvc, cfg.APIKey.AdminOnly, apikeyOwner)
 
 	availableH := handler.NewAvailableHandler(providers, models, voices, assetSvc)
 	tplH := handler.NewAgentTemplateHandler(agentTemplates)
@@ -117,16 +169,21 @@ func newRouter(
 		auth.POST("/register", authH.Register)
 		auth.POST("/login", authH.Login)
 
+		// 邮箱验证（auth.email_verify 开启时注册才需要走）：
+		// 验证令牌消费与重发都是匿名端点，重发恒返回同一文案防枚举。
+		auth.POST("/verify-email", authH.VerifyEmail)
+		auth.POST("/resend-verification", authH.ResendVerification)
+
 		// 第三方 OAuth 登录 — 平台由 internal/oauth 注册表提供，
 		// 未注册的平台在 handler 内返回 404
 		auth.GET("/oauth/providers", oauthH.Providers)
 		auth.GET("/oauth/:provider/login", oauthH.Login)
 		auth.GET("/oauth/:provider/callback", oauthH.Callback)
 
-		jwtMw := middleware.JWT(jwtSecret)
+		jwtMw := middleware.JWT(secret)
 		// 资源路由上的两种凭证：带 ox_sk_ 前缀的走 API key，其余走原来的 JWT
 		// （§7.2：老客户端行为零变化）。
-		authMw := middleware.Auth(jwtSecret, apikeySvc)
+		authMw := middleware.Auth(secret, apikeySvc)
 		// scope 判定只对 API key 生效（JWT 是人）。表与真实路由的一致性由
 		// middleware.ValidateCoverage 的测试钉住（§7 V3）。
 		scopeMw := middleware.RequireScopes(middleware.RouteScopes())
@@ -333,7 +390,7 @@ func newRouter(
 		// 的回归，P1 不动它们。计费关闭时不注册——不存在的端点该是 404，而不是一个
 		// 永远回 503 的空壳。
 		if billingSvc != nil {
-			internalAuth := middleware.InternalAuth(internalToken)
+			internalAuth := middleware.InternalAuth(cfg.Internal.Token)
 			internal.POST(strings.TrimPrefix(billing.PathAuthorize, "/internal"), internalAuth, billingInternalH.Authorize)
 			internal.POST(strings.TrimPrefix(billing.PathUsageEvents, "/internal"), internalAuth, billingInternalH.UsageEvents)
 			internal.POST(strings.TrimPrefix(billing.PathSettle, "/internal"), internalAuth, billingInternalH.Settle)
@@ -344,9 +401,33 @@ func newRouter(
 		// 凭证功能关闭时不注册——不存在的端点该是 404，数据面据此记
 		// auth_unavailable 并拒绝（FR-7）。
 		if apikeySvc != nil {
-			internalAuth := middleware.InternalAuth(internalToken)
+			internalAuth := middleware.InternalAuth(cfg.Internal.Token)
 			internal.POST(strings.TrimPrefix(apikey.PathVerify, "/internal"), internalAuth, apiKeyH.Verify)
 		}
 	}
-	return r
+
+	return &ManagerServer{
+		engine: r,
+		http:   &http.Server{Addr: cfg.Server.Addr, Handler: r},
+		redis:  rdb,
+	}, nil
+}
+
+// Start 在后台启动 HTTP 服务；监听失败直接退出进程。
+func (s *ManagerServer) Start() {
+	go func() {
+		logging.Infof("manager listening on %s", s.http.Addr)
+		if err := s.http.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logging.Fatalf("listen: %v", err)
+		}
+	}()
+}
+
+// Shutdown 优雅关闭 HTTP 服务并释放 Redis 连接。
+func (s *ManagerServer) Shutdown(ctx context.Context) error {
+	err := s.http.Shutdown(ctx)
+	if s.redis != nil {
+		_ = s.redis.Close()
+	}
+	return err
 }
