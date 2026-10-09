@@ -1,6 +1,6 @@
 # 新 issue 自动分诊：摘要、打标签、给出初步答复或补充信息清单。
 # 仅处理有写权限成员创建的 issue；需要仓库 secret OPENCODE_API_KEY。
-# 运行期间维护一条状态评论（原地更新、结束清理），见 .github/opencode-instructions.md。
+# 运行期间维护一条状态评论（原地更新、结束收尾为最终结论），见 .github/opencode-instructions.md。
 name: opencode triage
 
 on:
@@ -27,7 +27,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # 运行期间保留一条状态评论，由智能体按运行约定原地更新，结束后删除。
+      # 运行期间保留一条状态评论，由智能体按运行约定原地更新并收尾为最终结论，结束时不删除。
       - name: Create progress comment
         id: progress
         continue-on-error: true
@@ -71,11 +71,20 @@ jobs:
                - 确认缺陷：指出可能涉及的模块，欢迎提交 PR。
             4. 不要修改代码，不要创建分支或 PR，不要关闭 issue；只允许按运行约定维护状态评论。
 
-      - name: Remove progress comment
+      # 收尾兜底：智能体已收尾则不动；评论仍是进行中（失败、超时或被取消）则标记为未收尾。
+      - name: Finalize progress comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "${{ steps.progress.outputs.id }}" ]; then
-            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/${{ steps.progress.outputs.id }}" || true
+          id="${{ steps.progress.outputs.id }}"
+          if [ -z "$id" ]; then
+            exit 0
           fi
+          body=$(gh api "repos/${{ github.repository }}/issues/comments/$id" --jq .body 2>/dev/null || true)
+          case "$body" in
+            *⏳*)
+              gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$id" \
+                -F body='❌ opencode 运行未收尾（失败、超时或被取消），详见[运行日志](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})。' || true
+              ;;
+          esac

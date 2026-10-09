@@ -1,7 +1,7 @@
 # PR 自动审查：打开 / 更新 / 重新打开 / 转为 Ready 时触发；草稿、bot 和 fork PR 跳过。
 # 只审查不修改（contents: read），审查结果以评论发布，并尝试提交行级评论。
 # 需要仓库 secret OPENCODE_API_KEY；fork PR 拿不到 secret，需维护者在 PR 评论 /oc review 手动触发。
-# 运行期间维护一条状态评论（原地更新、结束清理），见 .github/opencode-instructions.md。
+# 运行期间维护一条状态评论（原地更新、结束收尾为最终结论），见 .github/opencode-instructions.md。
 name: opencode review
 
 on:
@@ -33,7 +33,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # 运行期间保留一条状态评论，由智能体按运行约定原地更新，结束后删除。
+      # 运行期间保留一条状态评论，由智能体按运行约定原地更新并收尾为最终结论，结束时不删除。
       - name: Create progress comment
         id: progress
         continue-on-error: true
@@ -70,7 +70,7 @@ jobs:
             先阅读 AGENTS.md，再基于真实 diff 审查：
             1. 用 `gh pr diff` 获取完整 diff，或 `git fetch origin <base> --depth=50` 后 `git diff origin/<base>...HEAD`（base 分支见下方 PR 数据）。
             2. 必要时读取改动文件的上下文、调用方和测试，确认问题真实存在；不要凭猜测下结论。
-            3. 只做审查：不要编辑、提交或推送任何文件，不要改变 PR 状态（按运行约定维护和清理状态评论除外）。
+            3. 只做审查：不要编辑、提交或推送任何文件，不要改变 PR 状态（按运行约定维护和收尾状态评论除外）。
 
             重点关注（按优先级）：
             - 正确性：逻辑错误、边界条件、竞态、goroutine 或资源泄漏、错误处理遗漏。
@@ -101,11 +101,20 @@ jobs:
             gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews --input /tmp/opencode/review.json
             约束：event 必须是 COMMENT，禁止 APPROVE / REQUEST_CHANGES；line 必须是 diff 右侧（新文件）行号；只提交 🔴 问题；最多尝试一次，失败或不确定就跳过并把内容并入报告。
 
-      - name: Remove progress comment
+      # 收尾兜底：智能体已收尾则不动；评论仍是进行中（失败、超时或被取消）则标记为未收尾。
+      - name: Finalize progress comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "${{ steps.progress.outputs.id }}" ]; then
-            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/${{ steps.progress.outputs.id }}" || true
+          id="${{ steps.progress.outputs.id }}"
+          if [ -z "$id" ]; then
+            exit 0
           fi
+          body=$(gh api "repos/${{ github.repository }}/issues/comments/$id" --jq .body 2>/dev/null || true)
+          case "$body" in
+            *⏳*)
+              gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$id" \
+                -F body='❌ opencode 运行未收尾（失败、超时或被取消），详见[运行日志](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})。' || true
+              ;;
+          esac

@@ -1,7 +1,9 @@
 # 评论触发：包含 /oc 或 /opencode 的评论会启动 opencode 智能体，
 # 可解释 issue、审查指定代码，也可以按指令修改代码并提交到分支或 PR。
 # 需要仓库 secret OPENCODE_API_KEY；仅响应有写权限成员的评论。
-# 运行期间维护一条状态评论（原地更新、结束清理），见 .github/opencode-instructions.md。
+# GITHUB_TOKEN 建 PR 需要仓库开启 Settings → Actions → General → Allow GitHub Actions to create and approve pull requests；
+# 未开启时改动类任务会在收尾建 PR 时失败（分支已推送，见运行日志）。
+# 运行期间维护一条状态评论（原地更新、结束收尾为最终结论），见 .github/opencode-instructions.md。
 # 在途的 opencode 会用 👍 接管新的 /oc 评论，本工作流识别后跳过重复运行。
 # 注意：用 GITHUB_TOKEN 推送的提交不会触发其它 workflow，需要手动 re-run 或评论 /oc review。
 name: opencode
@@ -57,7 +59,7 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # 运行期间保留一条状态评论，由智能体按运行约定原地更新，结束后删除。
+      # 运行期间保留一条状态评论，由智能体按运行约定原地更新并收尾为最终结论，结束时不删除。
       - name: Create progress comment
         id: progress
         if: steps.handled.outputs.skip != 'true'
@@ -99,11 +101,20 @@ jobs:
           variant: max
           use_github_token: true
 
-      - name: Remove progress comment
+      # 收尾兜底：智能体已收尾则不动；评论仍是进行中（失败、超时或被取消）则标记为未收尾。
+      - name: Finalize progress comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "${{ steps.progress.outputs.id }}" ]; then
-            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/${{ steps.progress.outputs.id }}" || true
+          id="${{ steps.progress.outputs.id }}"
+          if [ -z "$id" ]; then
+            exit 0
           fi
+          body=$(gh api "repos/${{ github.repository }}/issues/comments/$id" --jq .body 2>/dev/null || true)
+          case "$body" in
+            *⏳*)
+              gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$id" \
+                -F body='❌ opencode 运行未收尾（失败、超时或被取消），详见[运行日志](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})。' || true
+              ;;
+          esac

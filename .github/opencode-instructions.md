@@ -29,14 +29,16 @@
   ```
 
 - 清单保持简短（10 行以内），勾选状态用 `- [x]` / `- [ ]`；更新时保留已有的会话分享链接行。
-- 全程只编辑这一条评论，不要为进度新增评论。
-- 输出最终回答之前删除它：
+- 全程只编辑这一条评论：不要为进度新增评论，也不要删除它。
+- 收尾（输出最终回答之前）把状态行更新为最终结论，再 PATCH 一次同一条评论——成功后评论里不应再出现 `⏳`，工作流靠它判断本次运行是否已收尾：
+  - 成功：`✅ 已完成：<一句话结论>`，有产出就附一行链接（文件 / 分支 / PR）；
+  - 失败或中断：`❌ 未完成：<原因>`。
 
   ```bash
-  gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$OPENCODE_PROGRESS_COMMENT_ID"
+  gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$OPENCODE_PROGRESS_COMMENT_ID" -F body=@/tmp/opencode/progress.md
   ```
 
-  删除失败可以忽略，工作流会兜底清理。
+  收尾更新失败可以忽略，工作流会兜底标记未收尾。
 
 ## /oc 指令的接续处理
 
