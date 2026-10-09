@@ -572,7 +572,7 @@ func asrSecondsOf(results []asr.Result) int64
 
 做法就是加个 `middleware.InternalAuth(token)`：Bearer token，加 `crypto/subtle.ConstantTimeCompare` 比较。有一个细节得定下来：**token 没配的时候要拒绝，不能放行**，同时在启动日志里 `Warnf` 提醒。这个方向的错误值钱——“忘了配”如果等于“不鉴权”，那迟早会发生在生产上。
 
-配置项 manager 是 `internal.token`（env `INTERNAL_TOKEN`），wsserver 是 `manager.token`（env `MANAGER_TOKEN`）。
+配置项 manager 是 `internal.token`（只从 manager 配置文件读取，2026-10-09 移除环境变量覆盖），wsserver 是 `manager.token`（env `MANAGER_TOKEN`，wsserver 侧配置迁移另开 issue）。
 
 挂的范围建议只挂新增的 `/internal/billing/*`，先不动存量接口。存量那些 `/internal/*` 的调用方有 TG 通道和 voicebot CLI，一起改就要搭上一轮跟计费无关的回归，P1 没必要。存量加固单开一个排期。
 

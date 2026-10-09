@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -125,14 +124,14 @@ func (c BillingConfig) Disabled() bool {
 // PaymentConfig 是充值通道（支付渠道 → 余额）的接入参数。
 //
 // 整段可以不写：不写就是没接支付渠道，/api/billing/recharge 回 503，其余能力不受
-// 影响。商户密钥建议只走环境变量 EPAY_KEY，不落配置文件。
+// 影响。商户密钥是敏感值：注意配置文件权限，不要提交到仓库。
 //
 // 一期只接易支付（EPay）一家，所以字段是平的；将来接第二家渠道时再改成按渠道分组。
 type PaymentConfig struct {
 	Enabled    *bool  `yaml:"enabled"`      // nil = 未接入；显式 true 才启用
 	APIBaseURL string `yaml:"api_base_url"` // 网关地址，如 https://pay.example.com
 	PID        int    `yaml:"pid"`          // 商户 ID
-	Key        string `yaml:"key"`          // 商户密钥（建议只走 EPAY_KEY 环境变量）
+	Key        string `yaml:"key"`          // 商户密钥（敏感值：注意配置文件权限）
 	NotifyURL  string `yaml:"notify_url"`   // 异步通知地址，必须公网可达
 	ReturnURL  string `yaml:"return_url"`   // 同步跳转地址
 	// Channels 是开放的支付渠道（epay:alipay / epay:wxpay / epay:qqpay），
@@ -318,14 +317,14 @@ func defaultManagerConfig() *ManagerConfig {
 	}
 }
 
+// loadManagerConfig 只从 path 读取配置：配置文件是唯一来源，环境变量不再参与
+// 覆盖（2026-10-09 移除 applyManagerEnv）。文件缺失或解析失败都直接报错，不静默
+// 退回默认值——部署时漏挂配置文件，进程必须起不来。
 func loadManagerConfig(path string) (*ManagerConfig, error) {
 	cfg := defaultManagerConfig()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return cfg, nil
-		}
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
@@ -333,59 +332,5 @@ func loadManagerConfig(path string) (*ManagerConfig, error) {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
-	applyManagerEnv(cfg)
 	return cfg, nil
-}
-
-// TODO: 计划移除 applyManagerEnv：所有配置统一从配置文件加载；私密值（DB、密钥、
-// SMTP 密码等）后续由独立的加解密方案注入，不再通过环境变量覆盖。
-func applyManagerEnv(cfg *ManagerConfig) {
-	if v := strings.TrimSpace(os.Getenv("DB_DSN")); v != "" {
-		cfg.Database.DSN = v
-	}
-	if v := strings.TrimSpace(os.Getenv("JWT_SECRET")); v != "" {
-		cfg.JWT.Secret = v
-	}
-	if v := strings.TrimSpace(os.Getenv("LOG_LEVEL")); v != "" {
-		cfg.Logging.Level = v
-	}
-	if v := strings.TrimSpace(os.Getenv("ADMIN_USERNAME")); v != "" {
-		cfg.Admin.Username = v
-	}
-	if v := strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")); v != "" {
-		cfg.Admin.Password = v
-	}
-	if v := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_ID")); v != "" {
-		cfg.GithubOAuth.ClientID = v
-	}
-	if v := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET")); v != "" {
-		cfg.GithubOAuth.ClientSecret = v
-	}
-	if v := strings.TrimSpace(os.Getenv("GITHUB_REDIRECT_URL")); v != "" {
-		cfg.GithubOAuth.RedirectURL = v
-	}
-	// 服务间凭据建议只走环境变量，不落配置文件
-	if v := strings.TrimSpace(os.Getenv("INTERNAL_TOKEN")); v != "" {
-		cfg.Internal.Token = v
-	}
-	// 支付网关的商户密钥同理：只走环境变量，不落配置文件
-	if v := strings.TrimSpace(os.Getenv("EPAY_KEY")); v != "" {
-		cfg.Payment.Key = v
-	}
-	// 对象存储（AK/SK 建议只走环境变量，不落配置文件）
-	if v := strings.TrimSpace(os.Getenv("STORAGE_ENDPOINT")); v != "" {
-		cfg.Storage.Endpoint = v
-	}
-	if v := strings.TrimSpace(os.Getenv("STORAGE_REGION")); v != "" {
-		cfg.Storage.Region = v
-	}
-	if v := strings.TrimSpace(os.Getenv("STORAGE_BUCKET")); v != "" {
-		cfg.Storage.Bucket = v
-	}
-	if v := strings.TrimSpace(os.Getenv("STORAGE_ACCESS_KEY")); v != "" {
-		cfg.Storage.AccessKey = v
-	}
-	if v := strings.TrimSpace(os.Getenv("STORAGE_SECRET_KEY")); v != "" {
-		cfg.Storage.SecretKey = v
-	}
 }

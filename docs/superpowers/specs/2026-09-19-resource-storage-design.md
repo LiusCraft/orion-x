@@ -344,7 +344,7 @@ storage:
   endpoint: "https://s3.cn-east-1.qiniucs.com"   # 七牛 Kodo 华东-浙江；区域对照见七牛《服务域名》
   region: "cn-east-1"                            # 必须与 endpoint 区域一致（参与 SigV4 签名）
   bucket: "orionx-assets"                       # 填「S3 空间名」（空间概览可见，可能不同于七牛空间名）
-  access_key: ""                                # 建议留空，用环境变量注入
+  access_key: ""                                # 敏感值：注意配置文件权限，不要提交到仓库
   secret_key: ""
   use_path_style: true                          # 七牛 / 自建 MinIO 建议 true
   prefix: ""                                    # 可选 key 前缀，多环境共桶时用 dev/prod
@@ -352,7 +352,7 @@ storage:
   max_upload_size: 52428800                     # 全局单文件上限 50MB（用途上限再细分）
 ```
 
-环境变量覆盖（沿用 `applyManagerEnv` 风格）：`STORAGE_ENDPOINT`、`STORAGE_REGION`、`STORAGE_BUCKET`、`STORAGE_ACCESS_KEY`、`STORAGE_SECRET_KEY`。
+（2026-10-09 更新）manager 已移除环境变量覆盖（`applyManagerEnv`），AK/SK 等敏感值只从 manager 配置文件读取；注意文件权限并确保不提交到仓库。
 
 凭证安全：AK/SK 不写进仓库（`manager.example.yaml` 留空）；七牛侧建议用**子账号 + 仅授权该空间的策略**，不要用主账号 AK/SK。
 

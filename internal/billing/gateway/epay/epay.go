@@ -23,7 +23,7 @@ import (
 type Config struct {
 	APIBaseURL string // 网关地址，如 https://pay.example.com（不带路径）
 	PID        int    // 商户 ID
-	Key        string // 商户密钥；只该来自环境变量，不要写进配置文件
+	Key        string // 商户密钥；manager 只从配置文件读取，注意文件权限、不要提交到仓库
 	NotifyURL  string // 异步通知地址，必须公网可达
 	ReturnURL  string // 同步跳转地址（前端结果页），可以为空
 	Timeout    int    // 请求超时（秒），0 = SDK 默认 30s

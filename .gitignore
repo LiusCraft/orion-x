@@ -11,6 +11,8 @@ __debug_bin*
 # Debug binaries
 cmd/voicebot/config/voicebot.json
 data/
+deploy/manager.yaml
+deploy/.env
 docs-site/.vitepress/cache
 docs-site/.vitepress/dist
 docs-site/public/openapi

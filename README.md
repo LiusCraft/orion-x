@@ -59,15 +59,21 @@ Manager 是控制面和数据面：保存用户、智能体、设备、模型、
 # macOS
 brew install onnxruntime opus portaudio
 
-# 创建数据库后，在目标数据库中启用向量扩展
-psql "$DB_DSN" -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+# 创建数据库后，在目标数据库中启用向量扩展（DSN 与 data/manager.yaml 的 database.dsn 一致）
+psql "postgres://USER:PASSWORD@localhost:5432/orionx?sslmode=disable" -c 'CREATE EXTENSION IF NOT EXISTS vector;'
 ```
 
 Linux 部署需要提供等价的 ONNX Runtime、Opus 开发库和 PostgreSQL/pgvector 依赖。仅运行 Manager 时不需要音频设备。
 
 ### 2. 配置 Manager
 
-项目提供 `data/manager.yaml` 作为本地开发配置。至少修改数据库连接、JWT 密钥和管理员初始密码；不要将真实凭据提交到仓库。
+复制 `manager.example.yaml` 为 `data/manager.yaml` 作为本地开发配置（`data/` 已被 git 忽略）：
+
+```bash
+cp manager.example.yaml data/manager.yaml
+```
+
+至少修改数据库连接、JWT 密钥和管理员初始密码；不要将真实凭据提交到仓库。
 
 ```yaml
 server:
@@ -81,7 +87,7 @@ admin:
   password: "replace-this-initial-password"
 ```
 
-也可通过环境变量覆盖：`DB_DSN`、`JWT_SECRET`、`ADMIN_USERNAME`、`ADMIN_PASSWORD` 与 `LOG_LEVEL`。首次启动时会创建配置中的管理员；账户已存在时不会覆盖其密码。
+配置文件是 manager 的唯一配置来源：环境变量不再覆盖任何配置项，敏感值直接写在 `data/manager.yaml` 里，请限制文件权限（如 `chmod 600`）。首次启动时会创建配置中的管理员；账户已存在时不会覆盖其密码。
 
 可选启用对象存储（用于上传与签名访问音色参考音频、图片、知识库文档原件）。不配置时资源接口返回 503，其余功能不受影响：
 
@@ -91,14 +97,14 @@ storage:
   endpoint: "https://s3.cn-east-1.qiniucs.com"   # 七牛华东-浙江；region 必须与 endpoint 区域一致
   region: "cn-east-1"
   bucket: "your-bucket"                          # 七牛填「S3 空间名」（空间概览可见，可能不同于空间名）
-  access_key: ""                                 # 建议只放环境变量，不落配置文件
+  access_key: ""                                 # 敏感值：注意配置文件权限，不要提交到仓库
   secret_key: ""
   use_path_style: true                           # 七牛 / MinIO 建议 true；AWS S3 可设 false
   prefix: ""                                     # 可选 key 前缀，多环境共桶时用 dev/prod
   presign_ttl: "15m"                             # 预签名 URL 有效期
 ```
 
-以上字段可用环境变量覆盖：`STORAGE_ENDPOINT`、`STORAGE_REGION`、`STORAGE_BUCKET`、`STORAGE_ACCESS_KEY`、`STORAGE_SECRET_KEY`。对象存储为私有桶即可：读取一律通过服务端签发的预签名 URL（默认 15 分钟有效）。
+对象存储为私有桶即可：读取一律通过服务端签发的预签名 URL（默认 15 分钟有效）。AK/SK 是敏感值，直接写在该配置文件里，请限制文件权限并确保不提交到仓库。
 
 ### 3. 启动控制面与运行时
 
@@ -258,7 +264,7 @@ make build-frontend   # 类型检查并构建前端
 
 ## 安全与部署注意事项
 
-- 为数据库、JWT、管理员密码、模型 API Key 和 Telegram Token 使用密钥管理或环境变量；不要采用示例配置中的默认值。
+- Manager 的敏感配置（数据库、JWT、管理员密码、支付与存储密钥等）只从配置文件读取：请限制文件权限（如 `0600`）并纳入备份，不要采用示例配置中的默认值，也不要提交到仓库。
 - 所有 `/internal/*` 接口仅面向服务间通信，应通过网络隔离、反向代理 ACL 或 mTLS 保护。
 - WebSocket 升级当前允许任意 Origin。将浏览器客户端部署到公网前，应在反向代理或代码层加入来源校验和认证策略。
 - MCP 的 `stdio` 传输会在运行时主机上执行配置的命令。仅允许可信用户配置 MCP，并限制进程权限、网络与文件系统访问。
