@@ -61,12 +61,26 @@ check_patch_count() { # <name> <expected>
   check "$1" "$2" "$(grep -c -- '-X PATCH' "$GH_LOG" | tr -d '\n')"
 }
 
-# create：已有状态评论 -> 复用并 PATCH
+# create：已有未收尾（仍有行首 ⏳）状态评论 -> 复用并 PATCH
 : > "$GH_LOG"
-out=$(FAKE_EXISTING_ID=555 bash "$script" create 82 "⏳ opencode 正在处理…" 2>&1)
+out=$(FAKE_EXISTING_ID=555 FAKE_BODY='<!-- opencode:status:7 -->
+⏳ 正在处理，运行被中断' bash "$script" create 82 "⏳ opencode 正在处理…" 2>&1)
 check "create 输出复用的评论 id" "id=77" "$out"
 check_contains "create 按首行前缀定位评论" "$(cat "$GH_LOG")" 'startswith("<!-- opencode:status")'
 check_contains "create PATCH 已有评论" "$(cat "$GH_LOG")" "-X PATCH repos/example/repo/issues/comments/555"
+
+# create：已有已收尾（无行首 ⏳）状态评论 -> 不覆写，另建新评论
+: > "$GH_LOG"
+out=$(FAKE_EXISTING_ID=555 FAKE_BODY='<!-- opencode:status:7 -->
+✅ 已完成：上一轮的结论' bash "$script" create 82 "⏳ opencode 正在处理…" 2>&1)
+check "create 已收尾不覆写，输出新评论 id" "id=9999" "$out"
+check_patch_count "create 已收尾不 PATCH 旧评论" "0"
+check_contains "create 已收尾走新建" "$(cat "$GH_LOG")" "comments -F body="
+
+# create：已有评论读取失败 -> 不复用，新建
+: > "$GH_LOG"
+out=$(FAKE_EXISTING_ID=555 FAKE_GET_FAIL=1 bash "$script" create 82 "⏳ opencode 正在处理…" 2>&1)
+check "create 读取失败退回新建" "id=9999" "$out"
 
 # create：没有 -> 新建
 : > "$GH_LOG"
@@ -94,7 +108,7 @@ check_contains "finalize 前置未收尾说明" "$log" "❌ opencode 运行未�
 check_contains "finalize 保留分享链接" "$log" "share/ab12cd34"
 check_contains "finalize 保留 todo" "$log" "- [ ] 获取 diff"
 check "finalize 不再残留 ⏳" "0" "$(printf '%s' "$log" | grep -c '⏳' || true)"
-check_contains "finalize 后的评论仍可被复用（标记行在首行）" "$log" "-F body=$marker"
+check_contains "finalize 后首行仍是标记" "$log" "-F body=$marker"
 
 # finalize：标记属于其它运行 -> 不动（避免陈旧运行误标新运行）
 : > "$GH_LOG"

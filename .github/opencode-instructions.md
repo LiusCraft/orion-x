@@ -22,7 +22,7 @@
      gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$OPENCODE_PROGRESS_COMMENT_ID" -F body=@/tmp/opencode/progress.md
      ```
 
-- 评论第一行固定为环境变量 `OPENCODE_PROGRESS_MARKER` 的值（形如 `<!-- opencode:status:<运行 id> -->`，Markdown 渲染时不显示）；工作流靠它把后续运行接到同一条评论上，每次更新原样保留，不要改写或丢弃。
+- 评论第一行固定为环境变量 `OPENCODE_PROGRESS_MARKER` 的值（形如 `<!-- opencode:status:<运行 id> -->`，Markdown 渲染时不显示）；工作流靠它识别评论归属：已收尾的评论不会再被改动，未收尾（仍为 ⏳）的会被后续运行接管，每次更新原样保留，不要改写或丢弃。
 
 - **todo 更新与评论更新是同一个动作**：每次调用 todo 工具（勾选完成、新增、调整步骤）之后，立即把同一份清单写回 `/tmp/opencode/progress.md` 并 PATCH 评论——不要攒到阶段结束才更新：
 
