@@ -1,6 +1,6 @@
 # 新 issue 自动分诊：摘要、打标签、给出初步答复或补充信息清单。
 # 仅处理有写权限成员创建的 issue；需要仓库 secret OPENCODE_API_KEY。
-# 运行期间维护一条状态评论（原地更新、结束清理），见 .github/opencode-instructions.md。
+# 运行期间维护一条状态评论（原地更新、结束收尾为最终结论，多次运行复用同一条），见 .github/opencode-instructions.md 与 .github/opencode-progress-comment.sh。
 name: opencode triage
 
 on:
@@ -27,17 +27,14 @@ jobs:
         with:
           persist-credentials: false
 
-      # 运行期间保留一条状态评论，由智能体按运行约定原地更新，结束后删除。
-      - name: Create progress comment
+      # 状态评论：复用本 issue 上已有的 opencode 状态评论（首行标记定位），没有才新建；由智能体原地更新并收尾为最终结论。
+      - name: Create or reuse progress comment
         id: progress
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          body='⏳ opencode 正在分诊这个 issue…（[运行日志](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})）'
-          id=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
-            -f body="$body" --jq .id)
-          echo "id=$id" >> "$GITHUB_OUTPUT"
+          bash .github/opencode-progress-comment.sh create "${{ github.event.issue.number }}" "⏳ opencode 正在分诊这个 issue…" >> "$GITHUB_OUTPUT"
 
       # 以全局 AGENTS.md 形式注入本次运行的约定（进度评论、安全边界），不改动仓库文件。
       - name: Prepare opencode run instructions
@@ -54,6 +51,7 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENCODE_PROGRESS_COMMENT_ID: ${{ steps.progress.outputs.id }}
+          OPENCODE_PROGRESS_MARKER: "<!-- opencode:status:${{ github.run_id }} -->"
         with:
           model: opencode-go/deepseek-v4.1-flash
           variant: max
@@ -71,11 +69,10 @@ jobs:
                - 确认缺陷：指出可能涉及的模块，欢迎提交 PR。
             4. 不要修改代码，不要创建分支或 PR，不要关闭 issue；只允许按运行约定维护状态评论。
 
-      - name: Remove progress comment
+      # 收尾兜底：智能体已收尾（状态行不再是 ⏳）则不动；否则保留评论内容，仅标记为未收尾。
+      - name: Finalize progress comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [ -n "${{ steps.progress.outputs.id }}" ]; then
-            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/${{ steps.progress.outputs.id }}" || true
-          fi
+          PROGRESS_COMMENT_ID: ${{ steps.progress.outputs.id }}
+        run: bash .github/opencode-progress-comment.sh finalize
