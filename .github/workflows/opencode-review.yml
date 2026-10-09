@@ -1,0 +1,108 @@
+# PR 自动审查：打开 / 更新 / 重新打开 / 转为 Ready 时触发；草稿、bot 和 fork PR 跳过。
+# 只审查不修改（contents: read），审查结果以评论发布，并尝试提交行级评论。
+# 需要仓库 secret OPENCODE_API_KEY；fork PR 拿不到 secret，需维护者在 PR 评论 /oc review 手动触发。
+# 运行期间维护一条状态评论（原地更新、结束清理），见 .github/opencode-instructions.md。
+name: opencode review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  # contents 只读：即使模型误改文件也无法推送到 PR 分支。
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: opencode-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # fork PR 拿不到 secrets 且 GITHUB_TOKEN 只读，维护者可在 PR 评论 /oc review 手动触发；
+    # bot（如 Dependabot）触发的 PR 同样拿不到 secret，一并跳过。
+    if: |
+      github.event.pull_request.draft == false &&
+      !endsWith(github.actor, '[bot]') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # 运行期间保留一条状态评论，由智能体按运行约定原地更新，结束后删除。
+      - name: Create progress comment
+        id: progress
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body='⏳ opencode 正在审查这个 PR…（[运行日志](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})）'
+          id=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -f body="$body" --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      # 以全局 AGENTS.md 形式注入本次运行的约定（进度评论、安全边界），不改动仓库文件。
+      - name: Prepare opencode run instructions
+        run: |
+          config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+          mkdir -p "$config_dir"
+          cp .github/opencode-instructions.md "$config_dir/AGENTS.md"
+
+      - uses: anomalyco/opencode/github@latest
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_PROGRESS_COMMENT_ID: ${{ steps.progress.outputs.id }}
+        with:
+          model: opencode-go/deepseek-v4.1-flash
+          variant: max
+          use_github_token: true
+          prompt: |
+            你是 Orion-X 仓库的资深 Go 代码审查员。Orion-X 是面向多设备、多通道的实时语音智能体平台：Manager（Go + Gin + PostgreSQL，控制面）、wsserver（Go，实时语音 / Telegram 运行时）、Web 管理控制台（React）。仓库根目录的 AGENTS.md 定义了代码风格、提交与测试规范，审查时必须遵循。
+
+            先阅读 AGENTS.md，再基于真实 diff 审查：
+            1. 用 `gh pr diff` 获取完整 diff，或 `git fetch origin <base> --depth=50` 后 `git diff origin/<base>...HEAD`（base 分支见下方 PR 数据）。
+            2. 必要时读取改动文件的上下文、调用方和测试，确认问题真实存在；不要凭猜测下结论。
+            3. 只做审查：不要编辑、提交或推送任何文件，不要改变 PR 状态（按运行约定维护和清理状态评论除外）。
+
+            重点关注（按优先级）：
+            - 正确性：逻辑错误、边界条件、竞态、goroutine 或资源泄漏、错误处理遗漏。
+            - 并发与生命周期：context 传递、channel 关闭、锁与共享状态。
+            - 安全与隐私：注入、鉴权 / 越权、密钥泄漏、不安全随机数。
+            - 兼容性：API、WebSocket 协议、数据库 schema 的破坏性变更。
+            - 测试：关键行为缺少测试，或测试没有覆盖真正的风险。
+            - 项目规范：AGENTS.md 中容易在 review 中遗漏的约定。
+            gofmt、golangci-lint 能发现的问题不要报。
+
+            最终输出即发布到 PR 的审查报告，Markdown、中文（PR 主体为英文时用英文），格式：
+            ## 审查摘要
+            2-3 句：这个 PR 做了什么、整体评价。
+            ## 结论
+            从「✅ 可以合并 / 💡 有改进建议 / 🔴 建议修改后合并」中选一个。
+            ## 问题
+            按级别分组，每条包含 `文件:行`、问题描述、原因、具体修复建议（可附代码片段）：
+            - 🔴 必须修改
+            - 🟡 建议改进
+            - 🟢 可选优化
+            没有问题的级别写「无」。
+            ## 亮点
+            1-3 条真实优点，没有可省略本节。
+
+            可选行级评论（推荐但非必须，失败不影响结论）：对 🔴 问题，如果你能确定它落在本次 diff 新增或修改的行上，可把以下 JSON 写入 /tmp/opencode-review.json：
+            {"commit_id":"<git rev-parse HEAD 的结果>","event":"COMMENT","body":"opencode 自动审查：以下问题建议修改。","comments":[{"path":"internal/foo/bar.go","line":123,"side":"RIGHT","body":"问题与修复建议"}]}
+            然后执行：
+            gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews --input /tmp/opencode-review.json
+            约束：event 必须是 COMMENT，禁止 APPROVE / REQUEST_CHANGES；line 必须是 diff 右侧（新文件）行号；只提交 🔴 问题；最多尝试一次，失败或不确定就跳过并把内容并入报告。
+
+      - name: Remove progress comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ steps.progress.outputs.id }}" ]; then
+            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/${{ steps.progress.outputs.id }}" || true
+          fi

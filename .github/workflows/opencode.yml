@@ -1,0 +1,106 @@
+# 评论触发：包含 /oc 或 /opencode 的评论会启动 opencode 智能体，
+# 可解释 issue、审查指定代码，也可以按指令修改代码并提交到分支或 PR。
+# 需要仓库 secret OPENCODE_API_KEY；仅响应有写权限成员的评论。
+# 运行期间维护一条状态评论（原地更新、结束清理），见 .github/opencode-instructions.md。
+# 在途的 opencode 会用 👍 接管新的 /oc 评论，本工作流识别后跳过重复运行。
+# 注意：用 GITHUB_TOKEN 推送的提交不会触发其它 workflow，需要手动 re-run 或评论 /oc review。
+name: opencode
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+# 使用仓库内置 GITHUB_TOKEN（无需安装 GitHub App），权限按最小需要声明。
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: opencode-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  opencode:
+    # 仅响应有写权限成员的评论；忽略机器人自身的评论，避免循环触发。
+    if: |
+      !endsWith(github.event.comment.user.login, '[bot]') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+      (
+        contains(github.event.comment.body, ' /oc') ||
+        startsWith(github.event.comment.body, '/oc') ||
+        contains(github.event.comment.body, ' /opencode') ||
+        startsWith(github.event.comment.body, '/opencode')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # 在途的 opencode 运行发现新的 /oc 评论后会加 👍 接管；已接管的评论不再重复运行。
+      - name: Skip if handled by an in-flight run
+        id: handled
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request_review_comment" ]; then
+            endpoint="pulls/comments/${{ github.event.comment.id }}/reactions"
+          else
+            endpoint="issues/comments/${{ github.event.comment.id }}/reactions"
+          fi
+          count=$(gh api "repos/${{ github.repository }}/$endpoint" \
+            --jq '[.[] | select(.user.login == "github-actions[bot]" and .content == "+1")] | length')
+          if [ "$count" -gt 0 ]; then
+            echo "::notice::该评论已被在途的 opencode 运行接管，跳过重复运行"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 运行期间保留一条状态评论，由智能体按运行约定原地更新，结束后删除。
+      - name: Create progress comment
+        id: progress
+        if: steps.handled.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body='⏳ opencode 正在处理…（[运行日志](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})）'
+          id=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.issue.number || github.event.pull_request.number }}/comments" \
+            -f body="$body" --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      # 以全局 AGENTS.md 形式注入本次运行的约定（状态评论、会话分享、安全边界），不改动仓库文件。
+      - name: Prepare opencode run instructions
+        if: steps.handled.outputs.skip != 'true'
+        run: |
+          config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+          mkdir -p "$config_dir"
+          cp .github/opencode-instructions.md "$config_dir/AGENTS.md"
+
+      # GITHUB_TOKEN 模式下 opencode 不会配置 git 身份，这里预先配置，保证 /oc 修复类指令能提交。
+      - name: Configure git identity
+        if: steps.handled.outputs.skip != 'true'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - uses: anomalyco/opencode/github@latest
+        if: steps.handled.outputs.skip != 'true'
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_PROGRESS_COMMENT_ID: ${{ steps.progress.outputs.id }}
+        with:
+          model: opencode-go/deepseek-v4.1-flash
+          variant: max
+          use_github_token: true
+
+      - name: Remove progress comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ steps.progress.outputs.id }}" ]; then
+            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/${{ steps.progress.outputs.id }}" || true
+          fi
