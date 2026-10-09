@@ -3,7 +3,7 @@
 # 需要仓库 secret OPENCODE_API_KEY；仅响应有写权限成员的评论。
 # GITHUB_TOKEN 建 PR 需要仓库开启 Settings → Actions → General → Allow GitHub Actions to create and approve pull requests；
 # 未开启时改动类任务会在收尾建 PR 时失败（分支已推送，见运行日志）。
-# 运行期间维护一条状态评论（原地更新、结束收尾为最终结论），见 .github/opencode-instructions.md。
+# 运行期间维护一条状态评论（原地更新、结束收尾为最终结论，多次运行复用同一条），见 .github/opencode-instructions.md 与 .github/opencode-progress-comment.sh。
 # 在途的 opencode 会用 👍 接管新的 /oc 评论，本工作流识别后跳过重复运行。
 # 注意：用 GITHUB_TOKEN 推送的提交不会触发其它 workflow，需要手动 re-run 或评论 /oc review。
 name: opencode
@@ -59,18 +59,15 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # 运行期间保留一条状态评论，由智能体按运行约定原地更新并收尾为最终结论，结束时不删除。
-      - name: Create progress comment
+      # 状态评论：复用本 issue/PR 上已有的 opencode 状态评论（首行标记定位），没有才新建；由智能体原地更新并收尾为最终结论。
+      - name: Create or reuse progress comment
         id: progress
         if: steps.handled.outputs.skip != 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          body='⏳ opencode 正在处理…（[运行日志](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})）'
-          id=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.issue.number || github.event.pull_request.number }}/comments" \
-            -f body="$body" --jq .id)
-          echo "id=$id" >> "$GITHUB_OUTPUT"
+          bash .github/opencode-progress-comment.sh create "${{ github.event.issue.number || github.event.pull_request.number }}" "⏳ opencode 正在处理…" >> "$GITHUB_OUTPUT"
 
       # 以全局 AGENTS.md 形式注入本次运行的约定（状态评论、会话分享、安全边界），不改动仓库文件。
       - name: Prepare opencode run instructions
@@ -101,20 +98,10 @@ jobs:
           variant: max
           use_github_token: true
 
-      # 收尾兜底：智能体已收尾则不动；评论仍是进行中（失败、超时或被取消）则标记为未收尾。
+      # 收尾兜底：智能体已收尾（状态行不再是 ⏳）则不动；否则保留评论内容，仅标记为未收尾。
       - name: Finalize progress comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          id="${{ steps.progress.outputs.id }}"
-          if [ -z "$id" ]; then
-            exit 0
-          fi
-          body=$(gh api "repos/${{ github.repository }}/issues/comments/$id" --jq .body 2>/dev/null || true)
-          case "$body" in
-            *⏳*)
-              gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$id" \
-                -F body='❌ opencode 运行未收尾（失败、超时或被取消），详见[运行日志](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})。' || true
-              ;;
-          esac
+          PROGRESS_COMMENT_ID: ${{ steps.progress.outputs.id }}
+        run: bash .github/opencode-progress-comment.sh finalize
