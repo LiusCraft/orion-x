@@ -5,6 +5,7 @@
 ## 非交互环境
 
 - 不要使用提问、确认类工具（`question` 已被环境禁用），也不要等待用户输入。
+- 权限确认（permission ask）在 CI 中无人应答，会让本次运行永久挂起：不要调用任何会触发确认的操作；临时文件统一放在 `/tmp/opencode/` 下（先 `mkdir -p /tmp/opencode`），便于集中清理。
 - 需要决策时选择安全、可回退的方案，并在最终回答中说明你的取舍。
 
 ## 状态评论：同步 todo 进度（必须遵守）
@@ -13,17 +14,18 @@
 - 开始任何其他工作之前：
   1. 把任务拆成 5-10 个可勾选的具体步骤，并用 todo 工具（todowrite）维护这份计划；
   2. 用 `timeout 30 opencode session list --format json --max-count 1` 找到本次会话（最新一条），会话分享链接为 `https://opncd.ai/share/<会话 ID 的最后 8 个字符>`；命令失败就省略链接行；
-  3. 把链接、一行状态和 todo 清单写入 `/tmp/opencode-progress.md` 并同步到评论，例如：
+  3. 把链接、一行状态和 todo 清单写入 `/tmp/opencode/progress.md` 并同步到评论，例如：
 
      ```bash
-     printf '🔗 [会话分享](https://opncd.ai/share/xxxxxxxx)\n⏳ 正在审查\n\n- [ ] 读取 AGENTS.md\n- [ ] 获取 diff\n- [ ] 逐文件审查\n- [ ] 输出报告\n' > /tmp/opencode-progress.md
-     gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$OPENCODE_PROGRESS_COMMENT_ID" -F body=@/tmp/opencode-progress.md
+     mkdir -p /tmp/opencode
+     printf '🔗 [会话分享](https://opncd.ai/share/xxxxxxxx)\n⏳ 正在审查\n\n- [ ] 读取 AGENTS.md\n- [ ] 获取 diff\n- [ ] 逐文件审查\n- [ ] 输出报告\n' > /tmp/opencode/progress.md
+     gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$OPENCODE_PROGRESS_COMMENT_ID" -F body=@/tmp/opencode/progress.md
      ```
 
-- **todo 更新与评论更新是同一个动作**：每次调用 todo 工具（勾选完成、新增、调整步骤）之后，立即把同一份清单写回 `/tmp/opencode-progress.md` 并 PATCH 评论——不要攒到阶段结束才更新：
+- **todo 更新与评论更新是同一个动作**：每次调用 todo 工具（勾选完成、新增、调整步骤）之后，立即把同一份清单写回 `/tmp/opencode/progress.md` 并 PATCH 评论——不要攒到阶段结束才更新：
 
   ```bash
-  gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$OPENCODE_PROGRESS_COMMENT_ID" -F body=@/tmp/opencode-progress.md
+  gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$OPENCODE_PROGRESS_COMMENT_ID" -F body=@/tmp/opencode/progress.md
   ```
 
 - 清单保持简短（10 行以内），勾选状态用 `- [x]` / `- [ ]`；更新时保留已有的会话分享链接行。

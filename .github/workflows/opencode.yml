@@ -77,6 +77,9 @@ jobs:
           config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
           mkdir -p "$config_dir"
           cp .github/opencode-instructions.md "$config_dir/AGENTS.md"
+          # 全局配置（V1 permission 写法，适配 v1.18.x；升级 opencode 时需同步核对）：
+          # CI 无人应答权限确认（ask == 永久挂起），放行默认会 ask 的权限并禁用交互式提问工具。
+          cp .github/opencode-ci.json "$config_dir/opencode.json"
 
       # GITHUB_TOKEN 模式下 opencode 不会配置 git 身份，这里预先配置，保证 /oc 修复类指令能提交。
       - name: Configure git identity
