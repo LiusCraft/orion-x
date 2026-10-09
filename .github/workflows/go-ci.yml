@@ -1,12 +1,25 @@
+# 仅在 Go 相关文件变更时运行；前端、文档、skills 等变更不触发。
 name: Go CI
 
 on:
   push:
     branches:
       - main
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+      - .golangci.yml
+      - .github/workflows/go-ci.yml
   pull_request:
     branches:
       - main
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+      - .golangci.yml
+      - .github/workflows/go-ci.yml
 
 jobs:
   ci:
