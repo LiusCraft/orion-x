@@ -93,6 +93,7 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENCODE_PROGRESS_COMMENT_ID: ${{ steps.progress.outputs.id }}
+          OPENCODE_PROGRESS_MARKER: "<!-- opencode:status:${{ github.run_id }} -->"
         with:
           model: opencode-go/deepseek-v4.1-flash
           variant: max
