@@ -5,7 +5,7 @@
 ## 非交互环境
 
 - 不要使用提问、确认类工具（`question` 已被环境禁用），也不要等待用户输入。
-- 权限确认（permission ask）在 CI 中无人应答，会让本次运行永久挂起：不要直接用 read / write / edit 等工具访问 `/tmp` 根目录下的文件；临时文件一律放在 `/tmp/opencode/` 下（该目录已默认放行），先 `mkdir -p /tmp/opencode`。
+- 权限确认（permission ask）在 CI 中无人应答，会让本次运行永久挂起：不要调用任何会触发确认的操作；临时文件统一放在 `/tmp/opencode/` 下（先 `mkdir -p /tmp/opencode`），便于集中清理。
 - 需要决策时选择安全、可回退的方案，并在最终回答中说明你的取舍。
 
 ## 状态评论：同步 todo 进度（必须遵守）
