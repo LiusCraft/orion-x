@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Zap, Plus, CheckCircle2, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -6,79 +7,98 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 const MARKET_SKILLS = [
 	{
 		id: "s1",
-		name: "情绪分析",
+		nameKey: "skills.market.sentiment.name",
 		icon: "💬",
-		tags: ["NLP", "官方"],
-		desc: "分析用户输入的情感倾向，返回情绪类型和置信度，用于对话情感感知。",
+		tags: [
+			{ key: "skills.tags.nlp" },
+			{ key: "skills.tags.official", official: true },
+		],
+		descKey: "skills.market.sentiment.desc",
 		star: 4.8,
 		installed: true,
 	},
 	{
 		id: "s2",
-		name: "文本摘要",
+		nameKey: "skills.market.summary.name",
 		icon: "📝",
-		tags: ["NLP", "官方"],
-		desc: "将长文本压缩为简洁摘要，支持中英双语，可配置摘要长度比例。",
+		tags: [
+			{ key: "skills.tags.nlp" },
+			{ key: "skills.tags.official", official: true },
+		],
+		descKey: "skills.market.summary.desc",
 		star: 4.7,
 		installed: true,
 	},
 	{
 		id: "s3",
-		name: "实体识别",
+		nameKey: "skills.market.entities.name",
 		icon: "🏷️",
-		tags: ["NLP", "官方"],
-		desc: "从文本中提取人名、地点、组织、时间等实体信息，返回结构化数据。",
+		tags: [
+			{ key: "skills.tags.nlp" },
+			{ key: "skills.tags.official", official: true },
+		],
+		descKey: "skills.market.entities.desc",
 		star: 4.6,
 		installed: false,
 	},
 	{
 		id: "s4",
-		name: "关键词提取",
+		nameKey: "skills.market.keywords.name",
 		icon: "🔑",
-		tags: ["NLP"],
-		desc: "从文档中自动提取关键词和主题词，支持 TF-IDF 和 TextRank 算法。",
+		tags: [{ key: "skills.tags.nlp" }],
+		descKey: "skills.market.keywords.desc",
 		star: 4.5,
 		installed: false,
 	},
 	{
 		id: "s5",
-		name: "代码审查",
+		nameKey: "skills.market.codeReview.name",
 		icon: "🔍",
-		tags: ["编程", "官方"],
-		desc: "对提交的代码进行安全、性能和最佳实践检查，输出问题列表和建议。",
+		tags: [
+			{ key: "skills.tags.programming" },
+			{ key: "skills.tags.official", official: true },
+		],
+		descKey: "skills.market.codeReview.desc",
 		star: 4.9,
 		installed: false,
 	},
 	{
 		id: "s6",
-		name: "图像描述",
+		nameKey: "skills.market.imageCaption.name",
 		icon: "🖼️",
-		tags: ["多模态"],
-		desc: "为图片生成自然语言描述，支持场景、物体、文字识别。",
+		tags: [{ key: "skills.tags.multimodal" }],
+		descKey: "skills.market.imageCaption.desc",
 		star: 4.4,
 		installed: false,
 	},
 	{
 		id: "s7",
-		name: "翻译专家",
+		nameKey: "skills.market.translation.name",
 		icon: "🌐",
-		tags: ["语言", "官方"],
-		desc: "高质量多语言翻译，支持 50+ 种语言，保留格式和术语一致性。",
+		tags: [
+			{ key: "skills.tags.language" },
+			{ key: "skills.tags.official", official: true },
+		],
+		descKey: "skills.market.translation.desc",
 		star: 4.8,
 		installed: false,
 	},
 	{
 		id: "s8",
-		name: "SQL 生成",
+		nameKey: "skills.market.sqlGen.name",
 		icon: "🗄️",
-		tags: ["数据库", "编程"],
-		desc: "根据自然语言描述自动生成 SQL 查询，支持多种数据库方言。",
+		tags: [
+			{ key: "skills.tags.database" },
+			{ key: "skills.tags.programming" },
+		],
+		descKey: "skills.market.sqlGen.desc",
 		star: 4.7,
 		installed: false,
 	},
 ];
 
 export default function SkillsPage() {
+	const { t } = useTranslation(["components", "common"]);
 	const [installed, setInstalled] = useState<Set<string>>(
 		new Set(["s1", "s2"]),
 	);
@@ -97,9 +117,11 @@ export default function SkillsPage() {
 			<div className="border-b border-zinc-800/80 px-8 py-5">
 				<div className="flex items-center justify-between">
 					<div>
-						<h1 className="text-lg font-semibold text-white">SKILL 管理</h1>
+						<h1 className="text-lg font-semibold text-white">
+							{t("skills.title")}
+						</h1>
 						<p className="text-sm text-zinc-500 mt-0.5">
-							预置能力模块，可复用在多个智能体中
+							{t("skills.subtitle")}
 						</p>
 					</div>
 					<Button
@@ -107,7 +129,7 @@ export default function SkillsPage() {
 						className="h-9 px-4 text-sm border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white gap-1.5"
 					>
 						<Plus className="w-4 h-4" />
-						自定义 SKILL
+						{t("skills.custom")}
 					</Button>
 				</div>
 			</div>
@@ -119,13 +141,13 @@ export default function SkillsPage() {
 							value="market"
 							className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
 						>
-							市场
+							{t("market")}
 						</TabsTrigger>
 						<TabsTrigger
 							value="mine"
 							className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
 						>
-							已有 ({installed.size})
+							{t("skills.tab.installed", { total: installed.size })}
 						</TabsTrigger>
 					</TabsList>
 
@@ -146,20 +168,20 @@ export default function SkillsPage() {
 											</span>
 										</div>
 										<p className="font-medium text-sm text-white mb-1">
-											{sk.name}
+											{t(sk.nameKey)}
 										</p>
 										<div className="flex flex-wrap gap-1 mb-2">
-											{sk.tags.map((t) => (
+											{sk.tags.map((tag) => (
 												<span
-													key={t}
-													className={`text-[10px] px-1.5 py-0.5 rounded border ${t === "官方" ? "bg-violet-600/15 text-violet-400 border-violet-500/20" : "bg-zinc-800 text-zinc-500 border-zinc-700/50"}`}
+													key={tag.key}
+													className={`text-[10px] px-1.5 py-0.5 rounded border ${tag.official ? "bg-violet-600/15 text-violet-400 border-violet-500/20" : "bg-zinc-800 text-zinc-500 border-zinc-700/50"}`}
 												>
-													{t}
+													{t(tag.key)}
 												</span>
 											))}
 										</div>
 										<p className="text-xs text-zinc-500 leading-relaxed mb-4 line-clamp-2">
-											{sk.desc}
+											{t(sk.descKey)}
 										</p>
 										<Button
 											size="sm"
@@ -174,10 +196,10 @@ export default function SkillsPage() {
 											{isInstalled ? (
 												<>
 													<CheckCircle2 className="w-3 h-3 mr-1" />
-													已安装
+													{t("installed")}
 												</>
 											) : (
-												"安装"
+												t("install")
 											)}
 										</Button>
 									</div>
@@ -192,9 +214,11 @@ export default function SkillsPage() {
 								<div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
 									<Zap className="w-6 h-6 text-zinc-600" />
 								</div>
-								<p className="text-zinc-400 text-sm">还没有安装任何 SKILL</p>
+								<p className="text-zinc-400 text-sm">
+									{t("skills.mineEmpty")}
+								</p>
 								<p className="text-zinc-600 text-xs mt-1">
-									前往市场选择需要的能力模块
+									{t("skills.mineEmptyHint")}
 								</p>
 							</div>
 						) : (
@@ -208,24 +232,24 @@ export default function SkillsPage() {
 											<span className="text-2xl">{sk.icon}</span>
 											<span className="flex items-center gap-1 text-[11px] text-emerald-400">
 												<CheckCircle2 className="w-3 h-3" />
-												已安装
+												{t("installed")}
 											</span>
 										</div>
 										<p className="font-medium text-sm text-white mb-1">
-											{sk.name}
+											{t(sk.nameKey)}
 										</p>
 										<p className="text-xs text-zinc-500 leading-relaxed mb-4 line-clamp-2">
-											{sk.desc}
+											{t(sk.descKey)}
 										</p>
 										<div className="flex gap-1.5">
 											<button className="flex-1 text-xs text-zinc-500 hover:text-zinc-300 py-1.5 rounded hover:bg-zinc-800 transition-colors cursor-pointer border border-zinc-800 hover:border-zinc-700">
-												配置
+												{t("skills.configure")}
 											</button>
 											<button
 												onClick={() => toggle(sk.id)}
 												className="flex-1 text-xs text-zinc-500 hover:text-red-400 py-1.5 rounded hover:bg-red-400/10 transition-colors cursor-pointer border border-zinc-800 hover:border-red-400/30"
 											>
-												卸载
+												{t("skills.uninstall")}
 											</button>
 										</div>
 									</div>

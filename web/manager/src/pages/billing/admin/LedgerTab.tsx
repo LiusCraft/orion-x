@@ -5,12 +5,12 @@
 // reserve / release 只动冻结，balance_after 不变。
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ArrowLeftRight, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { SimpleSelect } from "@/components/ui/select";
 import { billingAdminApi, type BillingAccount, type BillingLedger } from "@/lib/api";
 import {
-	BILLING_DISABLED_TITLE,
 	billingErrorMessage,
 	directionLabel,
 	formatMicro,
@@ -52,6 +52,7 @@ const LEDGER_KINDS = [
 ];
 
 export default function LedgerTab() {
+	const { t } = useTranslation(["billingAdmin", "common"]);
 	const [rows, setRows] = useState<BillingLedger[]>([]);
 	const [total, setTotal] = useState(0);
 	const [page, setPage] = useState(1);
@@ -108,7 +109,10 @@ export default function LedgerTab() {
 					setDisabled(true);
 					return;
 				}
-				setBanner({ kind: "error", text: billingErrorMessage(err, "加载流水失败") });
+				setBanner({
+					kind: "error",
+					text: billingErrorMessage(err, t("ledger.loadFailed")),
+				});
 			})
 			.finally(() => {
 				if (!cancelled) setLoading(false);
@@ -116,15 +120,15 @@ export default function LedgerTab() {
 		return () => {
 			cancelled = true;
 		};
-	}, [page, accountId, kind, from, to, reloadKey]);
+	}, [page, accountId, kind, from, to, reloadKey, t]);
 
 	if (disabled) {
 		return (
 			<Panel bodyClassName="p-0">
 				<EmptyState
 					icon={ArrowLeftRight}
-					title={BILLING_DISABLED_TITLE}
-					hint="服务端没有开启计费模块（billing.enabled），流水不可用。"
+					title={t("billing:disabledTitle")}
+					hint={t("ledger.disabledHint")}
 				/>
 			</Panel>
 		);
@@ -146,7 +150,7 @@ export default function LedgerTab() {
 					}}
 					className="w-64"
 					size="sm"
-					placeholder="全部账户"
+					placeholder={t("shared.allAccounts")}
 					options={accounts.map((account) => ({
 						value: account.id,
 						label: `${subjectTypeLabel(account.subject_type)} · ${account.id}`,
@@ -160,7 +164,7 @@ export default function LedgerTab() {
 					}}
 					className="w-32"
 					size="sm"
-					placeholder="全部类型"
+					placeholder={t("ledger.kindPlaceholder")}
 					options={LEDGER_KINDS.map((value) => ({
 						value,
 						label: ledgerKindLabel(value),
@@ -195,7 +199,7 @@ export default function LedgerTab() {
 							}}
 							className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
 						>
-							清空
+							{t("ledger.clear")}
 						</button>
 					)}
 				</div>
@@ -208,13 +212,13 @@ export default function LedgerTab() {
 						className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
 						strokeWidth={1.5}
 					/>
-					刷新
+					{t("common:action.refresh")}
 				</button>
 			</FilterBar>
 
 			<Panel
-				title="账本流水"
-				description="append-only：只增不改。reserve / release 只动冻结，balance_after 不变"
+				title={t("ledger.panelTitle")}
+				description={t("ledger.panelDescription")}
 				bodyClassName="p-0"
 			>
 				{loading ? (
@@ -222,22 +226,22 @@ export default function LedgerTab() {
 				) : rows.length === 0 ? (
 					<EmptyState
 						icon={ArrowLeftRight}
-						title="没有匹配的流水"
-						hint="换个账户或时间段再试；用量结算后会写 charge 流水，人工操作写 adjust 流水。"
+						title={t("ledger.emptyTitle")}
+						hint={t("ledger.emptyHint")}
 					/>
 				) : (
 					<TableShell
 						head={
 							<>
-								<Th>时间</Th>
-								<Th>账户</Th>
-								<Th>方向</Th>
-								<Th className="text-right">金额</Th>
-								<Th className="text-right">余额后</Th>
-								<Th>类型</Th>
-								<Th>计费项</Th>
-								<Th>关联</Th>
-								<Th>备注</Th>
+								<Th>{t("shared.time")}</Th>
+								<Th>{t("shared.account")}</Th>
+								<Th>{t("ledger.columnDirection")}</Th>
+								<Th className="text-right">{t("shared.amount")}</Th>
+								<Th className="text-right">{t("ledger.columnBalanceAfter")}</Th>
+								<Th>{t("ledger.columnKind")}</Th>
+								<Th>{t("shared.item")}</Th>
+								<Th>{t("ledger.columnRef")}</Th>
+								<Th>{t("shared.note")}</Th>
 							</>
 						}
 					>
@@ -320,7 +324,7 @@ export default function LedgerTab() {
 											</span>
 											{row.creator && (
 												<span className="text-[11px] text-zinc-600 truncate">
-													操作人 {row.creator}
+													{t("ledger.creator", { name: row.creator })}
 												</span>
 											)}
 										</div>

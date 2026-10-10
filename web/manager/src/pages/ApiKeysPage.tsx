@@ -11,6 +11,7 @@
 //   ③ can_create: false 时创建入口置灰（灰度期只允许管理员），别等提交后才吃 403。
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	AlertCircle,
 	CheckCircle2,
@@ -42,7 +43,7 @@ import {
 } from "@/lib/api";
 import { useDocumentTitle } from "@/lib/title";
 import {
-	ADMIN_ONLY_HINT,
+	ADMIN_ONLY_HINT_KEY,
 	apiKeyErrorText,
 	apiKeyStatus,
 	apiKeyStatusLabel,
@@ -77,6 +78,7 @@ interface ScopeSection {
 }
 
 export default function ApiKeysPage() {
+	const { t } = useTranslation(["account", "common"]);
 	useDocumentTitle("API Keys");
 
 	const [catalog, setCatalog] = useState<ApiKeyCatalog | null>(null);
@@ -119,7 +121,7 @@ export default function ApiKeysPage() {
 				setLoadFailed(true);
 				setBanner({
 					kind: "error",
-					text: apiKeyErrorText(err, "加载 Key 列表失败，请重试"),
+					text: apiKeyErrorText(err, t("loadFailed.failed")),
 				});
 			})
 			.finally(() => {
@@ -158,7 +160,7 @@ export default function ApiKeysPage() {
 			.writeText(createdKey)
 			.then(() => setCopied(true))
 			.catch(() =>
-				setBanner({ kind: "error", text: "复制失败，请手动选中 Key 复制" }),
+				setBanner({ kind: "error", text: t("create.copyFailed") }),
 			);
 	};
 
@@ -173,7 +175,7 @@ export default function ApiKeysPage() {
 			setRevokeTarget(null);
 			// 撤销是软删：刷新后这一行还在，只是状态变成「已撤销」。
 			refresh();
-			setBanner({ kind: "ok", text: `已撤销「${target.name}」` });
+			setBanner({ kind: "ok", text: t("revoke.done", { name: target.name }) });
 		} catch (err) {
 			setBanner({ kind: "error", text: revokeKeyErrorText(err) });
 		} finally {
@@ -187,18 +189,18 @@ export default function ApiKeysPage() {
 				<div>
 					<h1 className="text-lg font-semibold text-white">API Keys</h1>
 					<p className="text-sm text-zinc-500 mt-0.5">
-						管理用于调用 Orion-X API 的访问密钥
+						{t("subtitle")}
 					</p>
 				</div>
 				{!disabled && (
 					<Button
 						onClick={() => setCreateOpen(true)}
 						disabled={!canCreate}
-						title={canCreate ? undefined : ADMIN_ONLY_HINT}
+						title={canCreate ? undefined : t(ADMIN_ONLY_HINT_KEY)}
 						className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
 					>
 						<Plus className="w-4 h-4" />
-						新建 Key
+						{t("createKey")}
 					</Button>
 				)}
 			</div>
@@ -214,8 +216,8 @@ export default function ApiKeysPage() {
 					<Panel bodyClassName="p-0">
 						<EmptyState
 							icon={KeyRound}
-							title="API Key 暂未开放"
-							hint="当前环境还没有开通 API Key 功能；开通后可以在这里创建、查看与撤销 Key。"
+							title={t("disabled.title")}
+							hint={t("disabled.hint")}
 						/>
 					</Panel>
 				</div>
@@ -236,7 +238,7 @@ export default function ApiKeysPage() {
 						/>
 						<div className="flex-1 min-w-0">
 							<p className="text-sm text-white font-medium mb-1">
-								API Key 已创建，请立即复制保存
+								{t("created.title")}
 							</p>
 							<p className="text-xs font-mono text-emerald-300 truncate">
 								{createdKey}
@@ -251,18 +253,18 @@ export default function ApiKeysPage() {
 							{copied ? (
 								<>
 									<CheckCircle2 className="w-3 h-3 mr-1" />
-									已复制
+									{t("common:action.copied")}
 								</>
 							) : (
 								<>
 									<Copy className="w-3 h-3 mr-1" />
-									复制
+									{t("common:action.copy")}
 								</>
 							)}
 						</Button>
 						<button
 							onClick={() => setCreatedKey(null)}
-							aria-label="关闭提示"
+							aria-label={t("created.close")}
 							className="text-zinc-500 hover:text-zinc-300 cursor-pointer ml-1 text-lg leading-none"
 						>
 							×
@@ -272,7 +274,8 @@ export default function ApiKeysPage() {
 
 				{!loading && !canCreate && (
 					<Hint icon={Shield}>
-						{ADMIN_ONLY_HINT}已有的 Key 不受影响，仍可正常使用与撤销。
+						{t(ADMIN_ONLY_HINT_KEY)}
+						{t("adminHintExtra")}
 					</Hint>
 				)}
 
@@ -280,22 +283,22 @@ export default function ApiKeysPage() {
 
 				{loading && keys.length === 0 ? (
 					<Panel bodyClassName="p-0">
-						<LoadingBlock label="加载 Key 列表中..." />
+						<LoadingBlock label={t("loadFailed.loading")} />
 					</Panel>
 				) : loadFailed && keys.length === 0 ? (
 					<Panel bodyClassName="p-0">
 						<EmptyState
 							icon={AlertCircle}
-							title="列表加载失败"
-							hint="请刷新页面重试；多次失败请联系管理员。"
+							title={t("loadFailed.title")}
+							hint={t("loadFailed.hint")}
 						/>
 					</Panel>
 				) : keys.length === 0 ? (
 					<Panel bodyClassName="p-0">
 						<EmptyState
 							icon={KeyRound}
-							title="还没有 API Key"
-							hint="创建 Key 后，脚本与流水线就能用它访问自己的智能体、设备与数据。"
+							title={t("empty.title")}
+							hint={t("empty.hint")}
 							action={
 								canCreate ? (
 									<Button
@@ -303,7 +306,7 @@ export default function ApiKeysPage() {
 										className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-4 text-xs gap-1.5"
 									>
 										<Plus className="w-3.5 h-3.5" />
-										新建 Key
+										{t("createKey")}
 									</Button>
 								) : undefined
 							}
@@ -311,8 +314,8 @@ export default function ApiKeysPage() {
 					</Panel>
 				) : (
 					<Panel
-						title="我的 Key"
-						description={`共 ${keys.length} 个`}
+						title={t("panel.title")}
+						description={t("panel.count", { total: keys.length })}
 						actions={
 							<button
 								onClick={refresh}
@@ -323,7 +326,7 @@ export default function ApiKeysPage() {
 									className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
 									strokeWidth={1.5}
 								/>
-								刷新
+								{t("common:action.refresh")}
 							</button>
 						}
 						bodyClassName="p-0"
@@ -331,14 +334,14 @@ export default function ApiKeysPage() {
 						<TableShell
 							head={
 								<>
-									<Th>名称</Th>
-									<Th>Key（脱敏）</Th>
-									<Th>权限</Th>
-									<Th>状态</Th>
-									<Th>调用次数</Th>
-									<Th>最后使用</Th>
-									<Th>创建时间</Th>
-									<Th className="text-right">操作</Th>
+									<Th>{t("common:field.name")}</Th>
+									<Th>{t("table.maskedKey")}</Th>
+									<Th>{t("table.scopes")}</Th>
+									<Th>{t("common:field.status")}</Th>
+									<Th>{t("table.calls")}</Th>
+									<Th>{t("table.lastUsed")}</Th>
+									<Th>{t("common:field.createdAt")}</Th>
+									<Th className="text-right">{t("common:field.actions")}</Th>
 								</>
 							}
 						>
@@ -407,11 +410,11 @@ export default function ApiKeysPage() {
 											) : (
 												<button
 													onClick={() => setRevokeTarget(item)}
-													aria-label={`撤销 ${item.name}`}
+													aria-label={t("revoke.actionWithName", { name: item.name })}
 													className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-red-400 px-1.5 py-1 rounded hover:bg-red-400/10 transition-colors cursor-pointer"
 												>
 													<Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
-													撤销
+													{t("revoke.action")}
 												</button>
 											)}
 										</Td>
@@ -428,8 +431,7 @@ export default function ApiKeysPage() {
 						strokeWidth={1.5}
 					/>
 					<p className="text-xs text-zinc-500 leading-relaxed">
-						API Key 创建后仅显示一次，请立即复制保存到安全位置。不要将 Key
-						提交到代码库或分享给他人。如发现泄露请立即撤销并新建。
+						{t("securityNote")}
 					</p>
 				</div>
 			</div>
@@ -464,6 +466,7 @@ function CreateKeyDialog({
 	onClose: () => void;
 	onCreated: (created: ApiKeyCreated) => void;
 }) {
+	const { t } = useTranslation(["account", "common"]);
 	const [name, setName] = useState("");
 	const [checked, setChecked] = useState<Set<string>>(() => {
 		// 打开就先勾上服务端标了 default 的那批权限。
@@ -564,42 +567,44 @@ function CreateKeyDialog({
 				<DialogHeader>
 					<DialogTitle className="text-white flex items-center gap-2">
 						<KeyRound className="w-4 h-4 text-violet-400" strokeWidth={1.5} />
-						新建 API Key
+						{t("create.title")}
 					</DialogTitle>
 				</DialogHeader>
 
 				<div className="space-y-4 py-2">
 					<div className="space-y-1.5">
 						<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-							名称
+							{t("common:field.name")}
 						</Label>
 						<Input
 							value={name}
 							onChange={(e) => setName(e.target.value)}
-							placeholder="例：生产环境"
+							placeholder={t("create.namePlaceholder")}
 							maxLength={64}
 							autoFocus
 							onKeyDown={(e) => e.key === "Enter" && submit()}
 						/>
 						<p className="text-[11px] text-zinc-600">
-							用于区分用途，最多 64 个字。
+							{t("create.nameHint")}
 						</p>
 					</div>
 
 					<div className="space-y-2">
 						<div className="flex items-center justify-between gap-2">
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-								权限范围
+								{t("create.scopes")}
 							</Label>
 							<div className="flex items-center gap-3 text-[11px]">
-								<span className="text-zinc-500">已选 {checked.size} 个权限</span>
+								<span className="text-zinc-500">
+									{t("create.selected", { total: checked.size })}
+								</span>
 								<button
 									type="button"
 									onClick={selectAllVisible}
 									disabled={visible.length === 0}
 									className="text-violet-400 hover:text-violet-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
 								>
-									全选
+									{t("create.selectAll")}
 								</button>
 								<button
 									type="button"
@@ -607,7 +612,7 @@ function CreateKeyDialog({
 									disabled={checked.size === 0}
 									className="text-zinc-400 hover:text-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
 								>
-									清空
+									{t("create.clear")}
 								</button>
 							</div>
 						</div>
@@ -638,7 +643,7 @@ function CreateKeyDialog({
 							<Input
 								value={query}
 								onChange={(e) => setQuery(e.target.value)}
-								placeholder="搜索权限"
+								placeholder={t("create.searchPlaceholder")}
 								className="pl-8"
 							/>
 						</div>
@@ -646,7 +651,7 @@ function CreateKeyDialog({
 						<div className="max-h-64 overflow-y-auto rounded-lg border border-zinc-800 divide-y divide-zinc-800/70">
 							{sections.length === 0 ? (
 								<p className="px-3 py-6 text-center text-xs text-zinc-600">
-									没有匹配的权限
+									{t("create.noMatch")}
 								</p>
 							) : (
 								sections.map((section) => (
@@ -692,14 +697,14 @@ function CreateKeyDialog({
 						onClick={onClose}
 						className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
 					>
-						取消
+						{t("common:action.cancel")}
 					</Button>
 					<Button
 						onClick={submit}
 						disabled={!canSubmit}
 						className="bg-violet-600 hover:bg-violet-500 text-white"
 					>
-						{submitting ? "创建中..." : "创建"}
+						{submitting ? t("common:action.creating") : t("common:action.create")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>
@@ -719,13 +724,14 @@ function RevokeKeyDialog({
 	onClose: () => void;
 	onConfirm: () => void;
 }) {
+	const { t } = useTranslation(["account", "common"]);
 	return (
 		<Dialog open onOpenChange={(open: boolean) => !open && !busy && onClose()}>
 			<DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-sm">
 				<DialogHeader>
 					<DialogTitle className="text-white flex items-center gap-2">
 						<Trash2 className="w-4 h-4 text-red-400" strokeWidth={1.5} />
-						撤销 API Key
+						{t("revoke.title")}
 					</DialogTitle>
 				</DialogHeader>
 
@@ -737,7 +743,7 @@ function RevokeKeyDialog({
 						</p>
 					</div>
 					<p className="text-sm text-zinc-400 leading-relaxed">
-						撤销后使用这把 Key 的服务会立即无法调用，且无法恢复。如果只是担心泄露，撤销后请及时新建一把替换。
+						{t("revoke.warning")}
 					</p>
 				</div>
 
@@ -748,14 +754,14 @@ function RevokeKeyDialog({
 						disabled={busy}
 						className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
 					>
-						取消
+						{t("common:action.cancel")}
 					</Button>
 					<Button
 						onClick={onConfirm}
 						disabled={busy}
 						className="bg-red-600 hover:bg-red-500 text-white"
 					>
-						{busy ? "撤销中..." : "确认撤销"}
+						{busy ? t("revoke.revoking") : t("revoke.confirm")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

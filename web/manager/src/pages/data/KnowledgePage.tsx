@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Trash2,
   Upload,
@@ -37,31 +38,31 @@ import { useDocumentTitle } from "@/lib/title";
 
 const STATUS_MAP: Record<
   string,
-  { label: string; icon: React.ElementType; cls: string }
+  { key: string; icon: React.ElementType; cls: string }
 > = {
-  ready: { label: "已索引", icon: CheckCircle2, cls: "text-emerald-400" },
-  pending: { label: "等待中", icon: Clock, cls: "text-zinc-400" },
+  ready: { key: "docStatus.ready", icon: CheckCircle2, cls: "text-emerald-400" },
+  pending: { key: "docStatus.pending", icon: Clock, cls: "text-zinc-400" },
   parsing: {
-    label: "解析中",
+    key: "docStatus.parsing",
     icon: Loader2,
     cls: "text-amber-400 animate-spin",
   },
   chunking: {
-    label: "分块中",
+    key: "docStatus.chunking",
     icon: Loader2,
     cls: "text-amber-400 animate-spin",
   },
   embedding: {
-    label: "向量化",
+    key: "docStatus.embedding",
     icon: Loader2,
     cls: "text-amber-400 animate-spin",
   },
   storing: {
-    label: "存储中",
+    key: "docStatus.storing",
     icon: Loader2,
     cls: "text-amber-400 animate-spin",
   },
-  error: { label: "失败", icon: AlertCircle, cls: "text-red-400" },
+  error: { key: "docStatus.error", icon: AlertCircle, cls: "text-red-400" },
 };
 
 function formatSize(chars: number) {
@@ -71,7 +72,9 @@ function formatSize(chars: number) {
 }
 
 export default function KnowledgePage() {
-  useDocumentTitle("知识库");
+  const { t } = useTranslation(["data", "common"]);
+
+  useDocumentTitle(t("knowledge.title"));
 
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [loadingKBs, setLoadingKBs] = useState(true);
@@ -196,7 +199,7 @@ export default function KnowledgePage() {
         setKbDesc("");
         loadAllKBs();
       } else {
-        alert("请先创建至少一个智能体");
+        alert(t("knowledge.createAgentFirst"));
       }
     } catch {
       /* silently fail */
@@ -205,7 +208,7 @@ export default function KnowledgePage() {
 
   // ── Delete KB ──
   const handleDeleteKB = async (kbId: string) => {
-    if (!confirm("确认删除该知识库及其所有文档？")) return;
+    if (!confirm(t("knowledge.confirmDeleteKB"))) return;
     setDeleting((p) => new Set(p).add(kbId));
     try {
       await knowledgeApi.deleteKB(kbId);
@@ -254,7 +257,7 @@ export default function KnowledgePage() {
 
   // ── Delete doc ──
   const handleDeleteDoc = async (docId: string) => {
-    if (!confirm("确认删除该文档？")) return;
+    if (!confirm(t("knowledge.confirmDeleteDoc"))) return;
     setDeleting((p) => new Set(p).add(docId));
     try {
       await knowledgeApi.deleteDoc(docId);
@@ -312,9 +315,11 @@ export default function KnowledgePage() {
       <div className="border-b border-zinc-800/80 px-8 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">知识库</h1>
+            <h1 className="text-lg font-semibold text-white">
+              {t("knowledge.title")}
+            </h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              独立的知识库，可绑定到任意智能体
+              {t("knowledge.subtitle")}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -324,11 +329,11 @@ export default function KnowledgePage() {
               className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-3 text-sm gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
-              新建知识库
+              {t("knowledge.createKB")}
             </Button>
             <span className="text-sm text-zinc-500 shrink-0 ml-2">
               <BookOpen className="w-4 h-4 text-zinc-600 inline mr-1" />
-              {kbs.length} 个知识库
+              {t("knowledge.kbCount", { n: kbs.length })}
             </span>
           </div>
         </div>
@@ -337,7 +342,7 @@ export default function KnowledgePage() {
           <Input
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            placeholder="搜索知识库..."
+            placeholder={t("knowledge.searchPlaceholder")}
             className="pl-9 h-9 text-sm "
           />
         </div>
@@ -356,10 +361,10 @@ export default function KnowledgePage() {
               <BookOpen className="w-6 h-6 text-zinc-600" />
             </div>
             <p className="text-zinc-400 text-sm">
-              {searchText ? "没有匹配的知识库" : "暂无知识库"}
+              {searchText ? t("knowledge.noMatch") : t("knowledge.empty")}
             </p>
             <p className="text-zinc-600 text-xs mt-1">
-              创建知识库后即可上传文档
+              {t("knowledge.emptyHint")}
             </p>
           </div>
         )}
@@ -392,7 +397,7 @@ export default function KnowledgePage() {
                       </span>
                     )}
                     <span className="text-xs text-zinc-600 font-mono">
-                      {kb.embedding_model_id || "未配置"}
+                      {kb.embedding_model_id || t("common:state.notConfigured")}
                     </span>
                     <button
                       onClick={(e) => {
@@ -419,7 +424,7 @@ export default function KnowledgePage() {
                           className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 h-7 px-3 text-xs gap-1 border border-zinc-700"
                         >
                           <Upload className="w-3 h-3" />
-                          上传文件
+                          {t("knowledge.uploadFile")}
                         </Button>
                         <Button
                           size="sm"
@@ -430,10 +435,10 @@ export default function KnowledgePage() {
                           className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 h-7 px-3 text-xs gap-1 border border-zinc-700"
                         >
                           <Link2 className="w-3 h-3" />
-                          导入 URL
+                          {t("knowledge.importURL")}
                         </Button>
                         <span className="ml-auto text-xs text-zinc-600">
-                          {docs.length} 个文档
+                          {t("knowledge.docCount", { n: docs.length })}
                         </span>
                       </div>
 
@@ -443,7 +448,7 @@ export default function KnowledgePage() {
                         <Input
                           value={kbSearchText}
                           onChange={(e) => setKbSearchText(e.target.value)}
-                          placeholder="搜索知识库内容..."
+                          placeholder={t("knowledge.searchContentPlaceholder")}
                           className="flex-1 h-7 text-xs "
                           onKeyDown={(e) => {
                             if (e.key === "Enter") handleKBSearch(kb.id);
@@ -460,7 +465,7 @@ export default function KnowledgePage() {
                           ) : (
                             <Search className="w-3 h-3" />
                           )}
-                          检索
+                          {t("knowledge.retrieve")}
                         </Button>
                       </div>
 
@@ -478,7 +483,9 @@ export default function KnowledgePage() {
                                   {r.document_name}
                                 </span>
                                 <span className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded ml-auto shrink-0">
-                                  得分 {(r.score * 100).toFixed(0)}%
+                                  {t("knowledge.score", {
+                                    score: (r.score * 100).toFixed(0),
+                                  })}
                                 </span>
                               </div>
                               <p className="text-sm text-zinc-300 leading-relaxed">
@@ -495,7 +502,7 @@ export default function KnowledgePage() {
                               }}
                               className="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
                             >
-                              清除结果
+                              {t("knowledge.clearResults")}
                             </button>
                           </div>
                         </div>
@@ -507,7 +514,7 @@ export default function KnowledgePage() {
                         </div>
                       ) : docs.length === 0 ? (
                         <div className="px-4 py-8 text-center text-xs text-zinc-600">
-                          暂无文档，上传文件或导入 URL 开始
+                          {t("knowledge.emptyDocs")}
                         </div>
                       ) : (
                         <div>
@@ -546,11 +553,13 @@ export default function KnowledgePage() {
                                   <StatusIcon
                                     className={`w-3 h-3 ${doc.status !== "ready" && doc.status !== "error" ? "animate-spin" : ""}`}
                                   />
-                                  {status.label}
+                                  {t(status.key)}
                                 </span>
                                 <span className="text-xs text-zinc-600 shrink-0 w-16 text-right">
                                   {doc.status === "ready"
-                                    ? `${doc.chunk_count} 块`
+                                    ? t("knowledge.chunkCount", {
+                                        n: doc.chunk_count,
+                                      })
                                     : formatSize(doc.char_count) || "—"}
                                 </span>
                                 <button
@@ -591,16 +600,18 @@ export default function KnowledgePage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <BookOpen className="w-4 h-4 text-violet-400" />
-              新建知识库
+              {t("knowledge.createKB")}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div>
-              <label className="text-xs text-zinc-400 mb-1.5 block">名称</label>
+              <label className="text-xs text-zinc-400 mb-1.5 block">
+                {t("common:field.name")}
+              </label>
               <Input
                 value={kbName}
                 onChange={(e) => setKbName(e.target.value)}
-                placeholder="例如：产品手册"
+                placeholder={t("knowledge.namePlaceholder")}
                 className="h-9 text-sm"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleCreateKB();
@@ -609,12 +620,13 @@ export default function KnowledgePage() {
             </div>
             <div>
               <label className="text-xs text-zinc-400 mb-1.5 block">
-                向量模型 <span className="text-red-400">*</span>
+                {t("knowledge.embeddingModel")}{" "}
+                <span className="text-red-400">*</span>
               </label>
               <SimpleSelect
                 value={kbModelId}
                 onValueChange={setKbModelId}
-                placeholder="请选择 Embedding 模型..."
+                placeholder={t("knowledge.selectEmbeddingModel")}
                 options={embModels.map((model) => ({
                   value: model.id,
                   label: `${model.name} (${model.model_id})`,
@@ -622,18 +634,18 @@ export default function KnowledgePage() {
               />
               {embModels.length === 0 && (
                 <p className="text-xs text-zinc-600 mt-1">
-                  暂无可用模型，请先在「模型管理」中添加 type=embedding 的模型
+                  {t("knowledge.noEmbeddingModels")}
                 </p>
               )}
             </div>
             <div>
               <label className="text-xs text-zinc-400 mb-1.5 block">
-                描述（可选）
+                {t("knowledge.descriptionOptional")}
               </label>
               <Input
                 value={kbDesc}
                 onChange={(e) => setKbDesc(e.target.value)}
-                placeholder="知识库用途说明"
+                placeholder={t("knowledge.descPlaceholder")}
                 className="h-9 text-sm"
               />
             </div>
@@ -644,14 +656,14 @@ export default function KnowledgePage() {
               onClick={() => setCreateKBOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleCreateKB}
               disabled={!kbName.trim() || !kbModelId}
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              创建
+              {t("common:action.create")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -663,7 +675,7 @@ export default function KnowledgePage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Upload className="w-4 h-4 text-violet-400" />
-              上传文档
+              {t("knowledge.uploadDoc")}
             </DialogTitle>
           </DialogHeader>
           <div className="py-2">
@@ -685,10 +697,10 @@ export default function KnowledgePage() {
                 strokeWidth={1.5}
               />
               <p className="text-sm text-zinc-400 mb-1">
-                拖拽文件到此处，或点击选择
+                {t("knowledge.dropHint")}
               </p>
               <p className="text-xs text-zinc-600 mt-3">
-                支持 TXT、Markdown、代码文件等
+                {t("knowledge.uploadFormats")}
               </p>
             </div>
             <Input
@@ -705,14 +717,14 @@ export default function KnowledgePage() {
               onClick={() => setUploadOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              关闭
+              {t("common:action.close")}
             </Button>
             <Button
               onClick={handleUpload}
               disabled={!fileRef.current?.files?.length}
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              上传
+              {t("common:action.upload")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -724,12 +736,12 @@ export default function KnowledgePage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Link2 className="w-4 h-4 text-violet-400" />
-              导入 URL
+              {t("knowledge.importURL")}
             </DialogTitle>
           </DialogHeader>
           <div className="py-2">
             <label className="text-xs text-zinc-400 mb-1.5 block">
-              网页地址
+              {t("knowledge.urlLabel")}
             </label>
             <Input
               value={urlInput}
@@ -747,14 +759,14 @@ export default function KnowledgePage() {
               onClick={() => setUrlOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleImportURL}
               disabled={!urlInput.trim()}
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              导入
+              {t("knowledge.import")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,0 +1,41 @@
+// 智能体广场 / 我的智能体列表页文案。
+export default {
+	plaza: {
+		title: "智能体广场",
+		subtitle: "选择模板快速创建，或从零构建你的专属智能体",
+		createFromScratch: "从零创建",
+		searchPlaceholder: "搜索智能体模板...",
+		categoryAll: "全部",
+		useCount: "{{value}} 次使用",
+		createFromTemplate: "基于此创建",
+		createFailed: "创建失败，请重试",
+		emptyTitle: "没有找到匹配的模板",
+		emptyHint: "试试其他关键词或分类",
+	},
+	list: {
+		title: "我的智能体",
+		subtitle: "管理你的语音机器人，配置模型与语音",
+		searchPlaceholder: "搜索智能体...",
+		create: "新建智能体",
+		namePlaceholder: "客厅助手 / 车载音箱...",
+		createHint: "创建后进入配置页面设置 LLM、ASR、TTS 等参数",
+		emptyTitle: "还没有智能体",
+		emptyHint: "创建第一个，配置 LLM / ASR / TTS 后绑定设备",
+		noMatchTitle: "没有匹配的智能体",
+		noMatchHint: "试试其他关键词",
+		chatModel: "聊天模型",
+		voice: "音色",
+		asr: "语音识别",
+		memory: "记忆",
+		language: "语言",
+	},
+	memory: {
+		none: "无记忆",
+		session: "会话记忆",
+		longTerm: "长期记忆",
+	},
+	deleteDialog: {
+		title: "确认删除",
+		body: "确定要删除「{{name}}」吗？此操作无法撤销，该智能体关联的设备也将失去配置。",
+	},
+};

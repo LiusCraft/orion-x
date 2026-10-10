@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Database,
   Plus,
@@ -42,6 +43,7 @@ const TYPE_ICONS: Record<string, { color: string; bg: string }> = {
 interface DataSource {
   id: string;
   name: string;
+  nameKey?: string;
   type: string;
   host: string;
   status: "connected" | "disconnected" | "error";
@@ -52,6 +54,7 @@ const MOCK_SOURCES: DataSource[] = [
   {
     id: "ds1",
     name: "生产数据库",
+    nameKey: "sources.mock.productionDB",
     type: "PostgreSQL",
     host: "db.prod.internal:5432/app_db",
     status: "connected",
@@ -60,6 +63,7 @@ const MOCK_SOURCES: DataSource[] = [
   {
     id: "ds2",
     name: "用户分析库",
+    nameKey: "sources.mock.analyticsDB",
     type: "MySQL",
     host: "analytics.internal:3306/user_data",
     status: "connected",
@@ -68,6 +72,7 @@ const MOCK_SOURCES: DataSource[] = [
   {
     id: "ds3",
     name: "缓存服务",
+    nameKey: "sources.mock.cache",
     type: "Redis",
     host: "redis.internal:6379",
     status: "disconnected",
@@ -84,13 +89,23 @@ const MOCK_SOURCES: DataSource[] = [
 ];
 
 const STATUS_CFG = {
-  connected: { label: "已连接", cls: "text-emerald-400", icon: CheckCircle2 },
-  disconnected: { label: "未连接", cls: "text-zinc-500", icon: Plug },
-  error: { label: "连接错误", cls: "text-red-400", icon: AlertCircle },
+  connected: {
+    key: "sources.status.connected",
+    cls: "text-emerald-400",
+    icon: CheckCircle2,
+  },
+  disconnected: {
+    key: "sources.status.disconnected",
+    cls: "text-zinc-500",
+    icon: Plug,
+  },
+  error: { key: "sources.status.error", cls: "text-red-400", icon: AlertCircle },
 };
 
 export default function SourcesPage() {
-  useDocumentTitle("数据源");
+  const { t } = useTranslation(["data", "common"]);
+
+  useDocumentTitle(t("sources.title"));
 
   const [sources, setSources] = useState<DataSource[]>(MOCK_SOURCES);
   const [addOpen, setAddOpen] = useState(false);
@@ -130,9 +145,11 @@ export default function SourcesPage() {
       <div className="border-b border-zinc-800/80 px-8 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">数据源</h1>
+            <h1 className="text-lg font-semibold text-white">
+              {t("sources.title")}
+            </h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              连接外部数据库和 API，供智能体查询使用
+              {t("sources.subtitle")}
             </p>
           </div>
           <Button
@@ -140,7 +157,7 @@ export default function SourcesPage() {
             className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
           >
             <Plus className="w-4 h-4" />
-            添加数据源
+            {t("sources.add")}
           </Button>
         </div>
       </div>
@@ -151,22 +168,22 @@ export default function SourcesPage() {
             <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
               <Database className="w-6 h-6 text-zinc-600" />
             </div>
-            <p className="text-zinc-400 text-sm">还没有数据源</p>
+            <p className="text-zinc-400 text-sm">{t("sources.empty")}</p>
             <p className="text-zinc-600 text-xs mt-1 mb-4">
-              连接数据库或 API 让智能体访问实时数据
+              {t("sources.emptyHint")}
             </p>
             <Button
               onClick={() => setAddOpen(true)}
               className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-4 text-xs gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
-              添加数据源
+              {t("sources.add")}
             </Button>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {sources.map((src) => {
-              const { label, cls, icon: StatusIcon } = STATUS_CFG[src.status];
+              const { key, cls, icon: StatusIcon } = STATUS_CFG[src.status];
               const typeStyle = TYPE_ICONS[src.type] ?? TYPE_ICONS["HTTP API"];
               return (
                 <div
@@ -185,7 +202,7 @@ export default function SourcesPage() {
                       </div>
                       <div>
                         <p className="font-medium text-sm text-white">
-                          {src.name}
+                          {src.nameKey ? t(src.nameKey) : src.name}
                         </p>
                         <span
                           className={`text-[11px] ${typeStyle.color} bg-zinc-800 px-1.5 py-0.5 rounded font-mono`}
@@ -218,14 +235,14 @@ export default function SourcesPage() {
                   <div className="flex items-center justify-between">
                     <span className={`flex items-center gap-1 text-xs ${cls}`}>
                       <StatusIcon className="w-3 h-3" />
-                      {label}
+                      {t(key)}
                     </span>
                     <Button
                       size="sm"
                       variant="outline"
                       className="h-7 px-2.5 text-xs border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-white"
                     >
-                      测试连接
+                      {t("sources.testConnection")}
                     </Button>
                   </div>
                 </div>
@@ -240,27 +257,27 @@ export default function SourcesPage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Database className="w-4 h-4 text-violet-400" />
-              添加数据源
+              {t("sources.add")}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                  名称
+                  {t("common:field.name")}
                 </Label>
                 <Input
                   value={form.name}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, name: e.target.value }))
                   }
-                  placeholder="我的数据库"
+                  placeholder={t("sources.namePlaceholder")}
                   className="text-sm "
                 />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                  类型
+                  {t("common:field.type")}
                 </Label>
                 <SimpleSelect
                   value={form.type}
@@ -274,7 +291,7 @@ export default function SourcesPage() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                连接地址
+                {t("sources.host")}
               </Label>
               <Input
                 value={form.host}
@@ -289,7 +306,7 @@ export default function SourcesPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                    用户名
+                    {t("sources.username")}
                   </Label>
                   <Input
                     value={form.username}
@@ -302,7 +319,7 @@ export default function SourcesPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                    密码
+                    {t("sources.password")}
                   </Label>
                   <Input
                     type="password"
@@ -323,14 +340,14 @@ export default function SourcesPage() {
               onClick={() => setAddOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleAdd}
               disabled={!form.name.trim() || !form.host.trim()}
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              添加
+              {t("common:action.add")}
             </Button>
           </DialogFooter>
         </DialogContent>

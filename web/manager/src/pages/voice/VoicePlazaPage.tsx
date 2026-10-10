@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Play, Pause, Plus, Music, Search, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,19 +7,14 @@ import { voiceApi, languageApi, type ModelVoice } from "@/lib/api";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useDocumentTitle } from "@/lib/title";
 
-const GENDERS = ["全部", "女声", "男声", "中性"];
-const GENDER_MAP: Record<string, string> = {
-  女声: "female",
-  男声: "male",
-  中性: "neutral",
-};
+const ALL = "all";
 
-function genderLabel(g: string | undefined): string {
-  if (g === "female") return "女声";
-  if (g === "male") return "男声";
-  if (g === "neutral") return "中性";
-  return "";
-}
+const GENDERS: { value: string; labelKey: string }[] = [
+  { value: ALL, labelKey: "common:field.all" },
+  { value: "female", labelKey: "gender.female" },
+  { value: "male", labelKey: "gender.male" },
+  { value: "neutral", labelKey: "gender.neutral" },
+];
 
 const VOICE_COLORS = [
   "from-pink-500 to-rose-600",
@@ -32,17 +28,19 @@ const VOICE_COLORS = [
 ];
 
 export default function VoicePlazaPage() {
-  useDocumentTitle("音色广场");
+  const { t } = useTranslation(["voice", "common"]);
+
+  useDocumentTitle(t("plaza.title"));
 
   const [voices, setVoices] = useState<ModelVoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState<string | null>(null);
   const [emotionPopup, setEmotionPopup] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [gender, setGender] = useState("全部");
-  const [lang, setLang] = useState("全部");
-  const [tag, setTag] = useState("全部");
-  const [emotion, setEmotion] = useState("全部");
+  const [gender, setGender] = useState(ALL);
+  const [lang, setLang] = useState(ALL);
+  const [tag, setTag] = useState(ALL);
+  const [emotion, setEmotion] = useState(ALL);
   const [langNames, setLangNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -76,15 +74,18 @@ export default function VoicePlazaPage() {
   ].sort();
 
   const filtered = voices.filter((v) => {
-    const matchGender = gender === "全部" || GENDER_MAP[gender] === v.gender;
-    const matchLang = lang === "全部" || (v.langs ?? []).includes(lang);
-    const matchTag = tag === "全部" || (v.tags ?? []).includes(tag);
+    const matchGender = gender === ALL || gender === v.gender;
+    const matchLang = lang === ALL || (v.langs ?? []).includes(lang);
+    const matchTag = tag === ALL || (v.tags ?? []).includes(tag);
     const matchEmotion =
-      emotion === "全部" || Object.keys(v.emotions ?? {}).includes(emotion);
+      emotion === ALL || Object.keys(v.emotions ?? {}).includes(emotion);
     const matchQuery =
       !query || v.name.includes(query) || (v.description ?? "").includes(query);
     return matchGender && matchLang && matchTag && matchEmotion && matchQuery;
   });
+
+  const genderLabel = (g: string | undefined) =>
+    g ? t(`gender.${g}`, { defaultValue: "" }) : "";
 
   const togglePlay = (id: string) => {
     setPlaying((prev) => (prev === id ? null : id));
@@ -99,9 +100,11 @@ export default function VoicePlazaPage() {
       <div className="border-b border-zinc-800/80 px-8 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">音色广场</h1>
+            <h1 className="text-lg font-semibold text-white">
+              {t("plaza.title")}
+            </h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              官方上架音色，试听后选用到你的智能体
+              {t("plaza.subtitle")}
             </p>
           </div>
         </div>
@@ -110,64 +113,72 @@ export default function VoicePlazaPage() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索音色..."
+            placeholder={t("plaza.searchPlaceholder")}
             className="pl-9 w-48 h-9 text-sm "
           />
         </div>
         <div className="mt-4 space-y-3">
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-zinc-400 w-10 shrink-0">性别</span>
+            <span className="text-zinc-400 w-10 shrink-0">
+              {t("plaza.filterGender")}
+            </span>
             <div className="flex gap-1.5 flex-wrap">
               {GENDERS.map((g) => (
                 <button
-                  key={g}
-                  onClick={() => setGender(g)}
-                  className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer ${gender === g ? "bg-violet-600/20 text-violet-400 border border-violet-500/30" : "bg-zinc-800/50 text-zinc-500 border border-transparent hover:text-zinc-300 hover:border-zinc-700"}`}
+                  key={g.value}
+                  onClick={() => setGender(g.value)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer ${gender === g.value ? "bg-violet-600/20 text-violet-400 border border-violet-500/30" : "bg-zinc-800/50 text-zinc-500 border border-transparent hover:text-zinc-300 hover:border-zinc-700"}`}
                 >
-                  {g}
+                  {t(g.labelKey)}
                 </button>
               ))}
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-zinc-400 w-10 shrink-0">语言</span>
+            <span className="text-zinc-400 w-10 shrink-0">
+              {t("plaza.filterLanguage")}
+            </span>
             <div className="flex gap-1.5 flex-wrap">
-              {["全部", ...allLangs].map((l) => (
+              {[ALL, ...allLangs].map((l) => (
                 <button
                   key={l}
                   onClick={() => setLang(l)}
                   className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer ${lang === l ? "bg-violet-600/20 text-violet-400 border border-violet-500/30" : "bg-zinc-800/50 text-zinc-500 border border-transparent hover:text-zinc-300 hover:border-zinc-700"}`}
                 >
-                  {langNames[l] || l}
+                  {l === ALL ? t("common:field.all") : langNames[l] || l}
                 </button>
               ))}
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-zinc-400 w-10 shrink-0">标签</span>
+            <span className="text-zinc-400 w-10 shrink-0">
+              {t("plaza.filterTag")}
+            </span>
             <div className="flex gap-1.5 flex-wrap">
-              {["全部", ...allTags].map((t) => (
+              {[ALL, ...allTags].map((tg) => (
                 <button
-                  key={t}
-                  onClick={() => setTag(t)}
-                  className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer ${tag === t ? "bg-violet-600/20 text-violet-400 border border-violet-500/30" : "bg-zinc-800/50 text-zinc-500 border border-transparent hover:text-zinc-300 hover:border-zinc-700"}`}
+                  key={tg}
+                  onClick={() => setTag(tg)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer ${tag === tg ? "bg-violet-600/20 text-violet-400 border border-violet-500/30" : "bg-zinc-800/50 text-zinc-500 border border-transparent hover:text-zinc-300 hover:border-zinc-700"}`}
                 >
-                  {t}
+                  {tg === ALL ? t("common:field.all") : tg}
                 </button>
               ))}
             </div>
           </div>
           {allEmotions.length > 0 && (
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-zinc-400 w-10 shrink-0">情绪</span>
+              <span className="text-zinc-400 w-10 shrink-0">
+                {t("plaza.filterEmotion")}
+              </span>
               <div className="flex gap-1.5 flex-wrap">
-                {["全部", ...allEmotions].map((e) => (
+                {[ALL, ...allEmotions].map((e) => (
                   <button
                     key={e}
                     onClick={() => setEmotion(e)}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer ${emotion === e ? "bg-violet-600/20 text-violet-400 border border-violet-500/30" : "bg-zinc-800/50 text-zinc-500 border border-transparent hover:text-zinc-300 hover:border-zinc-700"}`}
                   >
-                    {e}
+                    {e === ALL ? t("common:field.all") : e}
                   </button>
                 ))}
               </div>
@@ -186,7 +197,7 @@ export default function VoicePlazaPage() {
             <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
               <Music className="w-6 h-6 text-zinc-600" />
             </div>
-            <p className="text-zinc-400 text-sm">没有匹配的音色</p>
+            <p className="text-zinc-400 text-sm">{t("plaza.empty")}</p>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -226,12 +237,12 @@ export default function VoicePlazaPage() {
                             {genderLabel(voice.gender)}
                           </span>
                         )}
-                        {tags.slice(0, 2).map((t) => (
+                        {tags.slice(0, 2).map((tg) => (
                           <span
-                            key={t}
+                            key={tg}
                             className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50"
                           >
-                            {t}
+                            {tg}
                           </span>
                         ))}
                         {langs.length > 0 && (
@@ -251,7 +262,9 @@ export default function VoicePlazaPage() {
                             content={Object.keys(voice.emotions).join(", ")}
                           >
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-500 border border-amber-800/40">
-                              {Object.keys(voice.emotions).length}情绪
+                              {t("plaza.emotionCount", {
+                                n: Object.keys(voice.emotions).length,
+                              })}
                             </span>
                           </Tooltip>
                         )}
@@ -288,7 +301,7 @@ export default function VoicePlazaPage() {
                       ) : (
                         <Play className="w-3 h-3" />
                       )}
-                      {isPlaying ? "停止" : "试听"}
+                      {isPlaying ? t("action.stop") : t("action.preview")}
                     </button>
                     {emotionPopup === voice.id && voice.emotions && (
                       <div
@@ -297,7 +310,7 @@ export default function VoicePlazaPage() {
                         className="absolute bottom-full left-0 mb-2 p-2 rounded-lg bg-zinc-800 border border-zinc-700 shadow-xl z-50 min-w-[140px]"
                       >
                         <p className="text-[10px] text-zinc-500 mb-1.5 px-1">
-                          选择情绪试听
+                          {t("plaza.selectEmotion")}
                         </p>
                         <button
                           onClick={(e) => {
@@ -320,7 +333,7 @@ export default function VoicePlazaPage() {
                           ) : (
                             <Music className="w-3 h-3 shrink-0 text-zinc-600" />
                           )}
-                          默认
+                          {t("plaza.emotionDefault")}
                         </button>
                         <div className="h-px bg-zinc-700 my-1" />
                         {Object.entries(voice.emotions).map(([key, val]) => {
@@ -366,7 +379,7 @@ export default function VoicePlazaPage() {
                       className="flex-1 h-7 text-xs bg-violet-600/15 hover:bg-violet-600 text-violet-400 hover:text-white border border-violet-500/20 hover:border-violet-500 transition-all"
                     >
                       <Plus className="w-3 h-3 mr-1" />
-                      使用
+                      {t("action.use")}
                     </Button>
                   </div>
                 </div>

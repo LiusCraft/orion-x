@@ -6,6 +6,7 @@
 //     幂等来源（同 account + item + ref_id 只发一次）。
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { HandCoins, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,9 +29,6 @@ import {
 	yuanToMicro,
 } from "@/lib/billing";
 
-const GRANT_HINT =
-	"赠款是限定计费项的额度，不写进可用余额：结算时按 grant → balance → credit_limit 的顺序消耗。ref_id 是幂等来源，同一 ref_id 只发一次——重复提交不会重复发放。";
-
 export function AccountAdjustDialog({
 	account,
 	grant,
@@ -42,6 +40,7 @@ export function AccountAdjustDialog({
 	onClose: () => void;
 	onDone: (message: string) => void;
 }) {
+	const { t } = useTranslation(["billingAdmin", "common"]);
 	const [amount, setAmount] = useState("");
 	const [note, setNote] = useState("");
 	const [itemCode, setItemCode] = useState("");
@@ -62,22 +61,22 @@ export function AccountAdjustDialog({
 				if (cancelled) return;
 				setItemsError(
 					isBillingDisabled(err)
-						? "计费未启用，无法加载计费项"
-						: billingErrorMessage(err, "加载计费项目录失败"),
+						? t("adjust.loadDisabled")
+						: billingErrorMessage(err, t("adjust.loadFailed")),
 				);
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, []);
+	}, [t]);
 
 	const micro = yuanToMicro(amount);
 	const amountHint =
 		amount.trim() === ""
-			? "元，最多 6 位小数"
+			? t("adjust.amountHint")
 			: micro === null
-				? "金额格式不对"
-				: `${micro.toLocaleString("en-US")} 微元`;
+				? t("adjust.amountInvalid")
+				: t("adjust.microHint", { amount: micro.toLocaleString("en-US") });
 
 	const canSubmit =
 		!saving &&
@@ -90,27 +89,27 @@ export function AccountAdjustDialog({
 	const submit = async () => {
 		setFormError("");
 		if (micro === null) {
-			setFormError("金额格式不对：只接受数字，最多 6 位小数。");
+			setFormError(t("adjust.errAmount"));
 			return;
 		}
 		if (grant && micro <= 0) {
-			setFormError("赠款金额必须为正数。");
+			setFormError(t("adjust.errGrantPositive"));
 			return;
 		}
 		if (!grant && micro === 0) {
-			setFormError("调整金额不能为 0。");
+			setFormError(t("adjust.errAdjustZero"));
 			return;
 		}
 		if (note.trim() === "") {
-			setFormError("备注必填：这笔调整要能被人看懂。");
+			setFormError(t("adjust.errNote"));
 			return;
 		}
 		if (grant && itemCode === "") {
-			setFormError("赠款必须指定计费项。");
+			setFormError(t("adjust.errItem"));
 			return;
 		}
 		if (grant && refId.trim() === "") {
-			setFormError("赠款必须带 ref_id（幂等来源），否则重试会重复发放。");
+			setFormError(t("adjust.errRefId"));
 			return;
 		}
 
@@ -123,11 +122,24 @@ export function AccountAdjustDialog({
 				...(grant ? { grant: true, ref_id: refId.trim() } : {}),
 			});
 			const message = grant
-				? `已向账户 ${account.id} 发放赠款 ${formatMicro(micro, account.currency)}（限定 ${itemCode}），ref_id=${refId.trim()}`
-				: `已${micro > 0 ? "增加" : "扣减"}账户 ${account.id} 余额 ${formatMicro(Math.abs(micro), account.currency)}`;
+				? t("adjust.successGrant", {
+						account: account.id,
+						amount: formatMicro(micro, account.currency),
+						item: itemCode,
+						refId: refId.trim(),
+					})
+				: micro > 0
+					? t("adjust.successIncrease", {
+							account: account.id,
+							amount: formatMicro(micro, account.currency),
+						})
+					: t("adjust.successDecrease", {
+							account: account.id,
+							amount: formatMicro(Math.abs(micro), account.currency),
+						});
 			onDone(message);
 		} catch (err) {
-			setFormError(billingErrorMessage(err, "调整失败，请重试"));
+			setFormError(billingErrorMessage(err, t("adjust.fail")));
 		} finally {
 			setSaving(false);
 		}
@@ -146,13 +158,15 @@ export function AccountAdjustDialog({
 								strokeWidth={1.5}
 							/>
 						)}
-						{grant ? "发放赠款" : "调整余额"}
+						{grant ? t("adjust.grantTitle") : t("adjust.adjustTitle")}
 					</DialogTitle>
 				</DialogHeader>
 
 				<div className="space-y-4 py-2">
 					<div className="rounded-lg bg-zinc-800/60 px-3 py-2.5">
-						<p className="text-[10px] text-zinc-500 mb-1">账户</p>
+						<p className="text-[10px] text-zinc-500 mb-1">
+							{t("shared.account")}
+						</p>
 						<p className="text-xs text-zinc-300 font-mono break-all">
 							{account.id}
 						</p>
@@ -161,10 +175,20 @@ export function AccountAdjustDialog({
 								{subjectTypeLabel(account.subject_type)} · {account.subject_id}
 							</span>
 							<span className="font-mono">
-								可用 {formatMicro(account.balance_micro, account.currency)}
+								{t("adjust.available", {
+									amount: formatMicro(
+										account.balance_micro,
+										account.currency,
+									),
+								})}
 							</span>
 							<span className="font-mono">
-								冻结 {formatMicro(account.frozen_micro, account.currency)}
+								{t("adjust.frozen", {
+									amount: formatMicro(
+										account.frozen_micro,
+										account.currency,
+									),
+								})}
 							</span>
 						</div>
 					</div>
@@ -172,16 +196,18 @@ export function AccountAdjustDialog({
 					{grant && (
 						<div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
 							<p className="text-[11px] text-amber-200/90 leading-relaxed">
-								{GRANT_HINT}
+								{t("adjust.grantHint")}
 							</p>
 						</div>
 					)}
 
 					<div className="space-y-1.5">
 						<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-							金额（元）
+							{t("adjust.amountLabel")}
 							<span className="ml-1 text-zinc-600 normal-case">
-								{grant ? "必须为正数" : "可正可负"}
+								{grant
+									? t("adjust.amountPositiveHint")
+									: t("adjust.amountSignedHint")}
 							</span>
 						</Label>
 						<Input
@@ -204,15 +230,15 @@ export function AccountAdjustDialog({
 
 					<div className="space-y-1.5">
 						<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-							计费项
+							{t("shared.item")}
 							<span className="ml-1 text-zinc-600 normal-case">
-								{grant ? "必填，赠款限定这个计费项" : "可选，会记进流水"}
+								{grant ? t("adjust.itemGrantHint") : t("adjust.itemOptionalHint")}
 							</span>
 						</Label>
 						<SimpleSelect
 							value={itemCode}
 							onValueChange={setItemCode}
-							placeholder="不限定计费项"
+							placeholder={t("adjust.itemPlaceholder")}
 							className="font-mono"
 							options={items.map((item) => ({
 								value: item.code,
@@ -230,7 +256,7 @@ export function AccountAdjustDialog({
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
 								ref_id
 								<span className="ml-1 text-zinc-600 normal-case">
-									幂等来源，同一 ref_id 只发一次
+									{t("adjust.refIdHint")}
 								</span>
 							</Label>
 							<Input
@@ -244,12 +270,13 @@ export function AccountAdjustDialog({
 
 					<div className="space-y-1.5">
 						<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-							备注<span className="ml-1 text-red-400">*</span>
+							{t("shared.note")}
+							<span className="ml-1 text-red-400">*</span>
 						</Label>
 						<Input
 							value={note}
 							onChange={(e) => setNote(e.target.value)}
-							placeholder="例如：注册赠送 / 误扣回退（工单 #123）"
+							placeholder={t("adjust.notePlaceholder")}
 							className="text-sm"
 						/>
 					</div>
@@ -267,14 +294,18 @@ export function AccountAdjustDialog({
 						onClick={onClose}
 						className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
 					>
-						取消
+						{t("common:action.cancel")}
 					</Button>
 					<Button
 						onClick={submit}
 						disabled={!canSubmit}
 						className="bg-violet-600 hover:bg-violet-500 text-white"
 					>
-						{saving ? "提交中..." : grant ? "发放赠款" : "确认调整"}
+						{saving
+							? t("common:action.submitting")
+							: grant
+								? t("adjust.grantTitle")
+								: t("adjust.submitAdjust")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

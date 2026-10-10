@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Globe,
   Database,
@@ -162,13 +163,15 @@ export function TagInput({
   tags: string[];
   onChange: (tags: string[]) => void;
 }) {
+  const { t } = useTranslation(["components", "common"]);
   const [input, setInput] = useState("");
   const addTag = (tag: string) => {
-    const t = tag.trim();
-    if (t && !tags.includes(t)) onChange([...tags, t]);
+    const trimmed = tag.trim();
+    if (trimmed && !tags.includes(trimmed)) onChange([...tags, trimmed]);
     setInput("");
   };
-  const removeTag = (tag: string) => onChange(tags.filter((t) => t !== tag));
+  const removeTag = (tag: string) =>
+    onChange(tags.filter((item) => item !== tag));
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
@@ -200,7 +203,9 @@ export function TagInput({
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKey}
         placeholder={
-          tags.length === 0 ? "输入标签后按 Enter 或逗号添加" : "添加标签..."
+          tags.length === 0
+            ? t("mcp.tagPlaceholder")
+            : t("mcp.tagAddPlaceholder")
         }
         className="min-w-[80px] flex-1 bg-transparent text-sm text-[hsl(var(--foreground))] outline-none placeholder:text-[hsl(var(--muted-foreground))]"
       />
@@ -217,6 +222,7 @@ export function ToolAllowlist({
   selected: string[];
   onChange: (selected: string[]) => void;
 }) {
+  const { t } = useTranslation(["components", "common"]);
   const allSelected = selected.length === 0;
   const toggle = (name: string) =>
     onChange(
@@ -229,15 +235,20 @@ export function ToolAllowlist({
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-zinc-500">
           {allSelected
-            ? "已选择全部工具"
-            : `已选择 ${selected.length}/${tools.length} 个工具`}
+            ? t("mcp.tools.selectedAll")
+            : t("mcp.tools.selectedCount", {
+                selected: selected.length,
+                total: tools.length,
+              })}
         </span>
         <button
           type="button"
-          onClick={() => onChange(allSelected ? tools.map((t) => t.name) : [])}
+          onClick={() =>
+            onChange(allSelected ? tools.map((tool) => tool.name) : [])
+          }
           className="text-[11px] text-violet-400 hover:text-violet-300 transition-colors"
         >
-          {allSelected ? "取消全选" : "全选"}
+          {allSelected ? t("mcp.tools.deselectAll") : t("mcp.tools.selectAll")}
         </button>
       </div>
       <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto bg-zinc-800/50 rounded-lg p-2">
@@ -281,11 +292,16 @@ export function ToolInputs({
   values: Record<string, unknown>;
   onChange: (key: string, val: unknown) => void;
 }) {
+  const { t } = useTranslation(["components", "common"]);
   const properties = schema?.properties as
     | Record<string, { type?: string; description?: string; enum?: string[] }>
     | undefined;
   if (!properties || Object.keys(properties).length === 0)
-    return <div className="text-[11px] text-zinc-500 px-1">无参数</div>;
+    return (
+      <div className="text-[11px] text-zinc-500 px-1">
+        {t("mcp.tools.noParams")}
+      </div>
+    );
   const required = new Set<string>(
     (schema?.required as string[] | undefined) ?? [],
   );
@@ -371,6 +387,7 @@ export function ToolResult({
     output?: string;
   };
 }) {
+  const { t } = useTranslation(["components", "common"]);
   const [copied, setCopied] = useState(false);
   const text = result.output || result.message || "";
   const isJson =
@@ -415,15 +432,15 @@ export function ToolResult({
         {icon}
         <span className="font-medium">
           {result.is_error
-            ? "执行出错"
+            ? t("mcp.tools.result.error")
             : result.success
-              ? "执行成功"
-              : "请求失败"}
+              ? t("mcp.tools.result.success")
+              : t("mcp.tools.result.requestFailed")}
         </span>
         <button
           onClick={handleCopy}
           className="ml-auto p-0.5 rounded hover:bg-black/20 transition-colors"
-          title="复制结果"
+          title={t("mcp.tools.result.copyTitle")}
         >
           {copied ? (
             <Check className="w-3 h-3" />
@@ -536,13 +553,14 @@ export function McpServerDetail({
   headerValues?: Record<string, string>;
   onHeaderValueChange?: (key: string, value: string) => void;
 }) {
+  const { t } = useTranslation(["components", "common"]);
   if (mode === "view") {
     return (
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
         {server.description && (
           <div>
             <p className="text-xs text-zinc-400 uppercase tracking-wide mb-1.5">
-              描述
+              {t("common:field.description")}
             </p>
             <div className="text-sm text-zinc-300 leading-relaxed">
               <SimpleMarkdown text={server.description} />
@@ -552,7 +570,7 @@ export function McpServerDetail({
         {server.market_id ? null : server.transport === "stdio" ? (
           <div>
             <p className="text-xs text-zinc-400 uppercase tracking-wide mb-1.5">
-              命令
+              {t("mcp.fields.command")}
             </p>
             <code className="block text-sm text-zinc-200 bg-zinc-800/60 rounded-lg px-3 py-2 font-mono break-all">
               {server.command}
@@ -560,14 +578,14 @@ export function McpServerDetail({
             </code>
             {server.cwd && (
               <p className="text-[11px] text-zinc-600 mt-1">
-                工作目录: {server.cwd}
+                {t("mcp.fields.workingDir", { path: server.cwd })}
               </p>
             )}
           </div>
         ) : (
           <div>
             <p className="text-xs text-zinc-400 uppercase tracking-wide mb-1.5">
-              Endpoint
+              {t("mcp.fields.endpoint")}
             </p>
             <code className="block text-sm text-zinc-200 bg-zinc-800/60 rounded-lg px-3 py-2 font-mono break-all">
               {server.endpoint}
@@ -577,15 +595,15 @@ export function McpServerDetail({
         {server.tags && server.tags.length > 0 && (
           <div>
             <p className="text-xs text-zinc-400 uppercase tracking-wide mb-1.5">
-              标签
+              {t("mcp.fields.tags")}
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {server.tags.map((t) => (
+              {server.tags.map((tag) => (
                 <span
-                  key={t}
+                  key={tag}
                   className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50 font-mono"
                 >
-                  {t}
+                  {tag}
                 </span>
               ))}
             </div>
@@ -594,15 +612,15 @@ export function McpServerDetail({
         {server.tool_name_list && server.tool_name_list.length > 0 && (
           <div>
             <p className="text-xs text-zinc-400 uppercase tracking-wide mb-1.5">
-              工具白名单
+              {t("mcp.fields.toolAllowlist")}
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {server.tool_name_list.map((t) => (
+              {server.tool_name_list.map((tool) => (
                 <span
-                  key={t}
+                  key={tool}
                   className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50 font-mono"
                 >
-                  {t}
+                  {tool}
                 </span>
               ))}
             </div>
@@ -612,7 +630,7 @@ export function McpServerDetail({
         {headerMeta && (
           <div className="border-t border-zinc-800 pt-4 space-y-4">
             <p className="text-xs text-zinc-400 uppercase tracking-wide">
-              连接配置
+              {t("mcp.fields.connectionConfig")}
             </p>
             {Object.entries(headerMeta)
               .filter(([_, meta]) => meta.kind !== "auto")
@@ -633,7 +651,10 @@ export function McpServerDetail({
                     value={headerValues?.[key] || ""}
                     onChange={(e) => onHeaderValueChange?.(key, e.target.value)}
                     placeholder={
-                      meta.placeholder || `输入 ${meta.label || key}`
+                      meta.placeholder ||
+                      t("mcp.fields.headerInputPlaceholder", {
+                        label: meta.label || key,
+                      })
                     }
                     className={inp}
                   />
@@ -644,7 +665,7 @@ export function McpServerDetail({
             ).length > 0 && (
               <div className="space-y-2 bg-zinc-800/30 rounded-lg px-3 py-2.5">
                 <p className="text-[10px] text-zinc-500 uppercase tracking-wide">
-                  自动配置（无需填写）
+                  {t("mcp.fields.autoConfig")}
                 </p>
                 {Object.entries(headerMeta)
                   .filter(([_, meta]) => meta.kind === "auto")
@@ -674,7 +695,7 @@ export function McpServerDetail({
 
   return (
     <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-      <Field label="名称">
+      <Field label={t("common:field.name")}>
         <Input
           value={f.name}
           onChange={(e) => onFormChange("name", e.target.value)}
@@ -687,7 +708,7 @@ export function McpServerDetail({
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-            描述
+            {t("common:field.description")}
           </Label>
           {!official && (
             <div className="flex items-center gap-1">
@@ -696,14 +717,14 @@ export function McpServerDetail({
                 onClick={() => onDescPreviewChange?.(false)}
                 className={`text-[11px] px-2 py-0.5 rounded transition-colors ${!descPreview ? "bg-violet-600 text-white" : "text-zinc-500 hover:text-zinc-300"}`}
               >
-                编辑
+                {t("common:action.edit")}
               </button>
               <button
                 type="button"
                 onClick={() => onDescPreviewChange?.(true)}
                 className={`text-[11px] px-2 py-0.5 rounded transition-colors ${descPreview ? "bg-violet-600 text-white" : "text-zinc-500 hover:text-zinc-300"}`}
               >
-                预览
+                {t("mcp.preview")}
               </button>
             </div>
           )}
@@ -718,14 +739,14 @@ export function McpServerDetail({
           <Textarea
             value={f.description}
             onChange={(e) => onFormChange("description", e.target.value)}
-            placeholder="支持 Markdown 语法\n例如：**粗体**、`代码`\n- 列表项"
+            placeholder={t("mcp.descriptionPlaceholder")}
             className="min-h-[100px] text-sm"
             disabled={official}
           />
         )}
       </div>
 
-      <Field label="图标 URL">
+      <Field label={t("mcp.fields.iconUrl")}>
         <div className="flex gap-2 items-center">
           {f.icon ? (
             <img
@@ -739,7 +760,7 @@ export function McpServerDetail({
           ) : null}
           {official ? (
             <div className="flex-1 text-xs text-zinc-500 bg-zinc-800/60 rounded-lg px-3 py-2 truncate">
-              {f.icon || "无"}
+              {f.icon || t("common:field.none")}
             </div>
           ) : (
             <Input
@@ -752,20 +773,20 @@ export function McpServerDetail({
         </div>
       </Field>
 
-      <Field label="标签">
+      <Field label={t("mcp.fields.tags")}>
         {official ? (
           <div className="flex flex-wrap gap-1.5">
             {f.tags
               ? f.tags
                   .split(",")
-                  .map((t: string) => t.trim())
+                  .map((tag: string) => tag.trim())
                   .filter(Boolean)
-                  .map((t: string) => (
+                  .map((tag: string) => (
                     <span
-                      key={t}
+                      key={tag}
                       className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50 font-mono"
                     >
-                      {t}
+                      {tag}
                     </span>
                   ))
               : null}
@@ -785,21 +806,21 @@ export function McpServerDetail({
         )}
       </Field>
 
-      <Field label="传输协议">
+      <Field label={t("mcp.fields.transport")}>
         {official ? (
           <div className="text-sm text-zinc-300 bg-zinc-800/60 rounded-lg px-3 py-2 font-mono">
             {f.transport}
           </div>
         ) : (
           <div className="flex gap-1.5">
-            {(["streamable", "sse"] as const).map((t) => (
+            {(["streamable", "sse"] as const).map((value) => (
               <button
-                key={t}
+                key={value}
                 type="button"
-                onClick={() => onFormChange("transport", t)}
-                className={`flex-1 h-9 rounded-md text-sm font-mono border transition-colors cursor-pointer ${f.transport === t ? "bg-violet-600 border-violet-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"}`}
+                onClick={() => onFormChange("transport", value)}
+                className={`flex-1 h-9 rounded-md text-sm font-mono border transition-colors cursor-pointer ${f.transport === value ? "bg-violet-600 border-violet-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"}`}
               >
-                {t}
+                {value}
               </button>
             ))}
           </div>
@@ -808,7 +829,7 @@ export function McpServerDetail({
 
       {f.transport === "stdio" ? (
         <>
-          <Field label="命令">
+          <Field label={t("mcp.fields.command")}>
             <Input
               value={f.command}
               onChange={(e) => onFormChange("command", e.target.value)}
@@ -817,7 +838,7 @@ export function McpServerDetail({
               disabled={official}
             />
           </Field>
-          <Field label="参数（空格分隔）">
+          <Field label={t("mcp.fields.args")}>
             <Input
               value={f.args}
               onChange={(e) => onFormChange("args", e.target.value)}
@@ -826,7 +847,7 @@ export function McpServerDetail({
               disabled={official}
             />
           </Field>
-          <Field label="工作目录（可选）">
+          <Field label={t("mcp.fields.cwd")}>
             <Input
               value={f.cwd}
               onChange={(e) => onFormChange("cwd", e.target.value)}
@@ -839,14 +860,14 @@ export function McpServerDetail({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                环境变量
+                {t("mcp.fields.envVars")}
               </Label>
               {!official && addEnvRow && (
                 <button
                   onClick={addEnvRow}
                   className="text-[11px] text-violet-400 hover:text-violet-300 cursor-pointer"
                 >
-                  + 添加
+                  + {t("common:action.add")}
                 </button>
               )}
             </div>
@@ -875,7 +896,7 @@ export function McpServerDetail({
           </div>
         </>
       ) : (
-        <Field label="Endpoint">
+        <Field label={t("mcp.fields.endpoint")}>
           <div className="relative">
             <Input
               value={f.endpoint}
@@ -889,7 +910,7 @@ export function McpServerDetail({
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <span className="flex items-center gap-1.5 text-[11px] text-zinc-500 bg-zinc-800/80 px-2 py-1 rounded">
                   <EyeOff className="w-3 h-3" />
-                  系统配置 · 不可见
+                  {t("mcp.fields.systemConfigHidden")}
                 </span>
               </div>
             )}
@@ -901,14 +922,14 @@ export function McpServerDetail({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-            HTTP Headers
+            {t("mcp.fields.httpHeaders")}
           </Label>
           {!official && addHeaderRow && (
             <button
               onClick={addHeaderRow}
               className="text-[11px] text-violet-400 hover:text-violet-300 cursor-pointer"
             >
-              + 添加
+              + {t("common:action.add")}
             </button>
           )}
         </div>
@@ -940,7 +961,7 @@ export function McpServerDetail({
         ))}
       </div>
 
-      <Field label="工具白名单（留空=全部可用）">
+      <Field label={t("mcp.fields.toolAllowlistEdit")}>
         {toolsList && toolsList.length > 0 ? (
           <ToolAllowlist
             tools={toolsList}
@@ -948,7 +969,7 @@ export function McpServerDetail({
               f.toolList
                 ? f.toolList
                     .split(",")
-                    .map((t) => t.trim())
+                    .map((tool) => tool.trim())
                     .filter(Boolean)
                 : []
             }
@@ -958,23 +979,25 @@ export function McpServerDetail({
           <div className="flex flex-wrap gap-1.5">
             {f.toolList
               .split(",")
-              .map((t: string) => t.trim())
+              .map((tool: string) => tool.trim())
               .filter(Boolean)
-              .map((t: string) => (
+              .map((tool: string) => (
                 <span
-                  key={t}
+                  key={tool}
                   className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50 font-mono"
                 >
-                  {t}
+                  {tool}
                 </span>
               ))}
           </div>
         ) : (
-          <p className="text-xs text-zinc-500">请先测试连接获取工具列表</p>
+          <p className="text-xs text-zinc-500">
+            {t("mcp.tools.testFirst")}
+          </p>
         )}
       </Field>
 
-      <Field label="超时 (ms)">
+      <Field label={t("mcp.fields.timeout")}>
         <Input
           type="number"
           min={0}
