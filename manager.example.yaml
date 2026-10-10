@@ -1,3 +1,10 @@
+# Manager 配置示例：manager 只从这个配置文件读取配置，不再支持环境变量覆盖
+# （2026-10-09 移除 applyManagerEnv）。复制到 data/manager.yaml（本地）或
+# deploy/manager.yaml（部署）后填入真实值。
+#
+# 本文件包含 DSN、JWT 密钥、管理员密码等敏感值：请限制文件权限（如 0600），
+# 并确保它不会被提交到仓库。
+
 server:
   addr: ":9090"
 
@@ -60,15 +67,15 @@ storage:
   endpoint: "https://s3.cn-east-1.qiniucs.com"   # 七牛 Kodo 华东-浙江；区域对照见七牛《服务域名》
   region: "cn-east-1"                            # 必须与 endpoint 的区域一致（参与签名）
   bucket: "your-bucket"                          # 七牛填「S3 空间名」，见空间概览（可能不同于七牛空间名）
-  access_key: ""                                 # 建议留空，改用环境变量
-  secret_key: ""                                 # STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY
+  access_key: ""                                 # 敏感值：注意配置文件权限，不要提交到仓库
+  secret_key: ""                                 # 敏感值：注意配置文件权限，不要提交到仓库
   use_path_style: true                           # 七牛 / MinIO 建议 true；AWS S3 可设为 false
   prefix: ""                                     # 可选 key 前缀，多环境共用一个桶时用 dev/prod
   presign_ttl: "15m"                             # 预签名 URL 有效期（列表、预览、下载都走它）
   max_upload_size: 52428800                      # 单文件上限 50MB（按用途还有更小的限制）
 
 # 服务间调用的共享 token（wsserver → manager 的 /internal/billing/*）。
-# 建议只走环境变量 INTERNAL_TOKEN，不落配置文件。
+# 敏感值：注意配置文件权限，不要提交到仓库。
 #
 # 留空 = /internal/billing/* **拒绝一切请求**（不是“不鉴权”）：忘了配如果等于放行，
 # 那迟早会发生在生产上。存量 /internal/* 接口暂不受它影响。
@@ -95,7 +102,7 @@ internal:
 # 支付默认关闭——没配商户密钥就启用，用户点「充值」那一刻才会失败）。
 #
 # 需要公网可达的回调地址：把 notify_url 指到 manager 的 /pay/epay/notify。
-# 商户密钥建议只走环境变量 EPAY_KEY，不落配置文件。
+# 商户密钥是敏感值：注意配置文件权限，不要提交到仓库。
 #
 # 接入后建议在网关后台把 /pay/epay/notify 加进白名单/回源规则（如果网关有的话），
 # 并确认 notify_url 走的是直连而不是经过会丢掉 POST body 的缓存/代理。
@@ -104,7 +111,7 @@ payment:
   enabled: true                     # nil 或 false = 未接入
   api_base_url: "https://pay.example.com"  # 必须 https：查询/退款接口会带商户密钥
   pid: 1001                         # 商户 ID
-  key: ""                           # 商户密钥（建议只走 EPAY_KEY 环境变量）
+  key: ""                           # 商户密钥（敏感值：注意配置文件权限）
   notify_url: "https://api.example.com/pay/epay/notify"  # 异步通知，公网可达
   return_url: "https://www.example.com/pay/epay/return"  # 同步跳转（后端路由）
   channels: ["epay:alipay", "epay:wxpay"]  # 开放哪些渠道，留空 = 全部

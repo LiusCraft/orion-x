@@ -23,7 +23,7 @@ func InternalAuth(token string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !configured {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "internal token is not configured; set internal.token (env INTERNAL_TOKEN)",
+				"error": "internal token is not configured; set internal.token in the manager config file",
 			})
 			return
 		}

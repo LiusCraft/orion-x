@@ -164,7 +164,7 @@ curl -s -X POST localhost:9090/api/auth/login -H 'Content-Type: application/json
 
 无阻塞性问题。关键假设「目标 SMTP 可正常发信」的验证方式：上线前用 §D 的手工步骤跑通一封真实邮件；失败则开关保持 false，不影响系统其它部分。
 
-另一个非阻塞项：生产 compose 目前不挂载 manager 配置文件，本期按要求不新增环境变量；部署侧如何注入配置（挂载 `manager.yaml`，含 `redis.addr`）以及 Redis 实例由部署体系统一处理。
+另一个非阻塞项：生产 compose 已改为挂载 `deploy/manager.yaml`（2026-10-09 移除 `applyManagerEnv` 后，manager 配置只从文件读取，`redis.addr` 也写在该文件）；Redis 实例由部署体系统一处理。
 
 ## 支撑材料
 
@@ -178,8 +178,8 @@ curl -s -X POST localhost:9090/api/auth/login -H 'Content-Type: application/json
 | GitHub 邮箱来源保证 verified、排除 noreply | `internal/oauth/github/github.go:146-159` |
 | 用户表结构（Email 唯一、无验证字段） | `internal/store/models.go:20-29` |
 | 迁移入口（AutoMigrate 列表） | `internal/store/db.go:13-24` |
-| 配置加载 + 环境变量覆盖 | `cmd/manager/config.go:308-376` |
-| 生产部署只走环境变量（compose → manager env） | `deploy/docker-compose.yml:17-27`、`deploy/.env.example` |
+| 配置加载（`loadManagerConfig`，只读文件） | `cmd/manager/config.go` |
+| 生产部署挂载配置文件（compose → `/app/data/manager.yaml`） | `deploy/docker-compose.yml`、`deploy/README.md` |
 
 为什么现在做：开放注册的控制台需要挡住「随手填个邮箱就建号」，但完全禁止邮箱密码注册（github_only）过于激进，改为邮箱验证门槛。
 
@@ -196,7 +196,7 @@ curl -s -X POST localhost:9090/api/auth/login -H 'Content-Type: application/json
 | FR-7 | 开关开启但 `smtp.host/from` 或 `auth.verify_url_base` 缺失 → 启动失败 | `NewAuthHandler` 单测 + 手工 |
 | FR-8 | SMTP 支持 starttls / implicit / none；敏感值本阶段只从配置文件读取 | mailer 单测 + `manager.example.yaml` |
 
-约束：向后兼容（默认关闭）；不引入新依赖；本阶段不新增环境变量，配置只从 manager 配置文件读取（`applyManagerEnv` 计划废弃，见 `cmd/manager/config.go` TODO）。
+约束：向后兼容（默认关闭）；不引入新依赖；本阶段不新增环境变量，配置只从 manager 配置文件读取（`applyManagerEnv` 已于 2026-10-09 移除，环境变量覆盖彻底取消）。
 
 ### C. 业界调研
 
@@ -263,3 +263,4 @@ curl -s -X POST https://console.example.com/api/auth/register -H 'Content-Type: 
 - 2026-10-03：评审五调整。服务未上线，删除存量回填与兼容逻辑；令牌/重发冷却从关系库移到内存实现（接口 `TokenStore`/`ResendThrottle`，预留 Redis），handler 字段存接口；删除 `email_verification_tokens` 表与相关 store 代码。
 - 2026-10-03：评审六调整。不为两个小接口单开 `internal/emailverify` 包，接口与内存实现收进 handler 包（`handler/email_verify_store.go`），由 `NewManagerServer` 注入。
 - 2026-10-03：评审七调整。去掉接口抽象与内存实现，直接使用 Redis（`handler.VerifyStore`：SET TTL / GETDEL / SET NX EX，Redis 6.2+）；新增 `redis` 配置段与启动探活，handler 配置判定新增 `redis.addr` 缺件报错；测试改用 miniredis。
+- 2026-10-09：移除 `applyManagerEnv`，manager 配置单一来源（文件）；生产 compose 改为挂载 `deploy/manager.yaml`，敏感值暂随配置文件注入（独立加解密方案另议）。

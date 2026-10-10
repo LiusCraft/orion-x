@@ -18,13 +18,14 @@ services:
     image: ${ORION_X_IMAGE:?set ORION_X_IMAGE in deploy/.env}:${ORION_X_TAG:-latest}
     command: ["manager"]
     restart: unless-stopped
-    environment:
-      DB_DSN: postgres://${POSTGRES_USER:-orion}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-orionx}?sslmode=disable
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      # Required only until the initial administrator has been created.
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      # manager 只从配置文件读取配置。首次部署先执行 ./deploy.sh init-config
+      # （或 cp manager.example.yaml deploy/manager.yaml），再填入真实凭据。
+      # 宿主机文件缺失或权限不足时容器起不来，这正是 fail closed。
+      - type: bind
+        source: ./manager.yaml
+        target: /app/data/manager.yaml
+        read_only: true
     depends_on:
       postgres:
         condition: service_healthy

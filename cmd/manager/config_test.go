@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -199,5 +201,64 @@ smtp:
 	}
 	if cfg.SMTP.From != "no-reply@example.com" {
 		t.Errorf("smtp.from = %q, want no-reply@example.com", cfg.SMTP.From)
+	}
+}
+
+// TestLoadManagerConfigIgnoresEnv 钉住「配置文件是唯一来源」：移除 applyManagerEnv
+// 后，环境变量不能再覆盖任何字段（回归：曾经 15 个 env 会静默覆盖文件值）。
+func TestLoadManagerConfigIgnoresEnv(t *testing.T) {
+	envs := map[string]string{
+		"DB_DSN":               "postgres://env/override",
+		"JWT_SECRET":           "env-secret",
+		"LOG_LEVEL":            "debug",
+		"ADMIN_USERNAME":       "env-admin",
+		"ADMIN_PASSWORD":       "env-password",
+		"GITHUB_CLIENT_ID":     "env-client-id",
+		"GITHUB_CLIENT_SECRET": "env-client-secret",
+		"GITHUB_REDIRECT_URL":  "https://env.example.com/callback",
+		"INTERNAL_TOKEN":       "env-internal-token",
+		"EPAY_KEY":             "env-epay-key",
+		"STORAGE_ENDPOINT":     "https://env.example.com",
+		"STORAGE_REGION":       "env-region",
+		"STORAGE_BUCKET":       "env-bucket",
+		"STORAGE_ACCESS_KEY":   "env-access-key",
+		"STORAGE_SECRET_KEY":   "env-secret-key",
+	}
+	for k, v := range envs {
+		t.Setenv(k, v)
+	}
+
+	path := filepath.Join(t.TempDir(), "manager.yaml")
+	if err := os.WriteFile(path, []byte("database:\n  dsn: postgres://file/db\njwt:\n  secret: file-secret\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := loadManagerConfig(path)
+	if err != nil {
+		t.Fatalf("loadManagerConfig() error = %v", err)
+	}
+	if cfg.Database.DSN != "postgres://file/db" {
+		t.Errorf("Database.DSN = %q, want the file value", cfg.Database.DSN)
+	}
+	if cfg.JWT.Secret != "file-secret" {
+		t.Errorf("JWT.Secret = %q, want the file value", cfg.JWT.Secret)
+	}
+	if cfg.Logging.Level != "info" {
+		t.Errorf("Logging.Level = %q, want default info (env ignored)", cfg.Logging.Level)
+	}
+	if cfg.Admin.Username != "admin" {
+		t.Errorf("Admin.Username = %q, want default admin (env ignored)", cfg.Admin.Username)
+	}
+	if cfg.Admin.Password != "" || cfg.GithubOAuth.ClientID != "" || cfg.GithubOAuth.ClientSecret != "" ||
+		cfg.Internal.Token != "" || cfg.Payment.Key != "" || cfg.Storage.AccessKey != "" || cfg.Storage.SecretKey != "" {
+		t.Errorf("config picked up env values: %+v", cfg)
+	}
+}
+
+// TestLoadManagerConfigMissingFileFails 钉住 fail closed：配置文件缺失是启动
+// 错误，不能静默退回默认值（挂着空 DSN 起来再报错会掩盖真正的漏挂载）。
+func TestLoadManagerConfigMissingFileFails(t *testing.T) {
+	if _, err := loadManagerConfig(filepath.Join(t.TempDir(), "absent.yaml")); err == nil {
+		t.Fatal("loadManagerConfig() error = nil, want an error for a missing config file")
 	}
 }

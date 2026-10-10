@@ -6,6 +6,16 @@ cd "$(dirname "$0")"
 CMD=${1:-help}
 
 case "$CMD" in
+  init-config)
+    if [ -f manager.yaml ]; then
+      echo "deploy/manager.yaml already exists; not overwriting"
+      exit 0
+    fi
+    cp ../manager.example.yaml manager.yaml
+    chmod 600 manager.yaml
+    echo "created deploy/manager.yaml (mode 0600)"
+    echo "fill in database.dsn (same password as POSTGRES_PASSWORD), jwt.secret, admin.password and any optional sections before starting manager"
+    ;;
   update)
     docker compose pull
     docker compose up -d --force-recreate
@@ -29,6 +39,7 @@ case "$CMD" in
     echo "Usage: $0 <command>"
     echo ""
     echo "Commands:"
+    echo "  init-config    从 manager.example.yaml 生成 deploy/manager.yaml（已存在则跳过）"
     echo "  update         拉取最新镜像并重建服务"
     echo "  restart        重启服务"
     echo "  status|ps      查看服务状态"
