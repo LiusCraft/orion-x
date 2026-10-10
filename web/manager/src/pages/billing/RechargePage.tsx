@@ -10,6 +10,7 @@
 // 会去翻错地方。
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	AlertCircle,
 	CheckCircle2,
@@ -68,7 +69,8 @@ const POLL_INTERVAL_MS = 3000;
 const MICRO_PER_CENT = 10_000;
 
 export default function RechargePage() {
-	useDocumentTitle("余额充值");
+	const { t } = useTranslation(["billingPages", "common"]);
+	useDocumentTitle(t("recharge.title"));
 
 	const [summary, setSummary] = useState<BillingSummary | null>(null);
 	const [summaryLoading, setSummaryLoading] = useState(true);
@@ -111,7 +113,10 @@ export default function RechargePage() {
 					setBillingOff(true);
 					return;
 				}
-				setBanner({ kind: "error", text: userFacingError(err, "加载余额失败") });
+				setBanner({
+					kind: "error",
+					text: userFacingError(err, t("recharge.loadBalanceFailed")),
+				});
 			})
 			.finally(() => {
 				if (!cancelled) setSummaryLoading(false);
@@ -144,7 +149,10 @@ export default function RechargePage() {
 					setPaymentOff(true);
 					return;
 				}
-				setBanner({ kind: "error", text: userFacingError(err, "加载充值信息失败") });
+				setBanner({
+					kind: "error",
+					text: userFacingError(err, t("recharge.loadConfigFailed")),
+				});
 			})
 			.finally(() => {
 				if (!cancelled) setConfigLoading(false);
@@ -171,7 +179,10 @@ export default function RechargePage() {
 					setPaymentOff(true);
 					return;
 				}
-				setBanner({ kind: "error", text: userFacingError(err, "加载充值记录失败") });
+				setBanner({
+					kind: "error",
+					text: userFacingError(err, t("recharge.loadOrdersFailed")),
+				});
 			})
 			.finally(() => {
 				if (!cancelled) setListLoading(false);
@@ -197,11 +208,18 @@ export default function RechargePage() {
 						isPaymentCredited(data.status)
 							? {
 									kind: "ok",
-									text: `已到账 ${formatMicro(data.amount_micro, data.currency)}，余额已更新`,
+									text: t("recharge.creditedBanner", {
+										amount: formatMicro(
+											data.amount_micro,
+											data.currency,
+										),
+									}),
 								}
 							: {
 									kind: "error",
-									text: `订单${paymentStatusLabel(data.status)}，未到账`,
+									text: t("recharge.notCreditedBanner", {
+										status: paymentStatusLabel(data.status),
+									}),
 								},
 					);
 					setPending(null);
@@ -226,11 +244,17 @@ export default function RechargePage() {
 	// 上下限也来自服务端：写死在页面上的话，改了配置这里就会说错话。
 	const amountError = (() => {
 		if (amount.trim() === "") return "";
-		if (micro === null) return "金额格式不对，请输入数字。";
-		if (micro <= 0) return "金额必须大于 0。";
-		if (micro % MICRO_PER_CENT !== 0) return "最多两位小数。";
-		if (micro < minMicro) return `单笔最低 ${formatMicro(minMicro, currency)}。`;
-		if (micro > maxMicro) return `单笔最高 ${formatMicro(maxMicro, currency)}。`;
+		if (micro === null) return t("recharge.amountInvalid");
+		if (micro <= 0) return t("recharge.amountPositive");
+		if (micro % MICRO_PER_CENT !== 0) return t("recharge.amountTwoDecimals");
+		if (micro < minMicro)
+			return t("recharge.amountMin", {
+				amount: formatMicro(minMicro, currency),
+			});
+		if (micro > maxMicro)
+			return t("recharge.amountMax", {
+				amount: formatMicro(maxMicro, currency),
+			});
 		return "";
 	})();
 	const canSubmit =
@@ -256,7 +280,7 @@ export default function RechargePage() {
 			setAmount("");
 			setBanner({
 				kind: "ok",
-				text: `订单 ${data.out_trade_no} 已创建，请完成支付`,
+				text: t("recharge.orderCreated", { order: data.out_trade_no }),
 			});
 			setReloadKey((key) => key + 1);
 		} catch (err) {
@@ -264,7 +288,10 @@ export default function RechargePage() {
 				setPaymentOff(true);
 				return;
 			}
-			setBanner({ kind: "error", text: userFacingError(err, "下单失败，请稍后重试") });
+			setBanner({
+				kind: "error",
+				text: userFacingError(err, t("recharge.createOrderFailed")),
+			});
 		} finally {
 			setSubmitting(false);
 		}
@@ -278,8 +305,8 @@ export default function RechargePage() {
 					<Panel bodyClassName="p-0">
 						<EmptyState
 							icon={Wallet}
-							title="余额功能未开通"
-							hint="当前环境未开通余额与充值功能。如需使用请联系管理员。"
+							title={t("recharge.balanceDisabledTitle")}
+							hint={t("recharge.balanceDisabledHint")}
 						/>
 					</Panel>
 				</div>
@@ -307,8 +334,8 @@ export default function RechargePage() {
 					<Panel bodyClassName="p-0">
 						<EmptyState
 							icon={Wallet}
-							title="暂不支持在线充值"
-							hint="余额仍可正常使用。如需充值请联系管理员。"
+							title={t("recharge.paymentDisabledTitle")}
+							hint={t("recharge.paymentDisabledHint")}
 						/>
 					</Panel>
 				) : (
@@ -345,8 +372,8 @@ export default function RechargePage() {
 				)}
 
 				<Panel
-					title="充值记录"
-					description="「支付成功」表示已完成付款，「已到账」表示余额已更新，通常只差一两秒"
+					title={t("recharge.ordersTitle")}
+					description={t("recharge.ordersHint")}
 					actions={
 						<button
 							onClick={() => setReloadKey((key) => key + 1)}
@@ -357,7 +384,7 @@ export default function RechargePage() {
 								className={`w-3.5 h-3.5 ${listLoading ? "animate-spin" : ""}`}
 								strokeWidth={1.5}
 							/>
-							刷新
+							{t("common:action.refresh")}
 						</button>
 					}
 					bodyClassName="p-0"
@@ -367,19 +394,19 @@ export default function RechargePage() {
 					) : orders.length === 0 ? (
 						<EmptyState
 							icon={QrCode}
-							title="还没有充值记录"
-							hint="在上面的表单里选一个金额，扫码或跳转收银台完成支付即可。"
+							title={t("recharge.ordersEmptyTitle")}
+							hint={t("recharge.ordersEmptyHint")}
 						/>
 					) : (
 						<TableShell
 							head={
 								<>
-									<Th>订单号</Th>
-									<Th>金额</Th>
-									<Th>支付方式</Th>
-									<Th>状态</Th>
-									<Th>创建时间</Th>
-									<Th>到账时间</Th>
+									<Th>{t("recharge.column.orderNo")}</Th>
+									<Th>{t("recharge.column.amount")}</Th>
+									<Th>{t("recharge.column.paymentMethod")}</Th>
+									<Th>{t("recharge.column.status")}</Th>
+									<Th>{t("recharge.column.createdAt")}</Th>
+									<Th>{t("recharge.column.creditedAt")}</Th>
 								</>
 							}
 						>
@@ -424,22 +451,23 @@ export default function RechargePage() {
 }
 
 function Header({ balanceHint }: { balanceHint: string | null }) {
+	const { t } = useTranslation(["billingPages", "common"]);
 	return (
 		<div className="border-b border-zinc-800/80 px-8 py-5">
 			<div className="flex items-center justify-between gap-4">
 				<div>
 					<h1 className="text-lg font-semibold text-white flex items-center gap-2">
 						<Wallet className="w-4 h-4 text-violet-400" strokeWidth={1.5} />
-						余额充值
+						{t("recharge.title")}
 					</h1>
 					<p className="text-sm text-zinc-500 mt-0.5">
-						支付成功后余额立即到账，可用于扣费
+						{t("recharge.subtitle")}
 					</p>
 				</div>
 				{balanceHint && (
 					<div className="text-right shrink-0">
 						<p className="text-[11px] text-zinc-500 uppercase tracking-wider">
-							当前余额
+							{t("recharge.currentBalance")}
 						</p>
 						<p className="text-xl font-semibold text-amber-400 font-mono">
 							{balanceHint}
@@ -480,20 +508,24 @@ function RechargeForm({
 	canSubmit: boolean;
 	onSubmit: () => void;
 }) {
+	const { t } = useTranslation(["billingPages", "common"]);
 	if (loading) {
 		return (
-			<Panel title="选择金额">
-				<LoadingBlock label="加载充值信息..." />
+			<Panel title={t("recharge.selectAmount")}>
+				<LoadingBlock label={t("recharge.loadingConfig")} />
 			</Panel>
 		);
 	}
 
 	return (
-		<Panel title="选择金额" description="支付成功后余额立即到账">
+		<Panel
+			title={t("recharge.selectAmount")}
+			description={t("recharge.selectAmountHint")}
+		>
 			<div className="space-y-4">
 				<div className="space-y-1.5">
 					<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-						金额（元）
+						{t("recharge.amountLabel")}
 					</Label>
 					<div className="flex flex-wrap items-center gap-2">
 						{RECHARGE_PRESETS.map((preset) => (
@@ -515,7 +547,7 @@ function RechargeForm({
 							onKeyDown={(e) => {
 								if (e.key === "Enter" && canSubmit) onSubmit();
 							}}
-							placeholder="自定义金额"
+							placeholder={t("recharge.customAmount")}
 							inputMode="decimal"
 							className="h-8 w-36 text-sm font-mono"
 						/>
@@ -528,17 +560,24 @@ function RechargeForm({
 						{amountError ||
 							(amount.trim() === ""
 								? minMicro > 0
-									? `单笔 ${formatMicro(minMicro, currency)} 起，最多两位小数`
-									: "最多两位小数"
+									? t("recharge.amountHintMin", {
+											amount: formatMicro(
+												minMicro,
+												currency,
+											),
+										})
+									: t("recharge.amountHintTwoDecimals")
 								: micro !== null
-									? `将充值 ${formatMicro(micro, currency)}`
+									? t("recharge.amountToRecharge", {
+											amount: formatMicro(micro, currency),
+										})
 									: "")}
 					</p>
 				</div>
 
 				<div className="space-y-1.5">
 					<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-						支付方式
+						{t("recharge.paymentMethod")}
 					</Label>
 					<SimpleSelect
 						value={channel}
@@ -556,7 +595,7 @@ function RechargeForm({
 					disabled={!canSubmit}
 					className="bg-violet-600 hover:bg-violet-500 text-white"
 				>
-					{submitting ? "下单中..." : "去支付"}
+					{submitting ? t("recharge.creating") : t("recharge.payNow")}
 				</Button>
 			</div>
 		</Panel>
@@ -580,18 +619,19 @@ function PendingPanel({
 	onDismiss: () => void;
 	onBanner: (message: BannerMessage) => void;
 }) {
+	const { t } = useTranslation(["billingPages", "common"]);
 	if (!pending) {
 		return (
-			<Panel title="怎么充值">
+			<Panel title={t("recharge.howTo")}>
 				<div className="space-y-3">
 					<Hint icon={AlertCircle} tone="zinc">
-						支付完成后本页会自动刷新；余额没变就说明支付还没成功。
+						{t("recharge.howToAutoRefresh")}
 					</Hint>
 					<Hint icon={Clock} tone="zinc">
-						订单有时效限制。付款较晚时到账会稍有延迟，请不要重复付款。
+						{t("recharge.howToExpiry")}
 					</Hint>
 					<Hint icon={CheckCircle2} tone="zinc">
-						充值金额全额进入余额。
+						{t("recharge.howToFullAmount")}
 					</Hint>
 				</div>
 			</Panel>
@@ -603,13 +643,15 @@ function PendingPanel({
 		if (!link) return;
 		navigator.clipboard
 			.writeText(link)
-			.then(() => onBanner({ kind: "ok", text: "支付链接已复制" }))
-			.catch(() => onBanner({ kind: "error", text: "复制失败，请手动选中链接复制" }));
+			.then(() => onBanner({ kind: "ok", text: t("recharge.payLinkCopied") }))
+			.catch(() =>
+				onBanner({ kind: "error", text: t("recharge.copyLinkFailed") }),
+			);
 	};
 
 	return (
 		<Panel
-			title="待支付"
+			title={t("recharge.pendingTitle")}
 			description={`${formatMicro(pending.amount_micro, pending.currency)} · ${paymentChannelLabel(pending.channel)}`}
 		>
 			<div className="space-y-4">
@@ -617,18 +659,22 @@ function PendingPanel({
 					<div className="flex flex-col items-center gap-2">
 						<img
 							src={pending.qrcode}
-							alt="支付二维码"
+							alt={t("recharge.qrAlt")}
 							className="w-40 h-40 rounded-lg bg-white p-2"
 							onError={onQrBroken}
 						/>
 						<p className="text-[11px] text-zinc-500">
-							用 {paymentChannelLabel(pending.channel)} 扫码
+							{t("recharge.scanHint", {
+								channel: paymentChannelLabel(pending.channel),
+							})}
 						</p>
 					</div>
 				)}
 
 				<div className="rounded-lg bg-zinc-800/60 px-3 py-2.5">
-					<p className="text-[10px] text-zinc-500 mb-1">订单号</p>
+					<p className="text-[10px] text-zinc-500 mb-1">
+						{t("recharge.orderNo")}
+					</p>
 					<p className="text-xs text-zinc-300 font-mono break-all">
 						{pending.out_trade_no}
 					</p>
@@ -654,7 +700,7 @@ function PendingPanel({
 							className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-violet-600 hover:bg-violet-500 text-white transition-colors"
 						>
 							<ExternalLink className="w-3.5 h-3.5" strokeWidth={1.5} />
-							打开收银台
+							{t("recharge.openCheckout")}
 						</a>
 					)}
 					<button
@@ -662,19 +708,18 @@ function PendingPanel({
 						className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 transition-colors cursor-pointer"
 					>
 						<Copy className="w-3.5 h-3.5" strokeWidth={1.5} />
-						复制链接
+						{t("recharge.copyLink")}
 					</button>
 					<button
 						onClick={onDismiss}
 						className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-700 transition-colors cursor-pointer"
 					>
-						关闭
+						{t("common:action.close")}
 					</button>
 				</div>
 
 				<p className="text-[11px] text-zinc-600 leading-relaxed">
-					支付完成后本页会自动更新。如果几分钟后余额仍未变化，稍后刷新即可
-					——系统会自动核对支付结果。
+					{t("recharge.pendingFootnote")}
 				</p>
 			</div>
 		</Panel>

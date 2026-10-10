@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, Send, Square } from "lucide-react";
@@ -26,6 +27,7 @@ export default function QuickChat({
   agentId: string;
   onBeforeConnect?: () => Promise<boolean>;
 }) {
+  const { t } = useTranslation("agents");
   // 拾音模式由客户端自己决定（对应 wsproto 的 Mode）：自动 = 持续送音频交给
   // 服务端 VAD 切分；手动 = 按住按钮的一轮，用 listen start/stop 界定。
   const [mode, setMode] = useState<"auto" | "manual">("auto");
@@ -127,7 +129,7 @@ export default function QuickChat({
       }
       if (!saved) {
         setConnecting(false);
-        setConnectionError("保存失败，未建立连接");
+        setConnectionError(t("quickChat.saveFailed"));
         return;
       }
     }
@@ -209,11 +211,13 @@ export default function QuickChat({
         setConnectionError("");
         addMsg(
           "assistant",
-          isAutoMode ? "已连接，开始对话吧" : "已连接，按住麦克风按钮说话",
+          isAutoMode
+            ? t("quickChat.connectedAuto")
+            : t("quickChat.connectedManual"),
           "system",
         );
       } else if (type === "stt" && msg.text) {
-        addMsg("user", msg.text as string, "语音识别");
+        addMsg("user", msg.text as string, t("quickChat.sttLabel"));
       } else if (
         type === "tts" &&
         msg.text &&
@@ -225,8 +229,8 @@ export default function QuickChat({
 
     ws.onerror = () => {
       setConnecting(false);
-      setConnectionError("连接失败，请重试");
-      addMsg("assistant", "连接失败", "error");
+      setConnectionError(t("quickChat.connectFailedRetry"));
+      addMsg("assistant", t("quickChat.connectFailed"), "error");
     };
     ws.onclose = () => {
       stopMic();
@@ -235,7 +239,7 @@ export default function QuickChat({
       audioCtxRef.current?.close();
       audioCtxRef.current = null;
     };
-  }, [agentId, addMsg, onBeforeConnect, stopMic, startMic, isAutoMode]);
+  }, [agentId, addMsg, onBeforeConnect, stopMic, startMic, isAutoMode, t]);
 
   const disconnect = useCallback(() => {
     send({ type: "abort" });
@@ -247,12 +251,12 @@ export default function QuickChat({
   }, [send, stopMic]);
 
   const handleSendText = useCallback(() => {
-    const t = text.trim();
-    if (!t || !wsRef.current) return;
-    send({ type: "listen", state: "detect", text: t });
-    addMsg("user", t, "文本");
+    const value = text.trim();
+    if (!value || !wsRef.current) return;
+    send({ type: "listen", state: "detect", text: value });
+    addMsg("user", value, t("quickChat.textLabel"));
     setText("");
-  }, [text, send, addMsg]);
+  }, [text, send, addMsg, t]);
 
   const pttRef = useRef(false);
   const handlePTTDown = useCallback(() => {
@@ -282,11 +286,18 @@ export default function QuickChat({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-white">快速体验</span>
+          <span className="text-sm font-medium text-white">
+            {t("quickChat.title")}
+          </span>
           <span
             className={`text-xs ${connected ? "text-emerald-400" : connecting ? "text-yellow-400" : "text-zinc-500"}`}
           >
-            ● {connected ? "已连接" : connecting ? "连接中..." : ""}
+            ●{" "}
+            {connected
+              ? t("quickChat.connected")
+              : connecting
+                ? t("quickChat.connecting")
+                : ""}
           </span>
           {sessionId && (
             <span className="text-[10px] text-zinc-600 font-mono truncate max-w-[120px]">
@@ -297,7 +308,7 @@ export default function QuickChat({
         <div className="flex items-center gap-2">
           <div
             className={`flex rounded-lg border border-zinc-800 overflow-hidden ${connected ? "opacity-50" : ""}`}
-            title="拾音模式（连接前选择）：自动 = 持续监听交给服务端 VAD；按住说话 = 手动按键录音"
+            title={t("quickChat.modeTitle")}
           >
             {(["auto", "manual"] as const).map((m) => (
               <button
@@ -310,7 +321,7 @@ export default function QuickChat({
                     : "text-zinc-500 hover:text-zinc-300"
                 }`}
               >
-                {m === "auto" ? "自动" : "按住说话"}
+                {m === "auto" ? t("quickChat.modeAuto") : t("quickChat.modeManual")}
               </button>
             ))}
           </div>
@@ -321,7 +332,7 @@ export default function QuickChat({
               onClick={disconnect}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 h-7 px-3 text-xs"
             >
-              断开
+              {t("quickChat.disconnect")}
             </Button>
           )}
         </div>
@@ -363,13 +374,15 @@ export default function QuickChat({
         {!connected && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-zinc-950/90 px-6 text-center backdrop-blur-[2px]">
             <p className="text-zinc-400 text-sm">
-              {connecting ? "正在保存并连接..." : connectionError || "连接后开始体验"}
+              {connecting
+                ? t("quickChat.savingConnecting")
+                : connectionError || t("quickChat.connectPrompt")}
             </p>
             {!connecting && !connectionError && (
               <p className="text-[11px] text-zinc-600">
                 {isAutoMode
-                  ? "自动模式：连接后直接说话即可"
-                  : "按住说话模式：连接后按住按钮录音"}
+                  ? t("quickChat.autoHint")
+                  : t("quickChat.manualHint")}
               </p>
             )}
             {!connecting && (
@@ -377,7 +390,7 @@ export default function QuickChat({
                 onClick={connect}
                 className="bg-violet-600 hover:bg-violet-500 text-white h-10 px-6 text-sm"
               >
-                立即体验
+                {t("quickChat.start")}
               </Button>
             )}
             {connecting && <Loader2 className="w-5 h-5 text-violet-400 animate-spin" />}
@@ -394,9 +407,9 @@ export default function QuickChat({
           placeholder={
             connected
               ? isAutoMode
-                ? "输入文本或直接说话..."
-                : "输入文本或按住按钮说话..."
-              : "请先连接"
+                ? t("quickChat.inputAuto")
+                : t("quickChat.inputManual")
+              : t("quickChat.inputDisconnected")
           }
           disabled={!connected}
           className="h-8 text-sm flex-1"
@@ -433,7 +446,7 @@ export default function QuickChat({
                     : "bg-zinc-800/50 border-zinc-800 text-zinc-600 cursor-not-allowed"
               }`}
           >
-            {pttRef.current ? "说话中..." : "按住说话"}
+            {pttRef.current ? t("quickChat.speaking") : t("quickChat.modeManual")}
           </button>
         )}
 

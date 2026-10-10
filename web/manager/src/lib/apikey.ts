@@ -7,6 +7,7 @@
 
 import type { ApiKeyScopeInfo, ApiKeyView } from "@/lib/api";
 import { billingErrorMessage, billingErrorStatus, formatTime, userFacingError } from "@/lib/billing";
+import i18n from "@/i18n";
 
 /** 一把 Key 的当前状态。 */
 export type ApiKeyStatus = "valid" | "revoked" | "expired";
@@ -26,12 +27,6 @@ export function apiKeyStatus(
 	return "valid";
 }
 
-const STATUS_LABELS: Record<ApiKeyStatus, string> = {
-	valid: "有效",
-	revoked: "已撤销",
-	expired: "已过期",
-};
-
 const STATUS_TONES: Record<ApiKeyStatus, ApiKeyTone> = {
 	valid: "emerald",
 	revoked: "zinc",
@@ -39,7 +34,7 @@ const STATUS_TONES: Record<ApiKeyStatus, ApiKeyTone> = {
 };
 
 export function apiKeyStatusLabel(status: ApiKeyStatus): string {
-	return STATUS_LABELS[status];
+	return i18n.t(`account:status.${status}`);
 }
 
 export function apiKeyStatusTone(status: ApiKeyStatus): ApiKeyTone {
@@ -61,7 +56,7 @@ export function scopeDescription(
 
 /** 最后使用：空值在这里是有含义的（从未用过），所以不走 formatTime 的「—」。 */
 export function formatLastUsed(value?: string | null): string {
-	return value ? formatTime(value) : "从未使用";
+	return value ? formatTime(value) : i18n.t("account:neverUsed");
 }
 
 /** 503 = 这个部署没开凭证功能。这是默认状态，不是错误。 */
@@ -106,24 +101,24 @@ export function apiKeyErrorText(err: unknown, fallback: string): string {
 	return HAN.test(text) ? text : fallback;
 }
 
-/** 没有创建权限时的说明；按钮的置灰理由与提交失败的兜底共用一句话。 */
-export const ADMIN_ONLY_HINT = "当前暂只允许管理员创建 Key。";
+/** 没有创建权限时的说明 key；按钮的置灰理由与提交失败的兜底共用一句话。 */
+export const ADMIN_ONLY_HINT_KEY = "account:adminOnlyHint";
 
 /** 创建失败给客户看的话。 */
 export function createKeyErrorText(err: unknown): string {
 	if (isKeyQuotaExceeded(err)) {
-		return "Key 数量已达上限，请先撤销不再使用的 Key，再创建新的。";
+		return i18n.t("account:create.quota");
 	}
-	if (isAdminOnly(err)) return ADMIN_ONLY_HINT;
-	return apiKeyErrorText(err, "创建失败，请检查名称与勾选的权限后重试");
+	if (isAdminOnly(err)) return i18n.t(ADMIN_ONLY_HINT_KEY);
+	return apiKeyErrorText(err, i18n.t("account:create.failed"));
 }
 
 /** 撤销失败给客户看的话。 */
 export function revokeKeyErrorText(err: unknown): string {
-	if (isApiKeyDisabled(err)) return "当前环境还没有开通 API Key 功能。";
+	if (isApiKeyDisabled(err)) return i18n.t("account:revoke.disabled");
 	// 404：列表里的行已经过时了（被别人撤了，或者这行本来就不是自己的）。
 	if (billingErrorStatus(err) === 404) {
-		return "这把 Key 已经不在列表里了，请刷新看看最新状态。";
+		return i18n.t("account:revoke.notFound");
 	}
-	return apiKeyErrorText(err, "撤销失败，请重试");
+	return apiKeyErrorText(err, i18n.t("account:revoke.failed"));
 }

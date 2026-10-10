@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   voicebotApi,
   deviceApi,
@@ -142,12 +143,12 @@ const DC: BotConfig = {
 };
 
 const EMOTIONS = ["happy", "sad", "angry", "calm", "excited"] as const;
-const EMOTION_LABELS: Record<string, string> = {
-  happy: "开心",
-  sad: "悲伤",
-  angry: "生气",
-  calm: "平静",
-  excited: "兴奋",
+const EMOTION_KEY: Record<string, string> = {
+  happy: "emotions.happy",
+  sad: "emotions.sad",
+  angry: "emotions.angry",
+  calm: "emotions.calm",
+  excited: "emotions.excited",
 };
 
 /**
@@ -272,6 +273,7 @@ function channelHint(
 }
 
 export default function AgentDetailPage() {
+  const { t, i18n } = useTranslation(["agents", "common"]);
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -279,7 +281,7 @@ export default function AgentDetailPage() {
   const [cfg, setCfg] = useState<BotConfig>(structuredClone(DC));
 
   // 标题跟着智能体名字走：加载完成前先占一个通用名。
-  useDocumentTitle(name || "智能体详情");
+  useDocumentTitle(name || t("detail.titleFallback"));
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -480,14 +482,14 @@ export default function AgentDetailPage() {
     } catch (e: unknown) {
       setSaveErr(
         (e as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? "保存失败",
+          ?.error ?? t("detail.saveFailed"),
       );
       setSaveStatus("err");
       return false;
     } finally {
       setSaving(false);
     }
-  }, [cfg, id, name]);
+  }, [cfg, id, name, t]);
 
   const handleSave = async () => {
     await saveAgent();
@@ -557,7 +559,7 @@ export default function AgentDetailPage() {
     } catch (e: unknown) {
       setDevErr(
         (e as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? "添加失败",
+          ?.error ?? t("detail.device.addFailed"),
       );
     } finally {
       setDevAdding(false);
@@ -565,7 +567,7 @@ export default function AgentDetailPage() {
   };
 
   const handleDeleteDevice = async (devId: string) => {
-    if (!id || !confirm(`确认删除设备 ${devId}？`)) return;
+    if (!id || !confirm(t("detail.device.deleteConfirm", { id: devId }))) return;
     await deviceApi.remove(id, devId);
     setDevices((prev) => prev.filter((d) => d.id !== devId));
   };
@@ -638,7 +640,8 @@ export default function AgentDetailPage() {
     } catch (e: unknown) {
       setChannelErr(
         (e as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? `保存 ${platform.display_name} 配置失败`,
+          ?.error ??
+          t("detail.channel.saveFailed", { platform: platform.display_name }),
       );
     } finally {
       setChannelSaving(null);
@@ -649,7 +652,15 @@ export default function AgentDetailPage() {
     deviceID: string,
     platform: ChannelPlatform,
   ) => {
-    if (!id || !confirm(`确认断开此设备的 ${platform.display_name}？`)) return;
+    if (
+      !id ||
+      !confirm(
+        t("detail.channel.disconnectConfirm", {
+          platform: platform.display_name,
+        }),
+      )
+    )
+      return;
     setChannelSaving(`${deviceID}:${platform.name}`);
     setChannelErr("");
     try {
@@ -658,7 +669,10 @@ export default function AgentDetailPage() {
     } catch (e: unknown) {
       setChannelErr(
         (e as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? `断开 ${platform.display_name} 失败`,
+          ?.error ??
+          t("detail.channel.disconnectFailed", {
+            platform: platform.display_name,
+          }),
       );
     } finally {
       setChannelSaving(null);
@@ -712,7 +726,7 @@ export default function AgentDetailPage() {
   }, [expandedKB, docs]);
 
   const handleDeleteKB = async (kbId: string) => {
-    if (!confirm("确认解绑该知识库？")) return;
+    if (!confirm(t("detail.kb.unbindConfirm"))) return;
     try {
       await knowledgeApi.unbindKB(id!, kbId);
       setKbs((prev) => prev.filter((k) => k.id !== kbId));
@@ -785,7 +799,7 @@ export default function AgentDetailPage() {
   };
 
   const handleDeleteDoc = async (docId: string) => {
-    if (!confirm("确认删除该文档？")) return;
+    if (!confirm(t("detail.doc.deleteConfirm"))) return;
     try {
       await knowledgeApi.deleteDoc(docId);
       setDocs((prev) => prev.filter((d) => d.id !== docId));
@@ -819,31 +833,35 @@ export default function AgentDetailPage() {
 
   const DOC_STATUS_MAP: Record<
     string,
-    { label: string; icon: React.ElementType; cls: string }
+    { labelKey: string; icon: React.ElementType; cls: string }
   > = {
-    ready: { label: "已索引", icon: CheckCircle2, cls: "text-emerald-400" },
-    pending: { label: "等待中", icon: Clock, cls: "text-zinc-400" },
+    ready: {
+      labelKey: "docStatus.ready",
+      icon: CheckCircle2,
+      cls: "text-emerald-400",
+    },
+    pending: { labelKey: "docStatus.pending", icon: Clock, cls: "text-zinc-400" },
     parsing: {
-      label: "解析中",
+      labelKey: "docStatus.parsing",
       icon: Loader2,
       cls: "text-amber-400 animate-spin",
     },
     chunking: {
-      label: "分块中",
+      labelKey: "docStatus.chunking",
       icon: Loader2,
       cls: "text-amber-400 animate-spin",
     },
     embedding: {
-      label: "向量化",
+      labelKey: "docStatus.embedding",
       icon: Loader2,
       cls: "text-amber-400 animate-spin",
     },
     storing: {
-      label: "存储中",
+      labelKey: "docStatus.storing",
       icon: Loader2,
       cls: "text-amber-400 animate-spin",
     },
-    error: { label: "失败", icon: AlertCircle, cls: "text-red-400" },
+    error: { labelKey: "docStatus.error", icon: AlertCircle, cls: "text-red-400" },
   };
 
   const asr = cfg.asr;
@@ -900,7 +918,7 @@ export default function AgentDetailPage() {
               ) : (
                 <>
                   <Save className="w-3.5 h-3.5" />
-                  保存
+                  {t("common:action.save")}
                 </>
               )}
             </Button>
@@ -921,7 +939,7 @@ export default function AgentDetailPage() {
                   className="cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  保存并退出
+                  {t("detail.saveAndExit")}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -930,7 +948,7 @@ export default function AgentDetailPage() {
                   className="cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  删除
+                  {t("common:action.delete")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -953,46 +971,46 @@ export default function AgentDetailPage() {
           >
             <TabsList className="bg-zinc-900 border border-zinc-800 mb-0 h-auto flex-wrap gap-0.5 p-1">
               {(
-                ["基本", "语音识别", "语音合成", "数据", "MCP", "设备"] as const
-              ).map((t, i) => (
+                ["basic", "asr", "tts", "data", "mcp", "devices"] as const
+              ).map((tab) => (
                 <TabsTrigger
-                  key={t}
-                  value={["basic", "asr", "tts", "data", "mcp", "devices"][i]}
+                  key={tab}
+                  value={tab}
                   className="data-[state=active]:bg-zinc-700 data-[state=active]:text-white text-zinc-400 text-sm h-8"
                 >
-                  {t}
+                  {t(`detail.tabs.${tab}`)}
                 </TabsTrigger>
               ))}
             </TabsList>
 
             {/* ── 基本 ── */}
             <TabsContent value="basic" className="space-y-5 pt-1">
-              <Field label="智能体名称">
+              <Field label={t("detail.fields.name")}>
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className={inp}
                 />
               </Field>
-              <Field label="身份设定 (SOUL)">
+              <Field label={t("detail.fields.soul")}>
                 <Textarea
                   value={llm.soul_prompt}
                   onChange={(e) => setLlm({ soul_prompt: e.target.value })}
-                  placeholder="智能体的身份、人格、交流风格... 留空则使用默认"
+                  placeholder={t("detail.placeholders.soul")}
                   className="h-20 resize-none"
                 />
               </Field>
-              <Field label="行为规则 (RULES)">
+              <Field label={t("detail.fields.rules")}>
                 <Textarea
                   value={llm.rules_prompt}
                   onChange={(e) => setLlm({ rules_prompt: e.target.value })}
-                  placeholder="工具使用规则、对话约束... 留空则使用默认"
+                  placeholder={t("detail.placeholders.rules")}
                   className="h-20 resize-none"
                 />
               </Field>
               <div className="flex flex-wrap gap-4">
                 <div className="shrink-0">
-                  <Field label="语言">
+                  <Field label={t("detail.fields.language")}>
                     <Select
                       value={cfg.language}
                       onValueChange={(v) =>
@@ -1016,7 +1034,7 @@ export default function AgentDetailPage() {
                   </Field>
                 </div>
                 <div className="shrink-0">
-                  <Field label="聊天模型">
+                  <Field label={t("detail.fields.chatModel")}>
                     <Select
                       value={llm.model_id}
                       onValueChange={(v) => setLlm({ model_id: v ?? "" })}
@@ -1026,7 +1044,9 @@ export default function AgentDetailPage() {
                           {llmModels
                             .filter((m) => llmTypes.has(m.type))
                             .find((m) => m.id === llm.model_id)?.name || (
-                            <span className="text-zinc-500">选择模型</span>
+                            <span className="text-zinc-500">
+                              {t("detail.selectModel")}
+                            </span>
                           )}
                         </span>
                       </SelectTrigger>
@@ -1044,7 +1064,7 @@ export default function AgentDetailPage() {
                         {llmModels.filter((m) => llmTypes.has(m.type))
                           .length === 0 && (
                           <div className="px-2 py-3 text-xs text-zinc-500 text-center">
-                            暂无可用的聊天模型
+                            {t("detail.noChatModels")}
                           </div>
                         )}
                       </SelectContent>
@@ -1060,9 +1080,11 @@ export default function AgentDetailPage() {
                       aria-hidden="true"
                     />
                     <div>
-                      <Label className="text-sm text-zinc-200">深度思考</Label>
+                      <Label className="text-sm text-zinc-200">
+                        {t("detail.thinking.title")}
+                      </Label>
                       <p className="text-xs text-zinc-500 mt-0.5">
-                        默认关闭，按模型能力发送对应 thinking 参数
+                        {t("detail.thinking.desc")}
                       </p>
                     </div>
                   </div>
@@ -1071,12 +1093,12 @@ export default function AgentDetailPage() {
                     onCheckedChange={(checked) =>
                       setThinking({ mode: checked ? "enabled" : "disabled" })
                     }
-                    aria-label="启用深度思考"
+                    aria-label={t("detail.thinking.enableAria")}
                   />
                 </div>
                 {llm.thinking.mode === "enabled" && (
                   <div className="flex flex-wrap items-end gap-5">
-                    <Field label="思考强度">
+                    <Field label={t("detail.thinking.effort")}>
                       <Select
                         value={llm.thinking.effort || "default"}
                         onValueChange={(v) =>
@@ -1089,7 +1111,7 @@ export default function AgentDetailPage() {
                         <SelectTrigger className="w-40">
                           <span className="text-left flex-1">
                             {llm.thinking.effort === "default"
-                              ? "模型默认"
+                              ? t("detail.thinking.modelDefault")
                               : llm.thinking.effort}
                           </span>
                         </SelectTrigger>
@@ -1103,19 +1125,21 @@ export default function AgentDetailPage() {
                             "max",
                           ].map((effort) => (
                             <SelectItem key={effort} value={effort}>
-                              {effort === "default" ? "模型默认" : effort}
+                              {effort === "default"
+                                ? t("detail.thinking.modelDefault")
+                                : effort}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field label="思考预算">
+                    <Field label={t("detail.thinking.budget")}>
                       <div className="relative">
                         <Input
                           type="number"
                           min={1}
                           value={llm.thinking.budget_tokens ?? ""}
-                          placeholder="模型默认"
+                          placeholder={t("detail.thinking.modelDefault")}
                           onChange={(e) =>
                             setThinking({
                               budget_tokens: e.target.value
@@ -1126,7 +1150,7 @@ export default function AgentDetailPage() {
                           className="w-40 pr-14"
                         />
                         <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[11px] text-[hsl(var(--muted-foreground))]">
-                          tokens
+                          {t("detail.thinking.budgetUnit")}
                         </span>
                       </div>
                     </Field>
@@ -1138,10 +1162,10 @@ export default function AgentDetailPage() {
                             preserve_history: checked ? "all" : "none",
                           })
                         }
-                        aria-label="保留思考历史"
+                        aria-label={t("detail.thinking.preserveHistory")}
                       />
                       <Label className="text-xs text-zinc-400">
-                        保留思考历史
+                        {t("detail.thinking.preserveHistory")}
                       </Label>
                     </div>
                   </div>
@@ -1151,7 +1175,7 @@ export default function AgentDetailPage() {
 
             {/* ── ASR ── */}
             <TabsContent value="asr" className="space-y-5 pt-1">
-              <Field label="语音识别模型">
+              <Field label={t("detail.fields.asrModel")}>
                 <Select
                   value={asr.model_id}
                   onValueChange={(v) => setAsr({ model_id: v ?? "" })}
@@ -1159,7 +1183,9 @@ export default function AgentDetailPage() {
                   <SelectTrigger>
                     <span className="text-left flex-1 truncate">
                       {asrModels.find((m) => m.id === asr.model_id)?.name || (
-                        <span className="text-zinc-500">选择语音识别模型</span>
+                        <span className="text-zinc-500">
+                          {t("detail.selectAsrModel")}
+                        </span>
                       )}
                     </span>
                   </SelectTrigger>
@@ -1171,7 +1197,7 @@ export default function AgentDetailPage() {
                     ))}
                     {asrModels.length === 0 && (
                       <div className="px-2 py-3 text-xs text-zinc-500 text-center">
-                        暂无可用的语音识别模型
+                        {t("detail.noAsrModels")}
                       </div>
                     )}
                   </SelectContent>
@@ -1180,13 +1206,15 @@ export default function AgentDetailPage() {
 
               <div className="border-t border-zinc-800 pt-4 space-y-4">
                 <Label className="text-xs text-zinc-400 uppercase tracking-wide block">
-                  VAD 参数
+                  {t("detail.vad.title")}
                 </Label>
                 <p className="text-xs text-zinc-500">
-                  拾音模式（自动 / 手动）由设备端决定，以下参数只在自动模式下生效。
+                  {t("detail.vad.desc")}
                 </p>
                 <Field
-                  label={`活动检测阈值 (${asr.vad_threshold.toFixed(2)})`}
+                  label={t("detail.vad.threshold", {
+                    value: asr.vad_threshold.toFixed(2),
+                  })}
                 >
                   <Input
                     variant="unstyled"
@@ -1201,12 +1229,12 @@ export default function AgentDetailPage() {
                     className="w-full accent-violet-500"
                   />
                   <div className="flex justify-between text-[10px] text-zinc-600 -mt-1">
-                    <span>0 (低灵敏度)</span>
-                    <span>1 (高灵敏度)</span>
+                    <span>{t("detail.vad.lowSensitivity")}</span>
+                    <span>{t("detail.vad.highSensitivity")}</span>
                   </div>
                 </Field>
                 <div className="flex flex-wrap gap-4">
-                  <Field label="最小静音时长 (ms)">
+                  <Field label={t("detail.vad.minSilence")}>
                     <Input
                       type="number"
                       min={0}
@@ -1217,7 +1245,7 @@ export default function AgentDetailPage() {
                       className={inp}
                     />
                   </Field>
-                  <Field label="语音填充 (ms)">
+                  <Field label={t("detail.vad.speechPad")}>
                     <Input
                       type="number"
                       min={0}
@@ -1237,7 +1265,7 @@ export default function AgentDetailPage() {
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                    音色列表
+                    {t("detail.voiceList.title")}
                     <span className="text-zinc-600 ml-1 font-normal normal-case">
                       ({resources?.voices.length ?? 0})
                     </span>
@@ -1245,11 +1273,11 @@ export default function AgentDetailPage() {
                   {tts.voice_id &&
                     resources?.voices?.some((v) => v.id === tts.voice_id) && (
                       <span className="text-[11px] text-violet-400">
-                        当前选中:{" "}
-                        {
-                          resources?.voices.find((v) => v.id === tts.voice_id)
-                            ?.name
-                        }
+                        {t("detail.voiceList.current", {
+                          name: resources?.voices.find(
+                            (v) => v.id === tts.voice_id,
+                          )?.name,
+                        })}
                       </span>
                     )}
                 </div>
@@ -1261,7 +1289,7 @@ export default function AgentDetailPage() {
                         type="text"
                         value={voiceNameFilter}
                         onChange={(e) => setVoiceNameFilter(e.target.value)}
-                        placeholder="搜索音色..."
+                        placeholder={t("detail.voiceList.searchPlaceholder")}
                         className="min-w-48 flex-1"
                       />
                       <Select
@@ -1275,19 +1303,27 @@ export default function AgentDetailPage() {
                         <SelectTrigger className="w-28">
                           <span>
                             {voiceGenderFilter === "female"
-                              ? "女声"
+                              ? t("detail.voiceList.female")
                               : voiceGenderFilter === "male"
-                                ? "男声"
+                                ? t("detail.voiceList.male")
                                 : voiceGenderFilter === "neutral"
-                                  ? "中性"
-                                  : "全部性别"}
+                                  ? t("detail.voiceList.neutral")
+                                  : t("detail.voiceList.allGenders")}
                           </span>
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__all">全部性别</SelectItem>
-                          <SelectItem value="female">女声</SelectItem>
-                          <SelectItem value="male">男声</SelectItem>
-                          <SelectItem value="neutral">中性</SelectItem>
+                          <SelectItem value="__all">
+                            {t("detail.voiceList.allGenders")}
+                          </SelectItem>
+                          <SelectItem value="female">
+                            {t("detail.voiceList.female")}
+                          </SelectItem>
+                          <SelectItem value="male">
+                            {t("detail.voiceList.male")}
+                          </SelectItem>
+                          <SelectItem value="neutral">
+                            {t("detail.voiceList.neutral")}
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                       <Select
@@ -1300,14 +1336,16 @@ export default function AgentDetailPage() {
                       >
                         <SelectTrigger className="w-28">
                           <span className="truncate">
-                            {voiceTagFilter || "全部标签"}
+                            {voiceTagFilter || t("detail.voiceList.allTags")}
                           </span>
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__all">全部标签</SelectItem>
-                          {allVoiceTags.map((t) => (
-                            <SelectItem key={t} value={t}>
-                              {t}
+                          <SelectItem value="__all">
+                            {t("detail.voiceList.allTags")}
+                          </SelectItem>
+                          {allVoiceTags.map((tag) => (
+                            <SelectItem key={tag} value={tag}>
+                              {tag}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1316,7 +1354,9 @@ export default function AgentDetailPage() {
 
                     {filteredVoices.length === 0 ? (
                       <div className="text-center py-10 border border-dashed border-zinc-800 rounded-xl">
-                        <p className="text-zinc-500 text-sm">没有匹配的音色</p>
+                        <p className="text-zinc-500 text-sm">
+                          {t("detail.voiceList.noMatch")}
+                        </p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1351,10 +1391,10 @@ export default function AgentDetailPage() {
                                 }`}
                                   >
                                     {v.gender === "female"
-                                      ? "女声"
+                                      ? t("detail.voiceList.female")
                                       : v.gender === "male"
-                                        ? "男声"
-                                        : "中性"}
+                                        ? t("detail.voiceList.male")
+                                        : t("detail.voiceList.neutral")}
                                   </span>
                                 )}
                               </div>
@@ -1373,7 +1413,7 @@ export default function AgentDetailPage() {
                                         : "bg-transparent border-zinc-800 text-zinc-700"
                                     }`}
                                     >
-                                      {EMOTION_LABELS[em]}
+                                      {t(EMOTION_KEY[em])}
                                     </span>
                                   );
                                 })}
@@ -1387,7 +1427,7 @@ export default function AgentDetailPage() {
                                   className="mt-2 text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1"
                                 >
                                   <Play className="w-3 h-3" />
-                                  试听
+                                  {t("detail.voiceList.preview")}
                                 </button>
                               )}
                               {isSelected && (
@@ -1418,7 +1458,7 @@ export default function AgentDetailPage() {
                 {(!resources?.voices || resources.voices.length === 0) && (
                   <div className="text-center py-10 border border-dashed border-zinc-800 rounded-xl">
                     <p className="text-zinc-500 text-sm">
-                      当前语言下没有可用的音色
+                      {t("detail.voiceList.emptyForLanguage")}
                     </p>
                   </div>
                 )}
@@ -1427,10 +1467,14 @@ export default function AgentDetailPage() {
               {tts.voice_id && (
                 <div className="border-t border-zinc-800 pt-4 space-y-4">
                   <Label className="text-xs text-zinc-400 uppercase tracking-wide block">
-                    合成参数
+                    {t("detail.tts.title")}
                   </Label>
                   <div className="grid grid-cols-3 gap-4">
-                    <Field label={`语速 (${tts.rate.toFixed(1)})`}>
+                    <Field
+                      label={t("detail.tts.rate", {
+                        value: tts.rate.toFixed(1),
+                      })}
+                    >
                       <Input
                         variant="unstyled"
                         type="range"
@@ -1442,7 +1486,7 @@ export default function AgentDetailPage() {
                         className="w-full accent-violet-500"
                       />
                     </Field>
-                    <Field label={`音量 (${tts.volume})`}>
+                    <Field label={t("detail.tts.volume", { value: tts.volume })}>
                       <Input
                         variant="unstyled"
                         type="range"
@@ -1453,7 +1497,11 @@ export default function AgentDetailPage() {
                         className="w-full accent-violet-500"
                       />
                     </Field>
-                    <Field label={`语调 (${tts.pitch.toFixed(1)})`}>
+                    <Field
+                      label={t("detail.tts.pitch", {
+                        value: tts.pitch.toFixed(1),
+                      })}
+                    >
                       <Input
                         variant="unstyled"
                         type="range"
@@ -1474,10 +1522,12 @@ export default function AgentDetailPage() {
             <TabsContent value="data" className="space-y-3 pt-1">
               <div className="flex items-center gap-2 pb-3 border-b border-zinc-800">
                 <Brain className="w-4 h-4 text-violet-400" />
-                <span className="text-sm text-white font-medium">记忆</span>
+                <span className="text-sm text-white font-medium">
+                  {t("detail.memory.title")}
+                </span>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="记忆字符上限">
+                <Field label={t("detail.memory.charLimit")}>
                   <Input
                     type="number"
                     min={0}
@@ -1488,7 +1538,7 @@ export default function AgentDetailPage() {
                     className={inp}
                   />
                 </Field>
-                <Field label="用户画像字符上限">
+                <Field label={t("detail.memory.userCharLimit")}>
                   <Input
                     type="number"
                     min={0}
@@ -1499,14 +1549,16 @@ export default function AgentDetailPage() {
                     className={inp}
                   />
                 </Field>
-                <Field label="后台自省">
+                <Field label={t("detail.memory.review")}>
                   <div className="flex items-center gap-2 h-9">
                     <Switch
                       checked={mem.review_enabled}
                       onCheckedChange={(v) => setMem({ review_enabled: v })}
                     />
                     <span className="text-xs text-zinc-500">
-                      {mem.review_enabled ? "每轮对话后自动提取记忆" : "关闭"}
+                      {mem.review_enabled
+                        ? t("detail.memory.reviewOn")
+                        : t("detail.memory.reviewOff")}
                     </span>
                   </div>
                 </Field>
@@ -1516,7 +1568,7 @@ export default function AgentDetailPage() {
                   onClick={() => navigate("/data/memory")}
                   className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1"
                 >
-                  查看记忆库条目 →
+                  {t("detail.memory.viewEntries")}
                 </button>
               </div>
 
@@ -1524,11 +1576,15 @@ export default function AgentDetailPage() {
               <div className="space-y-3">
                 <div className="flex items-center gap-2 pb-3 border-b border-zinc-800">
                   <BookOpen className="w-4 h-4 text-violet-400" />
-                  <span className="text-sm text-white font-medium">知识库</span>
+                  <span className="text-sm text-white font-medium">
+                    {t("detail.kb.title")}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-zinc-500">
-                    {loadingKBs ? "加载中…" : `${kbs.length} 个知识库`}
+                    {loadingKBs
+                      ? t("detail.kb.loading")
+                      : t("detail.kb.count", { value: kbs.length })}
                   </span>
                   <Button
                     size="sm"
@@ -1536,7 +1592,7 @@ export default function AgentDetailPage() {
                     className="bg-violet-600 hover:bg-violet-500 text-white h-7 px-3 text-xs gap-1"
                   >
                     <BookOpen className="w-3 h-3" />
-                    绑定知识库
+                    {t("detail.kb.bind")}
                   </Button>
                 </div>
 
@@ -1546,9 +1602,11 @@ export default function AgentDetailPage() {
                   </div>
                 ) : kbs.length === 0 ? (
                   <div className="text-center py-10 border border-dashed border-zinc-800 rounded-xl">
-                    <p className="text-zinc-500 text-sm">暂无绑定知识库</p>
+                    <p className="text-zinc-500 text-sm">
+                      {t("detail.kb.empty")}
+                    </p>
                     <p className="text-zinc-600 text-xs mt-1">
-                      前往知识库页面绑定，让智能体具备特定领域知识
+                      {t("detail.kb.emptyHint")}
                     </p>
                   </div>
                 ) : (
@@ -1579,7 +1637,8 @@ export default function AgentDetailPage() {
                               </span>
                             )}
                             <span className="text-xs text-zinc-600 font-mono">
-                              {kb.embedding_model_id || "未配置"}
+                              {kb.embedding_model_id ||
+                                t("common:state.notConfigured")}
                             </span>
                             <button
                               onClick={(e) => {
@@ -1587,7 +1646,7 @@ export default function AgentDetailPage() {
                                 handleDeleteKB(kb.id);
                               }}
                               className="shrink-0 text-zinc-600 hover:text-amber-400 transition-all p-1 rounded hover:bg-amber-400/10 cursor-pointer"
-                              title="解绑"
+                              title={t("detail.kb.unbind")}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -1606,7 +1665,7 @@ export default function AgentDetailPage() {
                                   className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 h-7 px-3 text-xs gap-1 border border-zinc-700"
                                 >
                                   <Upload className="w-3 h-3" />
-                                  上传文件
+                                  {t("detail.doc.uploadFile")}
                                 </Button>
                                 <Button
                                   size="sm"
@@ -1617,10 +1676,10 @@ export default function AgentDetailPage() {
                                   className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 h-7 px-3 text-xs gap-1 border border-zinc-700"
                                 >
                                   <Link2 className="w-3 h-3" />
-                                  导入 URL
+                                  {t("detail.doc.importUrl")}
                                 </Button>
                                 <span className="ml-auto text-xs text-zinc-600">
-                                  {docs.length} 个文档
+                                  {t("detail.doc.count", { value: docs.length })}
                                 </span>
                               </div>
 
@@ -1632,7 +1691,7 @@ export default function AgentDetailPage() {
                                   onChange={(e) =>
                                     setKbSearchText(e.target.value)
                                   }
-                                  placeholder="搜索知识库内容..."
+                                  placeholder={t("detail.kb.searchPlaceholder")}
                                   className="flex-1 h-7 text-xs "
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter")
@@ -1650,7 +1709,7 @@ export default function AgentDetailPage() {
                                   ) : (
                                     <Search className="w-3 h-3" />
                                   )}
-                                  检索
+                                  {t("detail.kb.search")}
                                 </Button>
                               </div>
 
@@ -1669,7 +1728,9 @@ export default function AgentDetailPage() {
                                             {r.document_name}
                                           </span>
                                           <span className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded ml-auto shrink-0">
-                                            得分 {(r.score * 100).toFixed(0)}%
+                                            {t("detail.kb.score", {
+                                              value: (r.score * 100).toFixed(0),
+                                            })}
                                           </span>
                                         </div>
                                         <p className="text-sm text-zinc-300 leading-relaxed">
@@ -1686,7 +1747,7 @@ export default function AgentDetailPage() {
                                         }}
                                         className="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
                                       >
-                                        清除结果
+                                        {t("detail.kb.clearResults")}
                                       </button>
                                     </div>
                                   </div>
@@ -1699,7 +1760,7 @@ export default function AgentDetailPage() {
                                 </div>
                               ) : docs.length === 0 ? (
                                 <div className="px-4 py-8 text-center text-xs text-zinc-600">
-                                  暂无文档，上传文件或导入 URL 开始
+                                  {t("detail.doc.empty")}
                                 </div>
                               ) : (
                                 <div>
@@ -1748,11 +1809,13 @@ export default function AgentDetailPage() {
                                                 : ""
                                             }`}
                                           />
-                                          {status.label}
+                                          {t(status.labelKey)}
                                         </span>
                                         <span className="text-xs text-zinc-600 shrink-0 w-16 text-right">
                                           {doc.status === "ready"
-                                            ? `${doc.chunk_count} 块`
+                                            ? t("detail.doc.chunks", {
+                                                value: doc.chunk_count,
+                                              })
                                             : doc.char_count
                                               ? `${(doc.char_count / 1000).toFixed(1)} KB`
                                               : "—"}
@@ -1799,7 +1862,7 @@ export default function AgentDetailPage() {
                     type="text"
                     value={mcpSearch}
                     onChange={(e) => setMcpSearch(e.target.value)}
-                    placeholder="搜索 MCP..."
+                    placeholder={t("detail.mcp.searchPlaceholder")}
                     className="min-w-48 pl-9"
                   />
                 </div>
@@ -1816,10 +1879,10 @@ export default function AgentDetailPage() {
                       }`}
                     >
                       {f === "all"
-                        ? "全部"
+                        ? t("common:field.all")
                         : f === "bound"
-                          ? "已绑定"
-                          : "未绑定"}
+                          ? t("detail.mcp.filterBound")
+                          : t("detail.mcp.filterUnbound")}
                     </button>
                   ))}
                 </div>
@@ -1829,14 +1892,12 @@ export default function AgentDetailPage() {
                 <div className="text-center py-14 border border-dashed border-zinc-800 rounded-xl">
                   <p className="text-zinc-500 text-sm">
                     {mcpServers.length === 0
-                      ? "暂无可用 MCP"
-                      : mcpSearch
-                        ? "没有匹配的 MCP"
-                        : "没有匹配的 MCP"}
+                      ? t("detail.mcp.empty")
+                      : t("detail.mcp.noMatch")}
                   </p>
                   {mcpServers.length === 0 && (
                     <p className="text-zinc-600 text-xs mt-1">
-                      请先在 MCP 管理页面开通 MCP 服务器
+                      {t("detail.mcp.emptyHint")}
                     </p>
                   )}
                 </div>
@@ -1893,7 +1954,7 @@ export default function AgentDetailPage() {
                         )}
                         {bound && (
                           <span className="text-[10px] text-violet-400/60">
-                            已绑定
+                            {t("detail.mcp.bound")}
                           </span>
                         )}
                         <button
@@ -1904,7 +1965,7 @@ export default function AgentDetailPage() {
                           }}
                           className="absolute bottom-3 right-3 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
                         >
-                          查看详情
+                          {t("detail.mcp.viewDetail")}
                         </button>
                       </div>
                     );
@@ -1914,7 +1975,7 @@ export default function AgentDetailPage() {
               {allFiltered.length > mcpPageSize && (
                 <div className="flex items-center justify-between mt-4">
                   <span className="text-xs text-zinc-500">
-                    共 {allFiltered.length} 条
+                    {t("common:unit.totalItems", { total: allFiltered.length })}
                   </span>
                   <div className="flex items-center gap-2">
                     <SimpleSelect
@@ -1927,7 +1988,7 @@ export default function AgentDetailPage() {
                       size="sm"
                       options={[12, 24, 48].map((size) => ({
                         value: String(size),
-                        label: `${size} 条/页`,
+                        label: t("common:unit.perPage", { size }),
                       }))}
                     />
                     <div className="flex items-center gap-1">
@@ -1936,7 +1997,7 @@ export default function AgentDetailPage() {
                         disabled={safePage <= 1}
                         className="h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
                       >
-                        上一页
+                        {t("detail.mcp.prevPage")}
                       </button>
                       <span className="text-xs text-zinc-400 px-1">
                         {safePage} / {mcpTotalPages}
@@ -1948,7 +2009,7 @@ export default function AgentDetailPage() {
                         disabled={safePage >= mcpTotalPages}
                         className="h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
                       >
-                        下一页
+                        {t("detail.mcp.nextPage")}
                       </button>
                     </div>
                   </div>
@@ -1959,7 +2020,7 @@ export default function AgentDetailPage() {
                   onClick={() => navigate("/components/mcp")}
                   className="text-xs text-violet-400 hover:text-violet-300"
                 >
-                  管理 MCP 服务器 →
+                  {t("detail.mcp.manage")}
                 </button>
               </div>
             </TabsContent>
@@ -1974,7 +2035,7 @@ export default function AgentDetailPage() {
                   <Input
                     value={deviceSearch}
                     onChange={(e) => setDeviceSearch(e.target.value)}
-                    placeholder="搜索设备 ID 或名称"
+                    placeholder={t("detail.device.searchPlaceholder")}
                     className={`${inp} pl-8`}
                   />
                 </div>
@@ -1983,21 +2044,25 @@ export default function AgentDetailPage() {
                   className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-3 text-sm gap-1.5"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  绑定设备
+                  {t("detail.device.bind")}
                 </Button>
               </div>
               {devices.length === 0 ? (
                 <div className="text-center py-14 border border-dashed border-zinc-800 rounded-xl">
-                  <p className="text-zinc-500 text-sm">暂无绑定设备</p>
+                  <p className="text-zinc-500 text-sm">
+                    {t("detail.device.empty")}
+                  </p>
                   <p className="text-zinc-600 text-xs mt-1">
-                    填写设备 ID 即可绑定硬件
+                    {t("detail.device.emptyHint")}
                   </p>
                 </div>
               ) : filteredDevices.length === 0 ? (
                 <div className="text-center py-14 border border-dashed border-zinc-800 rounded-xl">
-                  <p className="text-zinc-500 text-sm">未找到匹配的设备</p>
+                  <p className="text-zinc-500 text-sm">
+                    {t("detail.device.noMatch")}
+                  </p>
                   <p className="text-zinc-600 text-xs mt-1">
-                    尝试设备 ID 或名称
+                    {t("detail.device.noMatchHint")}
                   </p>
                 </div>
               ) : (
@@ -2012,7 +2077,9 @@ export default function AgentDetailPage() {
                           <p className="text-sm font-mono text-white">{d.id}</p>
                           <p className="text-xs text-zinc-500 mt-0.5">
                             {d.name && <span className="mr-2">{d.name}</span>}
-                            {new Date(d.created_at).toLocaleDateString("zh-CN")}
+                            {new Date(d.created_at).toLocaleDateString(
+                              i18n.language,
+                            )}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -2021,7 +2088,7 @@ export default function AgentDetailPage() {
                             className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors px-2 py-1"
                           >
                             <Send className="w-3.5 h-3.5" />
-                            Channels
+                            {t("detail.channel.channels")}
                           </button>
                           <button
                             onClick={() =>
@@ -2031,13 +2098,13 @@ export default function AgentDetailPage() {
                             }
                             className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
                           >
-                            查看记忆
+                            {t("detail.device.viewMemory")}
                           </button>
                           <button
                             onClick={() => handleDeleteDevice(d.id)}
                             className="text-zinc-600 hover:text-red-400 transition-colors px-2 py-1 text-xs"
                           >
-                            删除
+                            {t("common:action.delete")}
                           </button>
                         </div>
                       </div>
@@ -2069,8 +2136,13 @@ export default function AgentDetailPage() {
                                       </p>
                                       <p className="text-xs text-zinc-500 mt-0.5">
                                         {connected
-                                          ? `已连接 ${channelHint(platform, status)}`
-                                          : "未连接"}
+                                          ? t("detail.channel.connected", {
+                                              hint: channelHint(
+                                                platform,
+                                                status,
+                                              ),
+                                            })
+                                          : t("detail.channel.disconnected")}
                                       </p>
                                     </div>
                                   </div>
@@ -2088,7 +2160,7 @@ export default function AgentDetailPage() {
                                         className="h-8 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
                                       >
                                         <QrCode className="w-3.5 h-3.5" />
-                                        扫码开通
+                                        {t("detail.channel.qrBind")}
                                       </Button>
                                     )}
                                     {connected && (
@@ -2100,7 +2172,7 @@ export default function AgentDetailPage() {
                                         disabled={saving}
                                         className="h-8 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-red-300"
                                       >
-                                        断开
+                                        {t("detail.channel.disconnect")}
                                       </Button>
                                     )}
                                   </div>
@@ -2142,7 +2214,9 @@ export default function AgentDetailPage() {
                                     disabled={saving || !filled}
                                     className="h-9 bg-violet-600 hover:bg-violet-500 text-white shrink-0"
                                   >
-                                    {saving ? "保存中..." : "保存"}
+                                    {saving
+                                      ? t("common:action.saving")
+                                      : t("common:action.save")}
                                   </Button>
                                 </div>
                               </div>
@@ -2176,10 +2250,10 @@ export default function AgentDetailPage() {
       <Dialog open={devOpen} onOpenChange={setDevOpen}>
         <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-white">绑定设备</DialogTitle>
+            <DialogTitle className="text-white">{t("detail.device.bind")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <Field label="Device ID">
+            <Field label={t("detail.device.idLabel")}>
               <Input
                 value={newDevId}
                 onChange={(e) => setNewDevId(e.target.value)}
@@ -2188,11 +2262,11 @@ export default function AgentDetailPage() {
                 autoFocus
               />
             </Field>
-            <Field label="设备名称（可选）">
+            <Field label={t("detail.device.nameLabel")}>
               <Input
                 value={newDevName}
                 onChange={(e) => setNewDevName(e.target.value)}
-                placeholder="客厅音箱"
+                placeholder={t("detail.device.namePlaceholder")}
                 className={inp}
               />
             </Field>
@@ -2208,14 +2282,16 @@ export default function AgentDetailPage() {
               onClick={() => setDevOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleAddDevice}
               disabled={devAdding || !newDevId.trim()}
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              {devAdding ? "绑定中..." : "绑定"}
+              {devAdding
+                ? t("detail.device.binding")
+                : t("detail.device.bindAction")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2227,7 +2303,7 @@ export default function AgentDetailPage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Upload className="w-4 h-4 text-violet-400" />
-              上传文档
+              {t("detail.upload.title")}
             </DialogTitle>
           </DialogHeader>
           <div className="py-2">
@@ -2249,10 +2325,10 @@ export default function AgentDetailPage() {
                 strokeWidth={1.5}
               />
               <p className="text-sm text-zinc-400 mb-1">
-                拖拽文件到此处，或点击选择
+                {t("detail.upload.dragHint")}
               </p>
               <p className="text-xs text-zinc-600 mt-3">
-                支持 TXT、Markdown、代码文件等
+                {t("detail.upload.supportHint")}
               </p>
             </div>
             <Input
@@ -2269,14 +2345,14 @@ export default function AgentDetailPage() {
               onClick={() => setUploadOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              关闭
+              {t("common:action.close")}
             </Button>
             <Button
               onClick={handleUpload}
               disabled={!fileRef.current?.files?.length}
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              上传
+              {t("common:action.upload")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2288,12 +2364,12 @@ export default function AgentDetailPage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Link2 className="w-4 h-4 text-violet-400" />
-              导入 URL
+              {t("detail.doc.importUrl")}
             </DialogTitle>
           </DialogHeader>
           <div className="py-2">
             <label className="text-xs text-zinc-400 mb-1.5 block">
-              网页地址
+              {t("detail.url.websiteLabel")}
             </label>
             <Input
               value={urlInput}
@@ -2311,14 +2387,14 @@ export default function AgentDetailPage() {
               onClick={() => setUrlOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleImportURL}
               disabled={!urlInput.trim()}
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              导入
+              {t("detail.url.importAction")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2330,7 +2406,7 @@ export default function AgentDetailPage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <BookOpen className="w-4 h-4 text-violet-400" />
-              绑定知识库
+              {t("detail.kb.bind")}
             </DialogTitle>
           </DialogHeader>
           <div className="relative">
@@ -2338,7 +2414,7 @@ export default function AgentDetailPage() {
             <Input
               value={bindKBSearch}
               onChange={(e) => setBindKBSearch(e.target.value)}
-              placeholder="模糊搜索知识库..."
+              placeholder={t("detail.kb.fuzzySearchPlaceholder")}
               className="pl-8 h-8 text-sm"
             />
           </div>
@@ -2354,8 +2430,8 @@ export default function AgentDetailPage() {
               ).length === 0 ? (
               <div className="text-center py-8 text-xs text-zinc-500">
                 {bindKBList.length === 0
-                  ? "暂无可用知识库，请先创建"
-                  : "没有匹配的知识库"}
+                  ? t("detail.kb.noAvailable")
+                  : t("detail.kb.noMatch")}
               </div>
             ) : (
               bindKBList
@@ -2383,7 +2459,8 @@ export default function AgentDetailPage() {
                         )}
                       </div>
                       <span className="text-[10px] text-zinc-600 font-mono shrink-0">
-                        {k.embedding_model_id || "未配置"}
+                        {k.embedding_model_id ||
+                          t("common:state.notConfigured")}
                       </span>
                       <Button
                         size="sm"
@@ -2391,7 +2468,9 @@ export default function AgentDetailPage() {
                         disabled={binding}
                         className="bg-violet-600 hover:bg-violet-500 text-white h-7 px-3 text-xs shrink-0 disabled:opacity-50"
                       >
-                        {binding ? "绑定中..." : "绑定"}
+                        {binding
+                          ? t("detail.kb.binding")
+                          : t("detail.kb.bindAction")}
                       </Button>
                     </div>
                   );
@@ -2404,7 +2483,7 @@ export default function AgentDetailPage() {
               onClick={() => setBindKBOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white mt-2"
             >
-              关闭
+              {t("common:action.close")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2451,31 +2530,33 @@ export default function AgentDetailPage() {
         <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
           <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-sm">
             <DialogHeader>
-              <DialogTitle className="text-white">确认删除</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-zinc-400 py-2">
-              确定要删除「{name}」吗？此操作无法撤销，该智能体关联的设备也将失去配置。
-            </p>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setDeleteOpen(false)}
-                disabled={deleting}
-                className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
-              >
-                取消
-              </Button>
-              <Button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="bg-red-600 hover:bg-red-500 text-white"
-              >
-                {deleting ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  "确认删除"
-                )}
-              </Button>
+            <DialogTitle className="text-white">
+              {t("deleteDialog.title")}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-zinc-400 py-2">
+            {t("deleteDialog.body", { name })}
+          </p>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleting}
+              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+            >
+              {t("common:action.cancel")}
+            </Button>
+            <Button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-500 text-white"
+            >
+              {deleting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                t("deleteDialog.confirm")
+              )}
+            </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

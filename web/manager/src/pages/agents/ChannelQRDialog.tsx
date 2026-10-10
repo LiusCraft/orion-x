@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
 import {
   AlertTriangle,
@@ -31,12 +32,12 @@ const pollInterval = 2000;
 // maxPollFailures 是连续查询失败多少次后把会话当作过期，让用户重新生成。
 const maxPollFailures = 3;
 
-const statusText: Record<ChannelQRStatus, string> = {
-  pending: "等待扫码",
-  scanned: "已扫码，请在手机上确认",
-  success: "已开通",
-  expired: "二维码已过期",
-  failed: "开通失败",
+const statusKey: Record<ChannelQRStatus, string> = {
+  pending: "channelQR.status.pending",
+  scanned: "channelQR.status.scanned",
+  success: "channelQR.status.success",
+  expired: "channelQR.status.expired",
+  failed: "channelQR.status.failed",
 };
 
 function isTerminal(session: ChannelQRSession | null): boolean {
@@ -75,6 +76,7 @@ export function ChannelQRDialog({
   onClose,
   onBound,
 }: ChannelQRDialogProps) {
+  const { t } = useTranslation(["agents", "common"]);
   const [session, setSession] = useState<ChannelQRSession | null>(null);
   const [startError, setStartError] = useState("");
   const [starting, setStarting] = useState(false);
@@ -97,12 +99,12 @@ export function ChannelQRDialog({
     } catch (e: unknown) {
       setStartError(
         (e as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? "生成二维码失败，请稍后重试",
+          ?.error ?? t("channelQR.startFailed"),
       );
     } finally {
       setStarting(false);
     }
-  }, [voicebotId, deviceId, platform.name]);
+  }, [voicebotId, deviceId, platform.name, t]);
 
   useEffect(() => {
     if (!open) {
@@ -197,7 +199,7 @@ export function ChannelQRDialog({
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
             <QrCode className="w-4 h-4 text-violet-400" strokeWidth={1.5} />
-            扫码开通 {platform.display_name}
+            {t("channelQR.title", { platform: platform.display_name })}
           </DialogTitle>
         </DialogHeader>
 
@@ -205,7 +207,7 @@ export function ChannelQRDialog({
           {starting && (
             <div className="flex items-center justify-center gap-2 py-10 text-zinc-400 text-xs">
               <Loader2 className="w-4 h-4 animate-spin" />
-              正在生成二维码...
+              {t("channelQR.generating")}
             </div>
           )}
 
@@ -222,7 +224,7 @@ export function ChannelQRDialog({
                 className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                重新生成
+                {t("channelQR.regenerate")}
               </Button>
             </div>
           )}
@@ -230,7 +232,7 @@ export function ChannelQRDialog({
           {showQR && (
             <>
               <p className="text-xs text-zinc-400">
-                用企业微信扫描下方二维码，并在手机上点击「一键创建机器人」。
+                {t("channelQR.scanHint")}
               </p>
               <div className="flex flex-col items-center gap-3">
                 <div className="rounded-lg bg-white p-3">
@@ -241,13 +243,15 @@ export function ChannelQRDialog({
                   />
                 </div>
                 <p className="text-xs text-zinc-500">
-                  {statusText[session.status]} · 二维码 {formatRemaining(remaining)}
-                  后过期
+                  {t("channelQR.expires", {
+                    status: t(statusKey[session.status]),
+                    time: formatRemaining(remaining),
+                  })}
                 </p>
               </div>
               <p className="flex items-start gap-2 text-xs text-amber-400/90">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                扫码会在企业微信里新建一个智能机器人，并替换该设备当前的绑定。
+                {t("channelQR.replaceWarning")}
               </p>
             </>
           )}
@@ -255,9 +259,11 @@ export function ChannelQRDialog({
           {session?.status === "success" && (
             <div className="flex flex-col items-center gap-2 py-6">
               <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-              <p className="text-sm text-zinc-200">已开通</p>
+              <p className="text-sm text-zinc-200">
+                {t(statusKey.success)}
+              </p>
               <p className="text-xs text-zinc-500">
-                设备会在 30 秒内自动连接，直接在企业微信里对话即可。
+                {t("channelQR.successHint")}
               </p>
             </div>
           )}
@@ -266,10 +272,10 @@ export function ChannelQRDialog({
             <div className="space-y-3 py-2">
               <p className="flex items-start gap-2 text-xs text-red-400">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                {session.error || statusText[session.status]}
+                {session.error || t(statusKey[session.status])}
               </p>
               <p className="text-xs text-zinc-500">
-                也可以关闭本弹窗，在下面的表单里手动填写 Bot ID 与 Secret。
+                {t("channelQR.manualHint")}
               </p>
               <Button
                 variant="outline"
@@ -278,7 +284,7 @@ export function ChannelQRDialog({
                 className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                重新生成二维码
+                {t("channelQR.regenerateQR")}
               </Button>
             </div>
           )}
@@ -291,7 +297,7 @@ export function ChannelQRDialog({
               className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors px-2 py-1"
             >
               <Copy className="w-3.5 h-3.5" />
-              {copied ? "已复制" : "复制链接"}
+              {copied ? t("common:action.copied") : t("channelQR.copyLink")}
             </button>
           )}
           <Button
@@ -299,7 +305,9 @@ export function ChannelQRDialog({
             onClick={close}
             className="h-8 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
           >
-            {session?.status === "success" ? "完成" : "取消"}
+            {session?.status === "success"
+              ? t("channelQR.done")
+              : t("common:action.cancel")}
           </Button>
         </DialogFooter>
       </DialogContent>

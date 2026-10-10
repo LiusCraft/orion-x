@@ -8,6 +8,7 @@
 
 import { billingApi, type AIModel, type BillingPrice } from "@/lib/api";
 import { formatUnitPrice } from "@/lib/billing";
+import i18n from "@/i18n";
 
 /**
  * 拉当前生效的平台标准价；拿不到（计费未启用 / 请求失败）返回 null。
@@ -45,19 +46,21 @@ export function modelCategory(model: AIModel): ModelCategory {
 /** 每个类别要看价格的计费项，数组顺序即展示顺序。 */
 const CATEGORY_ITEMS: Record<
 	ModelCategory,
-	Array<{ code: string; label: string }>
+	Array<{ code: string; labelKey: string }>
 > = {
 	llm: [
-		{ code: "llm:tokens:input", label: "输入" },
-		{ code: "llm:tokens:output", label: "输出" },
+		{ code: "llm:tokens:input", labelKey: "models:price.input" },
+		{ code: "llm:tokens:output", labelKey: "models:price.output" },
 	],
-	asr: [{ code: "asr:audio:seconds", label: "识别" }],
+	asr: [{ code: "asr:audio:seconds", labelKey: "models:price.recognition" }],
 	// tts:characters 与 tts:audio:seconds 是互斥口径，只展示配了价的那个。
 	tts: [
-		{ code: "tts:characters", label: "合成" },
-		{ code: "tts:audio:seconds", label: "音频" },
+		{ code: "tts:characters", labelKey: "models:price.synthesis" },
+		{ code: "tts:audio:seconds", labelKey: "models:price.audio" },
 	],
-	embedding: [{ code: "kb:embedding:tokens", label: "入库" }],
+	embedding: [
+		{ code: "kb:embedding:tokens", labelKey: "models:price.indexing" },
+	],
 	unknown: [],
 };
 
@@ -80,7 +83,9 @@ export function modelPriceLines(
 	if (items.length === 0) return null;
 	return items.flatMap((item) => {
 		const price = resolvePrice(prices, model, item.code);
-		return price ? [{ label: item.label, text: formatUnitPrice(price) }] : [];
+		return price
+			? [{ label: i18n.t(item.labelKey), text: formatUnitPrice(price) }]
+			: [];
 	});
 }
 

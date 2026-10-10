@@ -4,6 +4,7 @@
 // （§19）。非 admin 由路由层拦回 /billing/usage。
 
 import { Coins } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDocumentTitle } from "@/lib/title";
 import AccountsTab from "./admin/AccountsTab";
@@ -14,16 +15,17 @@ import RechargeTab from "./admin/RechargeTab";
 import StatsTab from "./admin/StatsTab";
 
 const TABS = [
-	{ value: "accounts", label: "账户" },
-	{ value: "prices", label: "价格版本" },
-	{ value: "items", label: "计费项" },
-	{ value: "recharge", label: "充值订单" },
-	{ value: "ledger", label: "流水" },
-	{ value: "stats", label: "报表" },
+	{ value: "accounts", labelKey: "admin.tab.accounts" },
+	{ value: "prices", labelKey: "admin.tab.prices" },
+	{ value: "items", labelKey: "admin.tab.items" },
+	{ value: "recharge", labelKey: "admin.tab.recharge" },
+	{ value: "ledger", labelKey: "admin.tab.ledger" },
+	{ value: "stats", labelKey: "admin.tab.stats" },
 ];
 
 export default function AdminBillingPage() {
-	useDocumentTitle("计费管理");
+	const { t } = useTranslation(["billingPages", "common"]);
+	useDocumentTitle(t("admin.title"));
 
 	return (
 		<div className="min-h-full">
@@ -31,10 +33,10 @@ export default function AdminBillingPage() {
 				<div>
 					<h1 className="text-lg font-semibold text-white flex items-center gap-2">
 						<Coins className="w-4 h-4 text-violet-400" strokeWidth={1.5} />
-						计费管理
+						{t("admin.title")}
 					</h1>
 					<p className="text-sm text-zinc-500 mt-0.5">
-						账户余额与人工调整、价格版本、计费项目录、充值订单、流水与报表
+						{t("admin.subtitle")}
 					</p>
 				</div>
 			</div>
@@ -48,7 +50,7 @@ export default function AdminBillingPage() {
 								value={tab.value}
 								className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
 							>
-								{tab.label}
+								{t(tab.labelKey)}
 							</TabsTrigger>
 						))}
 					</TabsList>
