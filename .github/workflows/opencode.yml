@@ -3,7 +3,7 @@
 # 需要仓库 secret OPENCODE_API_KEY；仅响应有写权限成员的评论。
 # GITHUB_TOKEN 建 PR 需要仓库开启 Settings → Actions → General → Allow GitHub Actions to create and approve pull requests；
 # 未开启时改动类任务会在收尾建 PR 时失败（分支已推送，见运行日志）。
-# 运行期间维护一条状态评论（原地更新、结束收尾为最终结论，多次运行复用同一条），见 .github/opencode-instructions.md 与 .github/opencode-progress-comment.sh。
+# 运行期间维护一条状态评论（原地更新、结束收尾为最终结论）；已收尾的按运行保留，只有异常中断未收尾的会被后续运行接管，见 .github/opencode-instructions.md 与 .github/opencode-progress-comment.sh。
 # 在途的 opencode 会用 👍 接管新的 /oc 评论，本工作流识别后跳过重复运行。
 # 注意：用 GITHUB_TOKEN 推送的提交不会触发其它 workflow，需要手动 re-run 或评论 /oc review。
 name: opencode
@@ -59,7 +59,7 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # 状态评论：复用本 issue/PR 上已有的 opencode 状态评论（首行标记定位），没有才新建；由智能体原地更新并收尾为最终结论。
+      # 状态评论：仅接管本 issue/PR 上未收尾的 opencode 状态评论（首行标记定位且仍有行首 ⏳），否则新建；由智能体原地更新并收尾为最终结论。
       - name: Create or reuse progress comment
         id: progress
         if: steps.handled.outputs.skip != 'true'

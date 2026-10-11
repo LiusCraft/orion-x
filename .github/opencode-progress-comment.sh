@@ -4,11 +4,13 @@
 # 智能体侧通过 OPENCODE_PROGRESS_MARKER（值与这里生成的 marker 相同）在每次更新时保留标记行，
 # 见 .github/opencode-instructions.md。
 #
-#   create <issue-number> <状态行>   复用本 issue/PR 上已有的状态评论（首行以 `<!-- opencode:status` 开头），
-#                                   没有则新建；首行写入含本次运行 id 的标记，向 stdout 输出 `id=<评论 id>`。
+#   create <issue-number> <状态行>   找本 issue/PR 上最新一条首行以 `<!-- opencode:status` 开头的状态评论：
+#                                   只有它仍未收尾（仍有行首 ⏳ 状态行）才复用它，否则新建；首行写入含
+#                                   本次运行 id 的标记，向 stdout 输出 `id=<评论 id>`。
 #   finalize                        仅当首行标记属于本次运行、且评论仍有行首 ⏳ 状态行时收尾：用未收尾说明
 #                                   替换该状态行；分享链接、todo 与标记行原样保留。已收尾、标记属于其它
-#                                   运行或评论已删除则不动——保证评论始终可被后续运行复用。
+#                                   运行或评论已删除则不动——已收尾的评论作为历史保留，异常中断的评论
+#                                   留给后续运行接管。
 set -eu
 
 endpoint="repos/$GITHUB_REPOSITORY/issues"
@@ -24,6 +26,13 @@ $status（[运行日志]($run_url)）"
     existing=$(gh api --paginate "$endpoint/$number/comments?per_page=100" \
       --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- opencode:status"))) | .id' \
       | tail -1 || true)
+    if [ -n "$existing" ]; then
+      existing_body=$(gh api "$endpoint/comments/$existing" --jq .body 2>/dev/null || true)
+      # 只接管未收尾的评论；已收尾的是历史记录，不能再被下次运行改写成 ⏳。
+      if ! printf '%s\n' "$existing_body" | grep -q '^⏳'; then
+        existing=""
+      fi
+    fi
     if [ -n "$existing" ]; then
       id=$(gh api -X PATCH "$endpoint/comments/$existing" -F body="$body" --jq .id)
     else

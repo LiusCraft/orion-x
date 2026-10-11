@@ -1,7 +1,7 @@
 # PR 自动审查：打开 / 更新 / 重新打开 / 转为 Ready 时触发；草稿、bot 和 fork PR 跳过。
 # 只审查不修改（contents: read），审查结果以评论发布，并尝试提交行级评论。
 # 需要仓库 secret OPENCODE_API_KEY；fork PR 拿不到 secret，需维护者在 PR 评论 /oc review 手动触发。
-# 运行期间维护一条状态评论（原地更新、结束收尾为最终结论，多次运行复用同一条），见 .github/opencode-instructions.md 与 .github/opencode-progress-comment.sh。
+# 运行期间维护一条状态评论（原地更新、结束收尾为最终结论）；已收尾的按运行保留，只有异常中断未收尾的会被后续运行接管，见 .github/opencode-instructions.md 与 .github/opencode-progress-comment.sh。
 name: opencode review
 
 on:
@@ -33,7 +33,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # 状态评论：复用本 PR 上已有的 opencode 状态评论（首行标记定位），没有才新建；由智能体原地更新并收尾为最终结论。
+      # 状态评论：仅接管本 PR 上未收尾的 opencode 状态评论（首行标记定位且仍有行首 ⏳），否则新建；由智能体原地更新并收尾为最终结论。
       - name: Create or reuse progress comment
         id: progress
         continue-on-error: true
