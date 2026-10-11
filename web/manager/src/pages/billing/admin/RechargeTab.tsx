@@ -7,6 +7,7 @@
 // 退款是真把钱退给付款人，所以只有 admin 能看到这个 tab（路由层已经拦了）。
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { CreditCard, RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,20 +41,21 @@ import {
 const PAGE_SIZE = 20;
 
 const STATUS_OPTIONS = [
-	{ value: "order:pending", label: "待支付" },
-	{ value: "order:paid", label: "已收款" },
-	{ value: "order:credited", label: "已到账" },
-	{ value: "order:closed", label: "已关闭" },
-	{ value: "order:refunded", label: "已退款" },
+	{ value: "order:pending", labelKey: "billing:paymentStatus.pending" },
+	{ value: "order:paid", labelKey: "recharge.statusPaid" },
+	{ value: "order:credited", labelKey: "billing:paymentStatus.credited" },
+	{ value: "order:closed", labelKey: "billing:paymentStatus.closed" },
+	{ value: "order:refunded", labelKey: "billing:paymentStatus.refunded" },
 ];
 
 const CHANNEL_OPTIONS = [
-	{ value: "epay:alipay", label: "支付宝" },
-	{ value: "epay:wxpay", label: "微信支付" },
-	{ value: "epay:qqpay", label: "QQ 钱包" },
+	{ value: "epay:alipay", labelKey: "billing:paymentChannel.alipay" },
+	{ value: "epay:wxpay", labelKey: "billing:paymentChannel.wxpay" },
+	{ value: "epay:qqpay", labelKey: "billing:paymentChannel.qqpay" },
 ];
 
 export default function RechargeTab() {
+	const { t } = useTranslation(["billingAdmin", "common"]);
 	const [orders, setOrders] = useState<BillingPaymentOrder[]>([]);
 	const [total, setTotal] = useState(0);
 	const [page, setPage] = useState(1);
@@ -97,7 +99,7 @@ export default function RechargeTab() {
 				}
 				setBanner({
 					kind: "error",
-					text: userFacingError(err, "加载充值订单失败"),
+					text: userFacingError(err, t("recharge.loadFailed")),
 				});
 			})
 			.finally(() => {
@@ -106,15 +108,15 @@ export default function RechargeTab() {
 		return () => {
 			cancelled = true;
 		};
-	}, [page, status, channel, subjectQuery, query, reloadKey]);
+	}, [page, status, channel, subjectQuery, query, reloadKey, t]);
 
 	if (disabled) {
 		return (
 			<Panel bodyClassName="p-0">
 				<EmptyState
 					icon={CreditCard}
-					title="暂不支持在线充值"
-					hint="当前环境未开通在线充值，没有订单可看。"
+					title={t("recharge.disabledTitle")}
+					hint={t("recharge.disabledHint")}
 				/>
 			</Panel>
 		);
@@ -133,8 +135,11 @@ export default function RechargeTab() {
 					}}
 					className="w-32"
 					size="sm"
-					placeholder="全部状态"
-					options={STATUS_OPTIONS}
+					placeholder={t("shared.allStatuses")}
+					options={STATUS_OPTIONS.map(({ value, labelKey }) => ({
+						value,
+						label: t(labelKey),
+					}))}
 				/>
 				<SimpleSelect
 					value={channel}
@@ -144,8 +149,11 @@ export default function RechargeTab() {
 					}}
 					className="w-32"
 					size="sm"
-					placeholder="全部渠道"
-					options={CHANNEL_OPTIONS}
+					placeholder={t("recharge.channelPlaceholder")}
+					options={CHANNEL_OPTIONS.map(({ value, labelKey }) => ({
+						value,
+						label: t(labelKey),
+					}))}
 				/>
 				<Input
 					value={subjectID}
@@ -156,7 +164,7 @@ export default function RechargeTab() {
 							setPage(1);
 						}
 					}}
-					placeholder="主体 ID（用户）"
+					placeholder={t("recharge.subjectPlaceholder")}
 					className="h-7 w-40 text-xs font-mono"
 				/>
 				<div className="flex items-center gap-2 flex-1 min-w-56">
@@ -170,7 +178,7 @@ export default function RechargeTab() {
 								setPage(1);
 							}
 						}}
-						placeholder="订单号 / 交易号"
+						placeholder={t("recharge.keywordPlaceholder")}
 						className="h-7 text-xs font-mono"
 					/>
 					<Button
@@ -183,7 +191,7 @@ export default function RechargeTab() {
 						className="h-7 px-2.5 text-xs border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white gap-1"
 					>
 						<Search className="w-3.5 h-3.5" strokeWidth={1.5} />
-						搜索
+						{t("common:action.search")}
 					</Button>
 				</div>
 				<button
@@ -195,13 +203,13 @@ export default function RechargeTab() {
 						className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
 						strokeWidth={1.5}
 					/>
-					刷新
+					{t("common:action.refresh")}
 				</button>
 			</FilterBar>
 
 			<Panel
-				title="充值订单"
-				description="退款只能整单退，且只对「已到账」的订单可用"
+				title={t("recharge.panelTitle")}
+				description={t("recharge.panelDescription")}
 				bodyClassName="p-0"
 			>
 				{loading ? (
@@ -209,21 +217,21 @@ export default function RechargeTab() {
 				) : orders.length === 0 ? (
 					<EmptyState
 						icon={CreditCard}
-						title="没有匹配的充值订单"
-						hint="用户下单后这里才会出现记录；也可以换个过滤条件再试。"
+						title={t("recharge.emptyTitle")}
+						hint={t("recharge.emptyHint")}
 					/>
 				) : (
 					<TableShell
 						head={
 							<>
-								<Th>订单号</Th>
-								<Th>主体</Th>
-								<Th className="text-right">金额</Th>
-								<Th>渠道</Th>
-								<Th>状态</Th>
-								<Th>创建时间</Th>
-								<Th>到账时间</Th>
-								<Th className="text-right">操作</Th>
+								<Th>{t("recharge.columnOrderNo")}</Th>
+								<Th>{t("recharge.columnSubject")}</Th>
+								<Th className="text-right">{t("shared.amount")}</Th>
+								<Th>{t("recharge.columnChannel")}</Th>
+								<Th>{t("common:field.status")}</Th>
+								<Th>{t("common:field.createdAt")}</Th>
+								<Th>{t("recharge.columnCreditedAt")}</Th>
+								<Th className="text-right">{t("common:field.actions")}</Th>
 							</>
 						}
 					>
@@ -272,14 +280,16 @@ export default function RechargeTab() {
 												disabled={!refundable && !refunded}
 												title={
 													refundable
-														? "整单退款"
+														? t("recharge.refundTitle")
 														: refunded
-															? "查看退款信息"
-															: "只有「已到账」的订单可以退款"
-													}
+															? t("recharge.refundView")
+															: t("recharge.refundUnavailable")
+												}
 												className="inline-flex items-center gap-1 h-7 px-2 text-[11px] rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
 											>
-												{refunded ? "详情" : "退款"}
+												{refunded
+													? t("recharge.details")
+													: t("recharge.refund")}
 											</button>
 										</div>
 									</Td>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Layers,
   Plus,
@@ -53,30 +54,33 @@ const TYPE_BADGE: Record<string, string> = {
   embedding: "bg-amber-400/10 text-amber-400 border-amber-400/20",
 };
 
-const TYPE_LABEL: Record<string, string> = {
-  text: "文本",
-  vision: "视觉",
-  speech: "语音",
-  multimodal: "全模态",
-  embedding: "向量",
+const TYPE_LABEL_KEY: Record<string, string> = {
+  text: "type.text",
+  vision: "type.vision",
+  speech: "type.speech",
+  multimodal: "type.multimodal",
+  embedding: "type.embedding",
 };
 
 /** 官方模型的标记，和厂商管理页保持一致：图标 + 文字。 */
 function OfficialBadge() {
+  const { t } = useTranslation(["models", "common"]);
   return (
     <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border bg-violet-600/15 text-violet-400 border-violet-500/20 shrink-0">
       <Shield className="w-2.5 h-2.5" />
-      官方
+      {t("official")}
     </span>
   );
 }
 
 function TypeBadge({ type }: { type: ModelType }) {
+  const { t } = useTranslation(["models", "common"]);
+  const key = TYPE_LABEL_KEY[type];
   return (
     <span
       className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${TYPE_BADGE[type]}`}
     >
-      {TYPE_LABEL[type]}
+      {key ? t(key) : type}
     </span>
   );
 }
@@ -101,8 +105,10 @@ function VoiceCategoryBadge({ model }: { model: AIModel }) {
 
 /** 价格行；null 表示这个模型没有可展示的计费项，调用方负责回落到「—」。 */
 function PriceLines({ lines }: { lines: ModelPriceLine[] | null }) {
+  const { t } = useTranslation(["models", "common"]);
   if (lines === null) return <span className="text-zinc-600">—</span>;
-  if (lines.length === 0) return <span className="text-zinc-600">未定价</span>;
+  if (lines.length === 0)
+    return <span className="text-zinc-600">{t("myModels.unpriced")}</span>;
   return (
     <div className="space-y-0.5">
       {lines.map((line) => (
@@ -116,7 +122,8 @@ function PriceLines({ lines }: { lines: ModelPriceLine[] | null }) {
 }
 
 export default function MyModelsPage() {
-  useDocumentTitle("我的模型");
+  const { t } = useTranslation(["models", "common"]);
+  useDocumentTitle(t("myModels.title"));
 
   const isAdmin = useAuthStore((state) => state.isAdmin);
   const [models, setModels] = useState<AIModel[]>([]);
@@ -254,15 +261,21 @@ export default function MyModelsPage() {
     prices ? modelPriceLines(model, prices) : null;
   const countOf = (type: ModelType) =>
     scoped.filter((m) => m.type === type).length;
+  const typeName = (type: string) => {
+    const key = TYPE_LABEL_KEY[type];
+    return key ? t(key) : type;
+  };
 
   return (
     <div className="min-h-full">
       <div className="border-b border-zinc-800/80 px-8 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">我的模型</h1>
+            <h1 className="text-lg font-semibold text-white">
+              {t("myModels.title")}
+            </h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              添加和管理自托管或第三方 AI 模型
+              {t("myModels.subtitle")}
             </p>
           </div>
           <Button
@@ -270,7 +283,7 @@ export default function MyModelsPage() {
             className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
           >
             <Plus className="w-4 h-4" />
-            添加模型
+            {t("myModels.addModel")}
           </Button>
         </div>
       </div>
@@ -291,7 +304,7 @@ export default function MyModelsPage() {
                   value="all"
                   className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
                 >
-                  全部
+                  {t("common:field.all")}
                   <span className="ml-1.5 text-[10px] text-zinc-600">
                     ({scoped.length})
                   </span>
@@ -302,7 +315,7 @@ export default function MyModelsPage() {
                     value={value}
                     className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
                   >
-                    {TYPE_LABEL[value] ?? value}
+                    {typeName(value)}
                     <span className="ml-1.5 text-[10px] text-zinc-600">
                       ({countOf(value)})
                     </span>
@@ -316,13 +329,14 @@ export default function MyModelsPage() {
             </div>
 
             {["all", ...modelTypes].map((value) => {
-              const typeLabel = value === "all" ? "" : (TYPE_LABEL[value] ?? "");
-              const emptyTitle =
-                scope === "system"
-                  ? `还没有官方${typeLabel}模型`
-                  : scope === "mine"
-                    ? `你还没有添加${typeLabel}模型`
-                    : `还没有${typeLabel}模型`;
+              const typeLabel = value === "all" ? "" : typeName(value);
+              const emptyKey = {
+                system: typeLabel
+                  ? "myModels.emptyOfficialTyped"
+                  : "myModels.emptyOfficial",
+                mine: typeLabel ? "myModels.emptyMineTyped" : "myModels.emptyMine",
+                all: typeLabel ? "myModels.emptyTyped" : "myModels.empty",
+              }[scope];
               return (
                 <TabsContent key={value} value={value}>
                   {filtered.length === 0 ? (
@@ -330,9 +344,13 @@ export default function MyModelsPage() {
                       <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
                         <Layers className="w-6 h-6 text-zinc-600" />
                       </div>
-                      <p className="text-zinc-400 text-sm">{emptyTitle}</p>
+                      <p className="text-zinc-400 text-sm">
+                        {t(emptyKey, typeLabel ? { type: typeLabel } : undefined)}
+                      </p>
                       <p className="text-zinc-600 text-xs mt-1 mb-4">
-                        添加兼容 OpenAI 接口的{typeLabel}模型
+                        {typeLabel
+                          ? t("myModels.emptyHintTyped", { type: typeLabel })
+                          : t("myModels.emptyHint")}
                       </p>
                       <Button
                         onClick={() =>
@@ -343,7 +361,9 @@ export default function MyModelsPage() {
                         className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-4 text-xs gap-1.5"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        添加{typeLabel}模型
+                        {typeLabel
+                          ? t("myModels.addTyped", { type: typeLabel })
+                          : t("myModels.addModel")}
                       </Button>
                     </div>
                   ) : viewMode === "grid" ? (
@@ -403,7 +423,7 @@ export default function MyModelsPage() {
                               {priceLines !== null && (
                                 <div className="bg-zinc-800/60 rounded-lg px-3 py-2">
                                   <p className="text-[10px] text-zinc-600 mb-0.5">
-                                    价格
+                                    {t("field.price")}
                                   </p>
                                   <PriceLines lines={priceLines} />
                                 </div>
@@ -423,7 +443,7 @@ export default function MyModelsPage() {
                             <div className="flex items-center justify-between mt-3">
                               <span className="flex items-center gap-1 text-[11px] text-emerald-400">
                                 <CheckCircle2 className="w-3 h-3" />
-                                可用
+                                {t("myModels.available")}
                               </span>
                               <span className="text-[11px] text-zinc-600 font-mono">
                                 {model.created_at.slice(0, 10)}
@@ -438,12 +458,20 @@ export default function MyModelsPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-zinc-800 text-left text-[11px] text-zinc-500 uppercase tracking-wide">
-                            <th className="px-4 py-3 font-medium">模型</th>
-                            <th className="px-4 py-3 font-medium">厂商</th>
+                            <th className="px-4 py-3 font-medium">
+                              {t("field.model")}
+                            </th>
+                            <th className="px-4 py-3 font-medium">
+                              {t("field.provider")}
+                            </th>
                             <th className="px-4 py-3 font-medium">Model ID</th>
-                            <th className="px-4 py-3 font-medium">价格</th>
+                            <th className="px-4 py-3 font-medium">
+                              {t("field.price")}
+                            </th>
                             <th className="px-4 py-3 font-medium">Base URL</th>
-                            <th className="px-4 py-3 font-medium">创建时间</th>
+                            <th className="px-4 py-3 font-medium">
+                              {t("common:field.createdAt")}
+                            </th>
                             <th className="px-4 py-3 font-medium w-20" />
                           </tr>
                         </thead>
@@ -523,51 +551,51 @@ export default function MyModelsPage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Layers className="w-4 h-4 text-violet-400" />
-              添加模型
+              {t("myModels.addModel")}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                  名称
+                  {t("common:field.name")}
                 </Label>
                 <Input
                   value={form.name}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, name: e.target.value }))
                   }
-                  placeholder="模型别名"
+                  placeholder={t("myModels.form.namePlaceholder")}
                   className="text-sm "
                 />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                  类型
+                  {t("common:field.type")}
                 </Label>
                 <SimpleSelect
                   value={form.type}
                   onValueChange={(value) => {
-                    const t = value as ModelType;
-                    setForm((f) => ({ ...f, type: t, provider_id: "" }));
+                    const modelType = value as ModelType;
+                    setForm((f) => ({ ...f, type: modelType, provider_id: "" }));
                   }}
                   options={modelTypes.map((value) => ({
                     value,
-                    label: `${TYPE_LABEL[value] ?? value}模型`,
+                    label: t("myModels.typeOption", { type: typeName(value) }),
                   }))}
                 />
               </div>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                厂商
+                {t("field.provider")}
               </Label>
               <SimpleSelect
                 value={form.provider_id}
                 onValueChange={(providerID) =>
                   setForm((f) => ({ ...f, provider_id: providerID }))
                 }
-                placeholder="选择厂商"
+                placeholder={t("myModels.form.providerPlaceholder")}
                 options={providers
                   .filter((p) => {
                     const isVoice =
@@ -583,16 +611,18 @@ export default function MyModelsPage() {
               />
               {form.is_system && (
                 <p className="text-[11px] text-zinc-500">
-                  官方模型只能选官方厂商；列表为空时先在「厂商管理」上架。
+                  {t("myModels.form.officialOnlyHint", {
+                    providers: t("providers.title"),
+                  })}
                 </p>
               )}
             </div>
             {isAdmin && (
               <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2">
                 <div>
-                  <p className="text-sm text-zinc-200">官方</p>
+                  <p className="text-sm text-zinc-200">{t("official")}</p>
                   <p className="text-[11px] text-zinc-500">
-                    所有用户可见、仅管理员可修改；不开则仅自己可见
+                    {t("officialHint")}
                   </p>
                 </div>
                 <Switch
@@ -609,7 +639,7 @@ export default function MyModelsPage() {
                         : f.provider_id,
                     }))
                   }
-                  aria-label="官方模型"
+                  aria-label={t("myModels.form.officialAria")}
                 />
               </div>
             )}
@@ -630,7 +660,7 @@ export default function MyModelsPage() {
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
                 Base URL{" "}
                 <span className="text-zinc-600 normal-case ml-1">
-                  （留空用厂商默认）
+                  {t("myModels.form.baseUrlOptional")}
                 </span>
               </Label>
               <Input
@@ -649,7 +679,7 @@ export default function MyModelsPage() {
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
                 API Key{" "}
                 <span className="text-zinc-600 normal-case ml-1">
-                  （留空用厂商 Key）
+                  {t("myModels.form.apiKeyOptional")}
                 </span>
               </Label>
               <div className="relative">
@@ -677,7 +707,7 @@ export default function MyModelsPage() {
               onClick={() => setAddOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleAdd}
@@ -689,7 +719,7 @@ export default function MyModelsPage() {
               }
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              添加模型
+              {t("myModels.addModel")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -709,20 +739,20 @@ export default function MyModelsPage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Edit2 className="w-4 h-4 text-violet-400" />
-              编辑模型
+              {t("myModels.editModel")}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                名称
+                {t("common:field.name")}
               </Label>
               <Input
                 value={form.name}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, name: e.target.value }))
                 }
-                placeholder="模型别名"
+                placeholder={t("myModels.form.namePlaceholder")}
                 className="text-sm "
               />
             </div>
@@ -743,7 +773,7 @@ export default function MyModelsPage() {
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
                 Base URL{" "}
                 <span className="text-zinc-600 normal-case ml-1">
-                  （留空用厂商默认）
+                  {t("myModels.form.baseUrlOptional")}
                 </span>
               </Label>
               <Input
@@ -757,7 +787,7 @@ export default function MyModelsPage() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                厂商
+                {t("field.provider")}
               </Label>
               <p className="text-sm text-zinc-300 px-3 py-2 bg-zinc-800/60 rounded-md">
                 {providers.find((p) => p.id === form.provider_id)?.name ??
@@ -766,10 +796,10 @@ export default function MyModelsPage() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                类型
+                {t("common:field.type")}
               </Label>
               <p className="text-sm text-zinc-300 px-3 py-2 bg-zinc-800/60 rounded-md">
-                {TYPE_LABEL[form.type] ?? form.type}
+                {typeName(form.type)}
               </p>
             </div>
           </div>
@@ -782,14 +812,14 @@ export default function MyModelsPage() {
               }}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleEdit}
               disabled={saving || !form.name.trim() || !form.model_id.trim()}
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              保存修改
+              {t("myModels.saveChanges")}
             </Button>
           </DialogFooter>
         </DialogContent>

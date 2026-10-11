@@ -9,10 +9,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Tag } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { billingApi, type BillingPrice } from "@/lib/api";
 import { useDocumentTitle } from "@/lib/title";
 import {
-	BILLING_DISABLED_TITLE,
 	billingErrorMessage,
 	formatDate,
 	formatMicro,
@@ -47,7 +47,8 @@ import {
 const METER_ORDER = ["llm", "tts", "asr", "voice:clone", "session", "mcp", "kb"];
 
 export default function PricesPage() {
-	useDocumentTitle("价格公示");
+	const { t } = useTranslation(["billingPages", "common"]);
+	useDocumentTitle(t("prices.title"));
 
 	const [prices, setPrices] = useState<BillingPrice[]>([]);
 	const [resources, setResources] =
@@ -76,7 +77,7 @@ export default function PricesPage() {
 					setDisabled(true);
 					return;
 				}
-				setError(billingErrorMessage(err, "加载价格失败"));
+				setError(billingErrorMessage(err, t("prices.loadFailed")));
 			})
 			.finally(() => {
 				if (!cancelled) setLoading(false);
@@ -121,14 +122,18 @@ export default function PricesPage() {
 			<div className="border-b border-zinc-800/80 px-8 py-5">
 				<div className="flex items-center justify-between">
 					<div>
-						<h1 className="text-lg font-semibold text-white">价格公示</h1>
+						<h1 className="text-lg font-semibold text-white">
+							{t("prices.title")}
+						</h1>
 						<p className="text-sm text-zinc-500 mt-0.5">
-							当前生效的平台标准价，按计量点分组
+							{t("prices.subtitle")}
 						</p>
 					</div>
 					{!loading && !disabled && prices.length > 0 && (
 						<div className="text-right">
-							<p className="text-xs text-zinc-500">生效中的价格版本</p>
+							<p className="text-xs text-zinc-500">
+								{t("prices.activeVersions")}
+							</p>
 							<p className="text-xl font-semibold text-white font-mono">
 								{prices.length}
 							</p>
@@ -147,22 +152,22 @@ export default function PricesPage() {
 
 				{loading ? (
 					<div className="bg-zinc-900 border border-zinc-800 rounded-xl">
-						<LoadingBlock label="加载价格中..." />
+						<LoadingBlock label={t("prices.loading")} />
 					</div>
 				) : disabled ? (
 					<div className="bg-zinc-900 border border-zinc-800 rounded-xl">
 						<EmptyState
 							icon={Tag}
-							title={BILLING_DISABLED_TITLE}
-							hint="服务端没有开启计费模块（billing.enabled），价格公示暂不可用。"
+							title={t("billing:disabledTitle")}
+							hint={t("prices.disabledHint")}
 						/>
 					</div>
 				) : groups.length === 0 ? (
 					<div className="bg-zinc-900 border border-zinc-800 rounded-xl">
 						<EmptyState
 							icon={Tag}
-							title="还没有公示的价格"
-							hint="平台标准价为空时，新会话会因为匹配不到价格被拒绝；运营把价格录进来之后这里就会显示。"
+							title={t("prices.emptyTitle")}
+							hint={t("prices.emptyHint")}
 						/>
 					</div>
 				) : (
@@ -170,18 +175,22 @@ export default function PricesPage() {
 						<Panel
 							key={source}
 							title={meterSourceLabel(source)}
-							description={`${rows.length} 条生效中的平台标准价`}
+							description={t("prices.activeCount", { n: rows.length })}
 							bodyClassName="p-0"
 						>
 							<TableShell
 								head={
 									<>
-										<Th>计费项</Th>
-										<Th>适用范围</Th>
-										<Th className="text-right">单价</Th>
-										<Th>舍入</Th>
-										<Th className="text-right">起步价</Th>
-										<Th>生效时间</Th>
+										<Th>{t("prices.column.item")}</Th>
+										<Th>{t("prices.column.scope")}</Th>
+										<Th className="text-right">
+											{t("prices.column.unitPrice")}
+										</Th>
+										<Th>{t("prices.column.rounding")}</Th>
+										<Th className="text-right">
+											{t("prices.column.minCharge")}
+										</Th>
+										<Th>{t("prices.column.effective")}</Th>
 									</>
 								}
 							>
@@ -212,9 +221,13 @@ export default function PricesPage() {
 													{price.tiers &&
 														price.tiers.length > 0 && (
 															<span className="text-[11px] text-zinc-500">
-																阶梯{" "}
-																{price.tiers.length}{" "}
-																档：按账期累计量分档累进
+																{t(
+																	"prices.tierSummary",
+																	{
+																		n: price.tiers
+																			.length,
+																	},
+																)}
 															</span>
 														)}
 												</div>
@@ -235,7 +248,7 @@ export default function PricesPage() {
 												{" ~ "}
 												{price.effective_to
 													? formatDate(price.effective_to)
-													: "长期"}
+													: t("prices.longTerm")}
 											</Td>
 										</Tr>
 									);
@@ -255,8 +268,11 @@ export default function PricesPage() {
 										.map((price) => (
 											<div key={price.id}>
 												<p className="text-[11px] text-zinc-500 mb-1.5">
-													{itemLabel(price.item_code)}{" "}
-													的阶梯（分档累进，不是达标后全量按新价）
+													{t("prices.tierDetail", {
+														item: itemLabel(
+															price.item_code,
+														),
+													})}
 												</p>
 												<div className="flex flex-wrap gap-x-4 gap-y-1">
 													{price.tiers?.map(

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Search, Bot, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,13 +11,16 @@ import {
 } from "@/lib/api";
 import { useDocumentTitle } from "@/lib/title";
 
+const ALL_CATEGORIES = "all";
+
 export default function AgentPlazaPage() {
-	useDocumentTitle("智能体广场");
+	const { t } = useTranslation("agentsList");
+	useDocumentTitle(t("plaza.title"));
 
 	const [templates, setTemplates] = useState<AgentTemplate[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [query, setQuery] = useState("");
-	const [activeCategory, setActiveCategory] = useState("全部");
+	const [activeCategory, setActiveCategory] = useState(ALL_CATEGORIES);
 	const [using, setUsing] = useState<string | null>(null);
 	const [error, setError] = useState("");
 	const navigate = useNavigate();
@@ -30,17 +34,17 @@ export default function AgentPlazaPage() {
 	}, []);
 
 	const categories = [
-		"全部",
-		...new Set(templates.map((t) => t.category).filter(Boolean)),
+		ALL_CATEGORIES,
+		...new Set(templates.map((tpl) => tpl.category).filter(Boolean)),
 	];
 
-	const filtered = templates.filter((t) => {
+	const filtered = templates.filter((tpl) => {
 		const matchCategory =
-			activeCategory === "全部" || t.category === activeCategory;
+			activeCategory === ALL_CATEGORIES || tpl.category === activeCategory;
 		const matchQuery =
 			!query.trim() ||
-			t.name.toLowerCase().includes(query.trim().toLowerCase()) ||
-			(t.description ?? "")
+			tpl.name.toLowerCase().includes(query.trim().toLowerCase()) ||
+			(tpl.description ?? "")
 				.toLowerCase()
 				.includes(query.trim().toLowerCase());
 		return matchCategory && matchQuery;
@@ -60,7 +64,7 @@ export default function AgentPlazaPage() {
 			const detail = (err as {
 				response?: { data?: { error?: string } };
 			})?.response?.data?.error;
-			setError(detail ?? (err instanceof Error ? err.message : "创建失败，请重试"));
+			setError(detail ?? (err instanceof Error ? err.message : t("plaza.createFailed")));
 		}
 	};
 
@@ -70,9 +74,9 @@ export default function AgentPlazaPage() {
 			<div className="border-b border-zinc-800/80 px-8 py-5">
 				<div className="flex items-center justify-between">
 					<div>
-						<h1 className="text-lg font-semibold text-white">智能体广场</h1>
+						<h1 className="text-lg font-semibold text-white">{t("plaza.title")}</h1>
 						<p className="text-sm text-zinc-500 mt-0.5">
-							选择模板快速创建，或从零构建你的专属智能体
+							{t("plaza.subtitle")}
 						</p>
 					</div>
 					<Button
@@ -82,7 +86,7 @@ export default function AgentPlazaPage() {
 						className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
 					>
 						<Sparkles className="w-3.5 h-3.5" />
-						从零创建
+						{t("plaza.createFromScratch")}
 					</Button>
 				</div>
 
@@ -92,7 +96,7 @@ export default function AgentPlazaPage() {
 					<Input
 						value={query}
 						onChange={(e) => setQuery(e.target.value)}
-						placeholder="搜索智能体模板..."
+						placeholder={t("plaza.searchPlaceholder")}
 						className="pl-9 h-9 text-sm"
 					/>
 				</div>
@@ -110,7 +114,7 @@ export default function AgentPlazaPage() {
 										: "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
 								}`}
 							>
-								{cat}
+								{cat === ALL_CATEGORIES ? t("plaza.categoryAll") : cat}
 							</button>
 						))}
 					</div>
@@ -129,8 +133,8 @@ export default function AgentPlazaPage() {
 						<div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
 							<Bot className="w-6 h-6 text-zinc-600" />
 						</div>
-						<p className="text-zinc-400 text-sm">没有找到匹配的模板</p>
-						<p className="text-zinc-600 text-xs mt-1">试试其他关键词或分类</p>
+						<p className="text-zinc-400 text-sm">{t("plaza.emptyTitle")}</p>
+						<p className="text-zinc-600 text-xs mt-1">{t("plaza.emptyHint")}</p>
 					</div>
 				) : (
 					<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -173,7 +177,9 @@ export default function AgentPlazaPage() {
 								{/* Footer */}
 								<div className="flex items-center justify-between">
 									<span className="text-[11px] text-zinc-600">
-										{tpl.use_count.toLocaleString()} 次使用
+										{t("plaza.useCount", {
+											value: tpl.use_count.toLocaleString(),
+										})}
 									</span>
 									<div className="flex gap-1.5">
 										<Button
@@ -185,7 +191,7 @@ export default function AgentPlazaPage() {
 											{using === tpl.id ? (
 												<Loader2 className="w-3 h-3 animate-spin" />
 											) : (
-												"基于此创建"
+												t("plaza.createFromTemplate")
 											)}
 										</Button>
 									</div>

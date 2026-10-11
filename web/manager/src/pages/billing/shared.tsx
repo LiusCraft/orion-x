@@ -6,6 +6,7 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 export interface BannerMessage {
@@ -31,6 +32,7 @@ export function Banner({
 	message: BannerMessage | null;
 	onClose?: () => void;
 }) {
+	const { t } = useTranslation(["billingPages", "common"]);
 	if (!message) return null;
 	const Icon = message.kind === "ok" ? CheckCircle2 : AlertCircle;
 	return (
@@ -59,7 +61,7 @@ export function Banner({
 							? "text-emerald-400/60 hover:text-emerald-300"
 							: "text-red-400/60 hover:text-red-300",
 					)}
-					aria-label="关闭提示"
+					aria-label={t("shared.closeBanner")}
 				>
 					<X className="w-3.5 h-3.5" strokeWidth={1.5} />
 				</button>
@@ -263,11 +265,12 @@ export function Pill({
 }
 
 /** 加载态：表格区与整页共用。 */
-export function LoadingBlock({ label = "加载中..." }: { label?: string }) {
+export function LoadingBlock({ label }: { label?: string }) {
+	const { t } = useTranslation(["billingPages", "common"]);
 	return (
 		<div className="flex items-center justify-center py-16 text-zinc-600 gap-2">
 			<Loader2 className="w-4 h-4 animate-spin" />
-			<span className="text-sm">{label}</span>
+			<span className="text-sm">{label ?? t("common:state.loading")}</span>
 		</div>
 	);
 }
@@ -326,6 +329,7 @@ export function PaginationBar({
 	loading?: boolean;
 	onPageChange: (page: number) => void;
 }) {
+	const { t } = useTranslation(["billingPages", "common"]);
 	if (total !== undefined && total <= pageSize) return null;
 	const totalPages =
 		total !== undefined ? Math.max(1, Math.ceil(total / pageSize)) : undefined;
@@ -337,8 +341,8 @@ export function PaginationBar({
 		<div className="flex items-center justify-between mt-4">
 			<span className="text-xs text-zinc-500">
 				{total !== undefined
-					? `共 ${total} 条 · 第 ${page}/${totalPages} 页`
-					: `第 ${page} 页`}
+					? t("shared.pagination.summary", { total, page, totalPages })
+					: t("shared.pagination.page", { page })}
 			</span>
 			<div className="flex items-center gap-2">
 				<button
@@ -347,14 +351,14 @@ export function PaginationBar({
 					className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
 				>
 					<ChevronLeft className="w-3.5 h-3.5" strokeWidth={1.5} />
-					上一页
+					{t("shared.pagination.prev")}
 				</button>
 				<button
 					onClick={() => onPageChange(page + 1)}
 					disabled={!canNext}
 					className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
 				>
-					下一页
+					{t("shared.pagination.next")}
 					<ChevronRight className="w-3.5 h-3.5" strokeWidth={1.5} />
 				</button>
 			</div>

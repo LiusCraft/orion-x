@@ -4,13 +4,13 @@
 // ledger 的合计会差一个结算延迟——这一点在页面上直说，不然对账的人会以为丢钱了。
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Activity, Coins, LineChart, Lock, RefreshCw, Scale } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { SimpleSelect } from "@/components/ui/select";
 import { billingAdminApi, type BillingAccount, type BillingStats } from "@/lib/api";
 import {
 	accountStatusLabel,
-	BILLING_DISABLED_TITLE,
 	billingErrorMessage,
 	formatMicro,
 	formatQuantity,
@@ -45,6 +45,7 @@ const STATUS_TONES: Record<string, "emerald" | "red" | "zinc"> = {
 };
 
 export default function StatsTab() {
+	const { t } = useTranslation(["billingAdmin", "common"]);
 	const [accounts, setAccounts] = useState<BillingAccount[]>([]);
 	const [accountId, setAccountId] = useState("");
 	const [from, setFrom] = useState("");
@@ -72,7 +73,7 @@ export default function StatsTab() {
 				}
 				setBanner({
 					kind: "error",
-					text: billingErrorMessage(err, "加载账户列表失败"),
+					text: billingErrorMessage(err, t("stats.loadAccountsFailed")),
 				});
 			})
 			.finally(() => {
@@ -81,7 +82,7 @@ export default function StatsTab() {
 		return () => {
 			cancelled = true;
 		};
-	}, [reloadKey]);
+	}, [reloadKey, t]);
 
 	useEffect(() => {
 		if (!accountId) {
@@ -110,7 +111,10 @@ export default function StatsTab() {
 					setDisabled(true);
 					return;
 				}
-				setBanner({ kind: "error", text: billingErrorMessage(err, "加载报表失败") });
+				setBanner({
+					kind: "error",
+					text: billingErrorMessage(err, t("stats.loadFailed")),
+				});
 			})
 			.finally(() => {
 				if (!cancelled) setLoading(false);
@@ -118,15 +122,15 @@ export default function StatsTab() {
 		return () => {
 			cancelled = true;
 		};
-	}, [accountId, from, to, reloadKey]);
+	}, [accountId, from, to, reloadKey, t]);
 
 	if (disabled) {
 		return (
 			<Panel bodyClassName="p-0">
 				<EmptyState
 					icon={LineChart}
-					title={BILLING_DISABLED_TITLE}
-					hint="服务端没有开启计费模块（billing.enabled），报表不可用。"
+					title={t("billing:disabledTitle")}
+					hint={t("stats.disabledHint")}
 				/>
 			</Panel>
 		);
@@ -149,10 +153,10 @@ export default function StatsTab() {
 						size="sm"
 						placeholder={
 							accountsLoading
-								? "加载账户中..."
+								? t("stats.accountsLoading")
 								: accounts.length === 0
-									? "没有可用账户"
-									: "选择账户"
+									? t("stats.noAccounts")
+									: t("stats.selectAccount")
 						}
 						disabled={accountsLoading || accounts.length === 0}
 						className="w-72"
@@ -184,7 +188,7 @@ export default function StatsTab() {
 							}}
 							className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
 						>
-							清空（本账期）
+							{t("stats.clearPeriod")}
 						</button>
 					)}
 				</div>
@@ -197,7 +201,7 @@ export default function StatsTab() {
 						className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
 						strokeWidth={1.5}
 					/>
-					刷新
+					{t("common:action.refresh")}
 				</button>
 			</FilterBar>
 
@@ -205,8 +209,8 @@ export default function StatsTab() {
 				<Panel bodyClassName="p-0">
 					<EmptyState
 						icon={LineChart}
-						title="先选一个账户"
-						hint="报表按账户聚合，account_id 是这个接口的必填参数。时间段留空即本账期到现在。"
+						title={t("stats.pickAccountTitle")}
+						hint={t("stats.pickAccountHint")}
 					/>
 				</Panel>
 			) : loading && !stats ? (
@@ -237,7 +241,7 @@ export default function StatsTab() {
 					<div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 						<div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
 							<div className="flex items-center justify-between mb-3">
-								<p className="text-xs text-zinc-500">可用余额</p>
+								<p className="text-xs text-zinc-500">{t("stats.cardBalance")}</p>
 								<div className="w-8 h-8 rounded-lg bg-amber-400/10 flex items-center justify-center">
 									<Coins
 										className="w-4 h-4 text-amber-400"
@@ -255,12 +259,12 @@ export default function StatsTab() {
 								{formatMicro(stats.summary.balance_micro, currency)}
 							</p>
 							<p className="text-[11px] text-zinc-600 mt-0.5">
-								可以为负 = 后付欠款
+								{t("stats.cardBalanceHint")}
 							</p>
 						</div>
 						<div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
 							<div className="flex items-center justify-between mb-3">
-								<p className="text-xs text-zinc-500">预冻结</p>
+								<p className="text-xs text-zinc-500">{t("stats.cardFrozen")}</p>
 								<div className="w-8 h-8 rounded-lg bg-sky-400/10 flex items-center justify-center">
 									<Lock
 										className="w-4 h-4 text-sky-400"
@@ -272,12 +276,12 @@ export default function StatsTab() {
 								{formatMicro(stats.summary.frozen_micro, currency)}
 							</p>
 							<p className="text-[11px] text-zinc-600 mt-0.5">
-								会话预授权占用
+								{t("stats.cardFrozenHint")}
 							</p>
 						</div>
 						<div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
 							<div className="flex items-center justify-between mb-3">
-								<p className="text-xs text-zinc-500">账期消耗</p>
+								<p className="text-xs text-zinc-500">{t("stats.cardSpend")}</p>
 								<div className="w-8 h-8 rounded-lg bg-violet-400/10 flex items-center justify-center">
 									<Activity
 										className="w-4 h-4 text-violet-400"
@@ -293,13 +297,15 @@ export default function StatsTab() {
 							</p>
 							<p className="text-[11px] text-zinc-600 mt-0.5 truncate">
 								{top
-									? `Top：${itemLabel(top.item_code)}`
-									: "账期内暂无消耗"}
+									? t("stats.topItem", { item: itemLabel(top.item_code) })
+									: t("stats.noSpend")}
 							</p>
 						</div>
 						<div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
 							<div className="flex items-center justify-between mb-3">
-								<p className="text-xs text-zinc-500">信用额度</p>
+								<p className="text-xs text-zinc-500">
+									{t("stats.cardCreditLimit")}
+								</p>
 								<div className="w-8 h-8 rounded-lg bg-emerald-400/10 flex items-center justify-center">
 									<Scale
 										className="w-4 h-4 text-emerald-400"
@@ -314,30 +320,32 @@ export default function StatsTab() {
 								)}
 							</p>
 							<p className="text-[11px] text-zinc-600 mt-0.5">
-								0 = 纯预付费
+								{t("stats.cardCreditLimitHint")}
 							</p>
 						</div>
 					</div>
 
 					<Panel
-						title="按计费项聚合"
-						description="读的是已结算的用量事件；数量口径见各计费项的单位"
+						title={t("stats.panelTitle")}
+						description={t("stats.panelDescription")}
 						bodyClassName="p-0"
 					>
 						{byItem.length === 0 ? (
 							<EmptyState
 								icon={LineChart}
-								title="这段时间没有已结算的用量"
-								hint="还没有产生用量，或者事件还在 pending 等结算。"
+								title={t("stats.emptyTitle")}
+								hint={t("stats.emptyHint")}
 							/>
 						) : (
 							<TableShell
 								head={
 									<>
-										<Th>计费项</Th>
-										<Th className="text-right">数量</Th>
-										<Th className="text-right">金额</Th>
-										<Th className="w-64">占比</Th>
+										<Th>{t("shared.item")}</Th>
+										<Th className="text-right">
+											{t("stats.columnQuantity")}
+										</Th>
+										<Th className="text-right">{t("shared.amount")}</Th>
+										<Th className="w-64">{t("stats.columnShare")}</Th>
 									</>
 								}
 							>
@@ -385,7 +393,7 @@ export default function StatsTab() {
 								})}
 								<Tr className="bg-zinc-800/30">
 									<Td className="text-xs font-semibold text-zinc-400">
-										合计
+										{t("stats.total")}
 									</Td>
 									<Td />
 									<Td className="text-right font-mono font-semibold text-amber-300">
@@ -399,14 +407,11 @@ export default function StatsTab() {
 				</>
 			) : (
 				<Panel bodyClassName="p-0">
-					<EmptyState icon={LineChart} title="暂无报表数据" />
+					<EmptyState icon={LineChart} title={t("stats.noData")} />
 				</Panel>
 			)}
 
-			<Hint tone="zinc">
-				报表只统计已结算的用量。数据面在 turn 边界上报、控制面 worker 每 1~5 秒跑一轮，
-				正在 pending 的事件会让报表与流水差一个结算延迟（对不上时先看 pending 数）。
-			</Hint>
+			<Hint tone="zinc">{t("stats.footer")}</Hint>
 		</div>
 	);
 }

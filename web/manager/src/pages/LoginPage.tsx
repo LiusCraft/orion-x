@@ -1,28 +1,34 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Eye, EyeOff, Mic, Cpu, Zap, Globe } from "lucide-react";
 import { authApi, type OAuthProvider } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { useDocumentTitle } from "@/lib/title";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 const FEATURES = [
-  { icon: Mic, title: "多路语音会话", desc: "每个设备独立会话，互不干扰" },
+  {
+    icon: Mic,
+    titleKey: "features.multiSession.title",
+    descKey: "features.multiSession.desc",
+  },
   {
     icon: Cpu,
-    title: "灵活 LLM 接入",
-    desc: "支持 OpenAI 兼容接口，自由切换模型",
+    titleKey: "features.llm.title",
+    descKey: "features.llm.desc",
   },
   {
     icon: Zap,
-    title: "实时流式响应",
-    desc: "VAD 检测 + 流式 ASR/TTS，延迟极低",
+    titleKey: "features.streaming.title",
+    descKey: "features.streaming.desc",
   },
   {
     icon: Globe,
-    title: "MCP 工具扩展",
-    desc: "通过 MCP 协议接入外部工具与服务",
+    titleKey: "features.mcp.title",
+    descKey: "features.mcp.desc",
   },
 ];
 
@@ -38,6 +44,7 @@ function readErrorBody(err: unknown): { error?: string; code?: string } {
 }
 
 export default function LoginPage() {
+  const { t } = useTranslation(["login", "common"]);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -75,11 +82,11 @@ export default function LoginPage() {
         .verifyEmail(verifyToken)
         .then(() => {
           setNoticeOk(true);
-          setNotice("邮箱验证成功，请登录");
+          setNotice(t("notice.emailVerified"));
         })
         .catch((err: unknown) => {
           setNoticeOk(false);
-          setNotice(readErrorBody(err).error || "验证链接无效或已过期");
+          setNotice(readErrorBody(err).error || t("notice.verifyLinkInvalid"));
         })
         .finally(() => {
           window.history.replaceState({}, document.title, window.location.pathname);
@@ -125,16 +132,19 @@ export default function LoginPage() {
       // 邮箱验证开启：注册只发验证邮件，不发登录态
       setVerificationEmail(email);
       setNoticeOk(data.verification_sent !== false);
-      setNotice(data.message || "验证邮件已发送，请查收");
+      setNotice(data.message || t("notice.verificationSent"));
       setMode("login");
     } catch (err: unknown) {
       const body = readErrorBody(err);
       if (body.code === "email_unverified") {
         setVerificationEmail(email);
         setNoticeOk(false);
-        setNotice(body.error || "邮箱未验证，请先完成邮箱验证");
+        setNotice(body.error || t("notice.emailUnverified"));
       } else {
-        setError(body.error || (mode === "login" ? "邮箱或密码错误" : "注册失败"));
+        setError(
+          body.error ||
+            (mode === "login" ? t("error.loginFailed") : t("error.registerFailed")),
+        );
       }
     } finally {
       setLoading(false);
@@ -147,10 +157,10 @@ export default function LoginPage() {
     try {
       await authApi.resendVerification(verificationEmail);
       setNoticeOk(true);
-      setNotice("验证邮件已发送，请查收（1 分钟内不会重复发送）");
+      setNotice(t("notice.verificationResent"));
     } catch (err: unknown) {
       setNoticeOk(false);
-      setNotice(readErrorBody(err).error || "发送失败，请稍后重试");
+      setNotice(readErrorBody(err).error || t("error.resendFailed"));
     } finally {
       setResending(false);
     }
@@ -158,6 +168,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-zinc-950 flex">
+      <LanguageSwitcher className="absolute top-4 right-4 z-10" />
       {/* Grid background */}
       <div
         className="absolute inset-0 pointer-events-none"
@@ -198,24 +209,23 @@ export default function LoginPage() {
             AI Voice Platform
           </p>
           <h2 className="text-[2.1rem] font-semibold text-white leading-tight mb-4">
-            为你的设备注入语音智能
+            {t("hero.title")}
           </h2>
           <p className="text-zinc-400 text-sm leading-relaxed mb-10">
-            开源 AI 语音机器人框架，支持多设备管理、可插拔 LLM
-            和低延迟流式语音对话。
+            {t("hero.desc")}
           </p>
 
           <div className="space-y-5">
-            {FEATURES.map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="flex items-center gap-3">
+            {FEATURES.map(({ icon: Icon, titleKey, descKey }) => (
+              <div key={titleKey} className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-zinc-800 border border-zinc-700/60 flex items-center justify-center shrink-0">
                   <Icon className="w-4 h-4 text-violet-400" strokeWidth={1.5} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-white leading-snug">
-                    {title}
+                    {t(titleKey)}
                   </p>
-                  <p className="text-xs text-zinc-500">{desc}</p>
+                  <p className="text-xs text-zinc-500">{t(descKey)}</p>
                 </div>
               </div>
             ))}
@@ -252,12 +262,12 @@ export default function LoginPage() {
 
           <div className="mb-7">
             <h1 className="text-2xl font-semibold text-white">
-              {mode === "login" ? "欢迎回来" : "创建账号"}
+              {mode === "login" ? t("title.login") : t("title.register")}
             </h1>
             <p className="text-sm text-zinc-500 mt-1">
               {mode === "login"
-                ? "登录到管理控制台"
-                : "注册一个管理控制台账号"}
+                ? t("subtitle.login")
+                : t("subtitle.register")}
             </p>
           </div>
 
@@ -268,7 +278,7 @@ export default function LoginPage() {
                   htmlFor="email"
                   className="block text-xs font-medium text-zinc-400 uppercase tracking-wider"
                 >
-                  邮箱
+                  {t("email")}
                 </label>
                 <Input
                   id="email"
@@ -294,7 +304,7 @@ export default function LoginPage() {
                     htmlFor="username"
                     className="block text-xs font-medium text-zinc-400 uppercase tracking-wider"
                   >
-                    昵称（选填）
+                    {t("username")}
                   </label>
                   <Input
                     id="username"
@@ -305,7 +315,7 @@ export default function LoginPage() {
                       setUsername(e.target.value);
                     }}
                     className="h-11 transition-[border-color,box-shadow] duration-150"
-                    placeholder="你的昵称"
+                    placeholder={t("usernamePlaceholder")}
                   />
                 </div>
               )}
@@ -315,7 +325,7 @@ export default function LoginPage() {
                   htmlFor="password"
                   className="block text-xs font-medium text-zinc-400 uppercase tracking-wider"
                 >
-                  密码
+                  {t("password")}
                 </label>
                 <div className="relative">
                   <Input
@@ -337,7 +347,7 @@ export default function LoginPage() {
                     onClick={() => setShowPassword((v) => !v)}
                     tabIndex={-1}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-200 transition-colors duration-150 cursor-pointer"
-                    aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                    aria-label={showPassword ? t("hidePassword") : t("showPassword")}
                   >
                     {showPassword ? (
                       <EyeOff className="w-4.5 h-4.5" />
@@ -387,7 +397,7 @@ export default function LoginPage() {
                       disabled={resending}
                       className="shrink-0 text-violet-400 hover:text-violet-300 disabled:opacity-50 cursor-pointer"
                     >
-                      {resending ? "发送中..." : "重发验证邮件"}
+                      {resending ? t("action.resending") : t("action.resendVerification")}
                     </button>
                   )}
                 </div>
@@ -419,12 +429,12 @@ export default function LoginPage() {
                         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                       />
                     </svg>
-                    {mode === "login" ? "登录中..." : "注册中..."}
+                    {mode === "login" ? t("action.loggingIn") : t("action.registering")}
                   </span>
                 ) : mode === "login" ? (
-                  "登录"
+                  t("action.login")
                 ) : (
-                  "注册"
+                  t("action.register")
                 )}
               </Button>
             </form>
@@ -435,7 +445,7 @@ export default function LoginPage() {
                 <div className="w-full border-t border-zinc-800" />
               </div>
               <div className="relative flex justify-center text-xs">
-                <span className="bg-zinc-900/70 px-2 text-zinc-500">或</span>
+                <span className="bg-zinc-900/70 px-2 text-zinc-500">{t("or")}</span>
               </div>
             </div>
 
@@ -456,7 +466,7 @@ export default function LoginPage() {
                 ) : (
                   <Globe className="w-5 h-5" />
                 )}
-                使用 {p.name} 登录
+                {t("oauthLogin", { name: p.name })}
               </button>
             ))}
 
@@ -464,7 +474,7 @@ export default function LoginPage() {
             <p className="text-center text-xs text-zinc-500 mt-5">
               {mode === "login" ? (
                 <>
-                  还没有账号？{" "}
+                  {t("noAccount")}{" "}
                   <button
                     type="button"
                     onClick={() => {
@@ -475,12 +485,12 @@ export default function LoginPage() {
                     }}
                     className="text-violet-400 hover:text-violet-300 cursor-pointer"
                   >
-                    注册
+                    {t("action.register")}
                   </button>
                 </>
               ) : (
                 <>
-                  已有账号？{" "}
+                  {t("haveAccount")}{" "}
                   <button
                     type="button"
                     onClick={() => {
@@ -491,7 +501,7 @@ export default function LoginPage() {
                     }}
                     className="text-violet-400 hover:text-violet-300 cursor-pointer"
                   >
-                    登录
+                    {t("action.login")}
                   </button>
                 </>
               )}

@@ -1,10 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/lib/store";
 import { billingApi } from "@/lib/api";
 import { formatMicro } from "@/lib/billing";
 import { useTheme } from "./ThemeProvider";
+import LanguageSwitcher from "./LanguageSwitcher";
 import {
 	Bot,
 	Store,
@@ -36,7 +38,7 @@ import {
 interface NavItem {
 	to: string;
 	icon: LucideIcon;
-	label: string;
+	labelKey: string;
 	end?: boolean;
 	/** 只给 admin 看的入口（路由层也会拦一道） */
 	adminOnly?: boolean;
@@ -45,66 +47,98 @@ interface NavItem {
 }
 
 interface NavGroup {
-	label: string;
+	labelKey: string;
 	items: NavItem[];
 }
 
 const NAV_GROUPS: NavGroup[] = [
 	{
-		label: "智能体",
+		labelKey: "nav.groups.agents",
 		items: [
-			{ to: "/agents/plaza", icon: Store, label: "广场", end: false },
-			{ to: "/agents", icon: Bot, label: "我的智能体", end: true },
+			{ to: "/agents/plaza", icon: Store, labelKey: "nav.agentsPlaza", end: false },
+			{ to: "/agents", icon: Bot, labelKey: "nav.agentsMine", end: true },
 		],
 	},
 	{
-		label: "组件",
-		items: [{ to: "/components/mcp", icon: Cpu, label: "MCP", end: false }],
+		labelKey: "nav.groups.components",
+		items: [
+			{ to: "/components/mcp", icon: Cpu, labelKey: "nav.mcp", end: false },
+		],
 	},
 	{
-		label: "数据",
+		labelKey: "nav.groups.data",
 		items: [
-			{ to: "/data/memory", icon: Brain, label: "记忆库", end: false },
-			{ to: "/data/knowledge", icon: BookOpen, label: "知识库", end: false },
+			{ to: "/data/memory", icon: Brain, labelKey: "nav.memory", end: false },
+			{
+				to: "/data/knowledge",
+				icon: BookOpen,
+				labelKey: "nav.knowledge",
+				end: false,
+			},
 			{
 				to: "/data/sources",
 				icon: Database,
-				label: "数据源",
+				labelKey: "nav.sources",
 				end: false,
 				hidden: true,
 			},
 		],
 	},
 	{
-		label: "语音",
+		labelKey: "nav.groups.voice",
 		items: [
-			{ to: "/voice/plaza", icon: Music, label: "音色广场", end: false },
-			{ to: "/voice/clone", icon: Wand2, label: "语音复刻", end: false },
-			{ to: "/voice", icon: Mic2, label: "已有音色", end: true },
+			{
+				to: "/voice/plaza",
+				icon: Music,
+				labelKey: "nav.voicePlaza",
+				end: false,
+			},
+			{
+				to: "/voice/clone",
+				icon: Wand2,
+				labelKey: "nav.voiceClone",
+				end: false,
+			},
+			{ to: "/voice", icon: Mic2, labelKey: "nav.voiceMine", end: true },
 		],
 	},
 	{
-		label: "模型",
+		labelKey: "nav.groups.models",
 		items: [
 			{
 				to: "/models/providers",
 				icon: Building2,
-				label: "厂商管理",
+				labelKey: "nav.providers",
 				end: false,
 			},
-			{ to: "/models/monitor", icon: Activity, label: "模型监控", end: false },
-			{ to: "/models", icon: Layers, label: "我的模型", end: true },
+			{
+				to: "/models/monitor",
+				icon: Activity,
+				labelKey: "nav.modelMonitor",
+				end: false,
+			},
+			{ to: "/models", icon: Layers, labelKey: "nav.modelsMine", end: true },
 		],
 	},
 	{
-		label: "计费",
+		labelKey: "nav.groups.billing",
 		items: [
-			{ to: "/billing/usage", icon: BarChart3, label: "用量与余额", end: false },
-			{ to: "/billing/prices", icon: Tag, label: "价格公示", end: false },
+			{
+				to: "/billing/usage",
+				icon: BarChart3,
+				labelKey: "nav.billingUsage",
+				end: false,
+			},
+			{
+				to: "/billing/prices",
+				icon: Tag,
+				labelKey: "nav.billingPrices",
+				end: false,
+			},
 			{
 				to: "/billing/admin",
 				icon: Wallet,
-				label: "计费管理",
+				labelKey: "nav.billingAdmin",
 				end: false,
 				adminOnly: true,
 			},
@@ -172,6 +206,7 @@ function UserPopover({
 	userId: string | null;
 	onLogout: () => void;
 }) {
+	const { t } = useTranslation("layout");
 	const [open, setOpen] = useState(false);
 	const [balance, setBalance] = useState<string | null>(null);
 	const [balanceLoaded, setBalanceLoaded] = useState(false);
@@ -234,7 +269,7 @@ function UserPopover({
 						<div className="w-6 h-6 rounded-full border border-zinc-700 flex items-center justify-center">
 							<User className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
 						</div>
-						<span className="text-white font-medium">账号</span>
+						<span className="text-white font-medium">{t("account")}</span>
 						<ChevronRight
 							className="w-3.5 h-3.5 text-zinc-600"
 							strokeWidth={1.5}
@@ -244,7 +279,7 @@ function UserPopover({
 						onClick={onLogout}
 						className="text-xs text-red-400 border border-red-400/40 rounded-lg px-2.5 py-1 hover:text-red-300 hover:border-red-400 transition-colors cursor-pointer"
 					>
-						退出登录
+						{t("logout")}
 					</button>
 				</div>
 
@@ -276,7 +311,7 @@ function UserPopover({
 					<div className="flex items-center gap-1.5 mb-3">
 						<Shield className="w-3.5 h-3.5 text-violet-400" strokeWidth={1.5} />
 						<span className="text-sm font-semibold text-white flex-1">
-							权限与安全
+							{t("security")}
 						</span>
 					</div>
 					<button
@@ -302,14 +337,14 @@ function UserPopover({
 					>
 						<Wallet className="w-3.5 h-3.5 text-violet-400" strokeWidth={1.5} />
 						<span className="text-sm font-semibold text-white flex-1">
-							费用与成本
+							{t("cost")}
 						</span>
 						<ChevronRight className="w-3 h-3 text-zinc-600" strokeWidth={1.5} />
 					</button>
 
 					<div className="flex items-center gap-5 mt-3">
 						<div>
-							<p className="text-[10px] text-zinc-500 mb-0.5">可用额度</p>
+							<p className="text-[10px] text-zinc-500 mb-0.5">{t("balance")}</p>
 							<p className="text-lg font-semibold text-white tracking-tight">
 								{balance ?? "—"}
 							</p>
@@ -321,7 +356,7 @@ function UserPopover({
 							}}
 							className="text-xs text-violet-400 hover:text-violet-300 mt-1 cursor-pointer"
 						>
-							充值汇款
+							{t("recharge")}
 						</button>
 					</div>
 				</PCard>
@@ -331,6 +366,7 @@ function UserPopover({
 }
 
 export default function Layout() {
+	const { t } = useTranslation("layout");
 	const { username, userId, isAdmin, logout } = useAuthStore();
 	const { theme, setTheme } = useTheme();
 	const navigate = useNavigate();
@@ -354,13 +390,14 @@ export default function Layout() {
 					</span>
 				</div>
 				<div className="flex items-center gap-2">
+					<LanguageSwitcher />
 					<button className="relative p-2 text-zinc-500 hover:text-zinc-200 transition-colors cursor-pointer rounded-lg hover:bg-zinc-800/70">
 						<Bell className="w-5 h-5" strokeWidth={1.5} />
 					</button>
 					<button
 						onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
 						className="p-2 text-zinc-500 hover:text-zinc-200 transition-colors cursor-pointer rounded-lg hover:bg-zinc-800/70"
-						aria-label="切换主题"
+						aria-label={t("theme")}
 					>
 						{theme === "dark" ? (
 							<Sun className="w-5 h-5" strokeWidth={1.5} />
@@ -382,13 +419,13 @@ export default function Layout() {
 					{/* Nav */}
 					<nav className="flex-1 overflow-y-auto py-3 px-2 scrollbar-none">
 						{NAV_GROUPS.map((group) => (
-							<div key={group.label} className="mb-5">
+							<div key={group.labelKey} className="mb-5">
 								<p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest px-2 mb-1.5">
-									{group.label}
+									{t(group.labelKey)}
 								</p>
 								{group.items
 									.filter((item) => !item.hidden && (!item.adminOnly || isAdmin))
-									.map(({ to, icon: Icon, label, end }) => (
+									.map(({ to, icon: Icon, labelKey, end }) => (
 										<NavLink
 											key={to}
 											to={to}
@@ -413,7 +450,7 @@ export default function Layout() {
 														)}
 														strokeWidth={1.5}
 													/>
-													{label}
+													{t(labelKey)}
 												</>
 											)}
 										</NavLink>

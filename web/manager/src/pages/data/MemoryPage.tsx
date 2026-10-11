@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
   Brain,
@@ -23,24 +24,32 @@ const PAGE_SIZE = 20;
 const DEVICE_PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
 
-const TARGET_MAP: Record<string, { label: string; cls: string }> = {
+const TARGET_MAP: Record<string, { key: string; cls: string }> = {
   memory: {
-    label: "记忆",
+    key: "target.memory",
     cls: "bg-violet-500/10 text-violet-400 border-violet-500/20",
   },
   user: {
-    label: "用户",
+    key: "target.user",
     cls: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   },
 };
 
 type SearchScope = "" | "agent" | "device" | "content";
 
-const SCOPE_OPTIONS: { value: SearchScope; label: string; hint: string }[] = [
-  { value: "", label: "关闭", hint: "" },
-  { value: "agent", label: "智能体", hint: "搜索智能体名称..." },
-  { value: "device", label: "设备", hint: "搜索设备名称或 ID..." },
-  { value: "content", label: "记忆内容", hint: "搜索记忆内容..." },
+const SCOPE_OPTIONS: {
+  value: SearchScope;
+  labelKey: string;
+  hintKey?: string;
+}[] = [
+  { value: "", labelKey: "memory.scope.off" },
+  { value: "agent", labelKey: "memory.scope.agent", hintKey: "memory.scope.agentHint" },
+  { value: "device", labelKey: "memory.scope.device", hintKey: "memory.scope.deviceHint" },
+  {
+    value: "content",
+    labelKey: "memory.scope.content",
+    hintKey: "memory.scope.contentHint",
+  },
 ];
 
 function shortId(id: string) {
@@ -59,11 +68,12 @@ function useDebouncedValue<T>(value: T, delay: number) {
 }
 
 export default function MemoryPage() {
+  const { t } = useTranslation(["data", "common"]);
   const [searchParams, setSearchParams] = useSearchParams();
   const deviceId = searchParams.get("device_id")?.trim() || "";
 
   // 展开某台设备时页面就是「设备记忆」，否则是记忆库总览。
-  useDocumentTitle(deviceId ? "设备记忆" : "记忆库");
+  useDocumentTitle(deviceId ? t("memory.deviceTitle") : t("memory.title"));
   const [agents, setAgents] = useState<AgentItem[]>([]);
   const [agentTotal, setAgentTotal] = useState(0);
   const [agentPage, setAgentPage] = useState(1);
@@ -95,8 +105,10 @@ export default function MemoryPage() {
   });
   searchRef.current = { searchScope, expandedAgent, expandedDevice };
 
-  const currentHint =
-    SCOPE_OPTIONS.find((o) => o.value === searchScope)?.hint || "";
+  const currentHintKey = SCOPE_OPTIONS.find(
+    (o) => o.value === searchScope,
+  )?.hintKey;
+  const currentHint = currentHintKey ? t(currentHintKey) : "";
 
   // ── 加载智能体 ──
   const loadAgents = useCallback(async (page = 1, q?: string) => {
@@ -111,7 +123,7 @@ export default function MemoryPage() {
       setAgentTotal(data.total || 0);
       setAgentPage(page);
     } catch {
-      setError("加载智能体列表失败");
+      setError(t("memory.error.agents"));
     } finally {
       setLoadingAgents(false);
     }
@@ -135,7 +147,7 @@ export default function MemoryPage() {
         setDeviceTotal(data.total || 0);
         setDevicePage(page);
       } catch {
-        setError("加载设备列表失败");
+        setError(t("memory.error.devices"));
       } finally {
         setLoadingDevices(false);
       }
@@ -157,7 +169,7 @@ export default function MemoryPage() {
         setEntryTotal(data.total || 0);
         setEntryPage(page);
       } catch {
-        setError("加载记忆条目失败");
+        setError(t("memory.error.entries"));
       } finally {
         setLoadingEntries(false);
       }
@@ -231,14 +243,14 @@ export default function MemoryPage() {
 
   // ── 删除 ──
   const handleDelete = async (id: string) => {
-    if (!confirm("确认删除这条记忆？")) return;
+    if (!confirm(t("memory.confirmDelete"))) return;
     setDeleting((p) => new Set(p).add(id));
     try {
       await memoryApi.remove(id);
       setEntries((prev) => prev.filter((e) => e.id !== id));
       setEntryTotal((prev) => prev - 1);
     } catch {
-      setError("删除失败");
+      setError(t("common:error.deleteFailed"));
     } finally {
       setDeleting((p) => {
         const n = new Set(p);
@@ -267,13 +279,15 @@ export default function MemoryPage() {
                 <button
                   type="button"
                   onClick={() => setSearchParams({})}
-                  aria-label="返回完整记忆库"
-                  title="返回完整记忆库"
+                  aria-label={t("memory.backToLibrary")}
+                  title={t("memory.backToLibrary")}
                   className="p-1.5 -ml-1.5 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
-                <h1 className="text-lg font-semibold text-white">设备记忆</h1>
+                <h1 className="text-lg font-semibold text-white">
+                  {t("memory.deviceTitle")}
+                </h1>
               </div>
               <p className="text-xs text-zinc-500 font-mono mt-1 ml-8 break-all">
                 {deviceId}
@@ -281,7 +295,7 @@ export default function MemoryPage() {
             </div>
             <div className="flex items-center gap-2 text-sm text-zinc-500 shrink-0">
               <Brain className="w-4 h-4 text-zinc-600" />
-              {entryTotal} 条记忆
+              {t("memory.entryCount", { n: entryTotal })}
             </div>
           </div>
           <div className="relative max-w-sm mt-4">
@@ -289,7 +303,7 @@ export default function MemoryPage() {
             <Input
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder="搜索该设备的记忆内容..."
+              placeholder={t("memory.searchDevicePlaceholder")}
               className="pl-9 h-9 text-sm "
             />
           </div>
@@ -306,7 +320,7 @@ export default function MemoryPage() {
                 }}
                 className="ml-auto bg-red-500/20 hover:bg-red-500/30 text-red-400 h-7 px-3 text-xs"
               >
-                重试
+                {t("common:action.retry")}
               </Button>
             </div>
           )}
@@ -320,7 +334,9 @@ export default function MemoryPage() {
               <div className="flex flex-col items-center py-20">
                 <Brain className="w-6 h-6 text-zinc-700 mb-3" />
                 <p className="text-sm text-zinc-500">
-                  {searchText ? "没有匹配的记忆条目" : "该设备暂无记忆条目"}
+                  {searchText
+                    ? t("memory.noMatchEntries")
+                    : t("memory.emptyEntries")}
                 </p>
               </div>
             ) : (
@@ -335,7 +351,7 @@ export default function MemoryPage() {
                       <span
                         className={`shrink-0 mt-0.5 text-[10px] px-1.5 py-0.5 rounded border ${target.cls}`}
                       >
-                        {target.label}
+                        {t(target.key)}
                       </span>
                       <span className="flex-1 text-sm text-zinc-300 leading-relaxed break-words min-w-0">
                         {mem.content}
@@ -347,8 +363,8 @@ export default function MemoryPage() {
                         type="button"
                         onClick={() => handleDelete(mem.id)}
                         disabled={deleting.has(mem.id)}
-                        aria-label="删除记忆"
-                        title="删除记忆"
+                        aria-label={t("memory.deleteEntry")}
+                        title={t("memory.deleteEntry")}
                         className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-zinc-600 hover:text-red-400 transition-all p-1 rounded hover:bg-red-400/10 disabled:opacity-40 cursor-pointer -mr-1"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -380,14 +396,16 @@ export default function MemoryPage() {
       <div className="border-b border-zinc-800/80 px-8 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">记忆库</h1>
+            <h1 className="text-lg font-semibold text-white">
+              {t("memory.title")}
+            </h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              终端用户与智能体对话中积累的长期记忆
+              {t("memory.subtitle")}
             </p>
           </div>
           <div className="flex items-center gap-2 text-sm text-zinc-500 shrink-0">
             <Brain className="w-4 h-4 text-zinc-600" />
-            {agentTotal} 个智能体
+            {t("memory.agentCount", { n: agentTotal })}
           </div>
         </div>
 
@@ -404,7 +422,7 @@ export default function MemoryPage() {
                     : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
-                {opt.label}
+                {t(opt.labelKey)}
               </button>
             ))}
           </div>
@@ -421,12 +439,12 @@ export default function MemoryPage() {
           )}
           {searchScope === "device" && !expandedAgent && (
             <span className="text-xs text-zinc-500 shrink-0">
-              请先展开一个智能体
+              {t("memory.expandAgentFirst")}
             </span>
           )}
           {searchScope === "content" && !expandedDevice && (
             <span className="text-xs text-zinc-500 shrink-0">
-              请先展开一个设备
+              {t("memory.expandDeviceFirst")}
             </span>
           )}
         </div>
@@ -443,7 +461,7 @@ export default function MemoryPage() {
               }}
               className="ml-auto bg-red-500/20 hover:bg-red-500/30 text-red-400 h-7 px-3 text-xs"
             >
-              重试
+              {t("common:action.retry")}
             </Button>
           </div>
         )}
@@ -461,11 +479,11 @@ export default function MemoryPage() {
             </div>
             <p className="text-zinc-400 text-sm">
               {searchScope === "agent" && searchText
-                ? "没有匹配的智能体"
-                : "暂无智能体"}
+                ? t("memory.noMatchAgents")
+                : t("memory.emptyAgents")}
             </p>
             <p className="text-zinc-600 text-xs mt-1">
-              创建智能体后，终端用户对话产生的记忆将自动存储
+              {t("memory.emptyAgentsHint")}
             </p>
           </div>
         )}
@@ -493,10 +511,10 @@ export default function MemoryPage() {
                       {agent.name}
                     </span>
                     <span className="text-xs text-zinc-500">
-                      {agent.total} 条
+                      {t("memory.countShort", { n: agent.total })}
                     </span>
                     <span className="ml-auto text-xs text-zinc-600">
-                      {agent.device_count} 设备
+                      {t("memory.deviceCount", { n: agent.device_count })}
                     </span>
                   </button>
 
@@ -510,7 +528,7 @@ export default function MemoryPage() {
 
                       {!loadingDevices && devices.length === 0 && (
                         <div className="px-5 py-6 text-center text-xs text-zinc-600">
-                          暂无设备
+                          {t("memory.emptyDevices")}
                         </div>
                       )}
 
@@ -539,7 +557,9 @@ export default function MemoryPage() {
                                     </span>
                                   )}
                                   <span className="text-xs text-zinc-500">
-                                    {device.total} 条
+                                    {t("memory.countShort", {
+                                      n: device.total,
+                                    })}
                                   </span>
                                 </button>
 
@@ -551,12 +571,12 @@ export default function MemoryPage() {
                                       </div>
                                     ) : entries.length === 0 ? (
                                       <div className="px-5 py-6 text-center text-xs text-zinc-600">
-                                        暂无记忆条目
+                                        {t("memory.emptyEntriesShort")}
                                       </div>
                                     ) : (
                                       <div>
                                         {entries.map((mem) => {
-                                          const t =
+                                          const target =
                                             TARGET_MAP[mem.target] ||
                                             TARGET_MAP.memory;
                                           return (
@@ -565,9 +585,9 @@ export default function MemoryPage() {
                                               className="flex items-start gap-3 px-5 py-2.5 hover:bg-zinc-800/10 transition-colors group border-b border-zinc-800/20 last:border-0"
                                             >
                                               <span
-                                                className={`shrink-0 mt-0.5 text-[10px] px-1.5 py-0.5 rounded border ${t.cls}`}
+                                                className={`shrink-0 mt-0.5 text-[10px] px-1.5 py-0.5 rounded border ${target.cls}`}
                                               >
-                                                {t.label}
+                                                {t(target.key)}
                                               </span>
                                               <span className="flex-1 text-sm text-zinc-300 leading-relaxed break-words min-w-0">
                                                 {mem.content}
@@ -643,6 +663,7 @@ function Pagination({
   totalPages: number;
   onChange: (p: number) => void;
 }) {
+  const { t } = useTranslation("data");
   return (
     <div className="flex items-center gap-1.5">
       <button
@@ -650,7 +671,7 @@ function Pagination({
         disabled={page <= 1}
         className="px-2 py-1 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
       >
-        上一页
+        {t("pagination.prev")}
       </button>
       <span className="text-xs text-zinc-500 px-1">
         {page} / {totalPages}
@@ -660,7 +681,7 @@ function Pagination({
         disabled={page >= totalPages}
         className="px-2 py-1 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
       >
-        下一页
+        {t("pagination.next")}
       </button>
     </div>
   );

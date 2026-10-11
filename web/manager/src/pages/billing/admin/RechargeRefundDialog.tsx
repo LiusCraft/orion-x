@@ -11,6 +11,7 @@
 // 的产品界面，只写「会发生什么」和「要付什么责任」。
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AlertTriangle, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +42,7 @@ export function RechargeRefundDialog({
 	onClose: () => void;
 	onDone: (message: string) => void;
 }) {
+	const { t } = useTranslation(["billingAdmin", "common"]);
 	const [note, setNote] = useState("");
 	const [saving, setSaving] = useState(false);
 	const [formError, setFormError] = useState("");
@@ -50,7 +52,7 @@ export function RechargeRefundDialog({
 	const submit = async () => {
 		setFormError("");
 		if (note.trim() === "") {
-			setFormError("备注必填：这笔退款要能被人看懂（工单号、原因）。");
+			setFormError(t("refund.noteRequired"));
 			return;
 		}
 
@@ -58,14 +60,17 @@ export function RechargeRefundDialog({
 		try {
 			await billingAdminApi.refundRecharge(order.out_trade_no, note.trim());
 			onDone(
-				`已退款 ${formatMicro(order.amount_micro, order.currency)}（订单 ${order.out_trade_no}）`,
+				t("refund.success", {
+					amount: formatMicro(order.amount_micro, order.currency),
+					order: order.out_trade_no,
+				}),
 			);
 		} catch (err) {
 			if (isBillingDisabled(err)) {
-				setFormError("当前环境未开通在线充值，无法退款。");
+				setFormError(t("refund.disabledError"));
 				return;
 			}
-			setFormError(userFacingError(err, "退款失败，请重试"));
+			setFormError(userFacingError(err, t("refund.fail")));
 		} finally {
 			setSaving(false);
 		}
@@ -77,36 +82,49 @@ export function RechargeRefundDialog({
 				<DialogHeader>
 					<DialogTitle className="text-white flex items-center gap-2">
 						<Undo2 className="w-4 h-4 text-violet-400" strokeWidth={1.5} />
-						{alreadyRefunded ? "退款详情" : "整单退款"}
+						{alreadyRefunded
+							? t("refund.titleDetails")
+							: t("recharge.refundTitle")}
 					</DialogTitle>
 				</DialogHeader>
 
 				<div className="space-y-4 py-2">
 					<div className="rounded-lg bg-zinc-800/60 px-3 py-2.5">
-						<p className="text-[10px] text-zinc-500 mb-1">订单</p>
+						<p className="text-[10px] text-zinc-500 mb-1">
+							{t("refund.orderLabel")}
+						</p>
 						<p className="text-xs text-zinc-300 font-mono break-all">
 							{order.out_trade_no}
 						</p>
 						<div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[11px] text-zinc-500">
 							<span className="font-mono">
-								金额 {formatMicro(order.amount_micro, order.currency)}
+								{t("refund.amountLabel", {
+									amount: formatMicro(
+										order.amount_micro,
+										order.currency,
+									),
+								})}
 							</span>
 							<span>{paymentChannelLabel(order.channel)}</span>
 							<span>{paymentStatusLabel(order.status)}</span>
 							{order.gateway_trade_no && (
 								<span className="font-mono truncate" title={order.gateway_trade_no}>
-									交易号 {order.gateway_trade_no}
+									{t("refund.tradeNo", { no: order.gateway_trade_no })}
 								</span>
 							)}
 						</div>
 						{order.credited_at && (
 							<p className="text-[11px] text-zinc-500 mt-1">
-								到账时间 {formatTime(order.credited_at)}
+								{t("refund.creditedAt", {
+									time: formatTime(order.credited_at),
+								})}
 							</p>
 						)}
 						{order.refunded_at && (
 							<p className="text-[11px] text-violet-300/80 mt-1">
-								退款时间 {formatTime(order.refunded_at)}
+								{t("refund.refundedAt", {
+									time: formatTime(order.refunded_at),
+								})}
 							</p>
 						)}
 					</div>
@@ -118,10 +136,7 @@ export function RechargeRefundDialog({
 									className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-400"
 									strokeWidth={1.5}
 								/>
-								<span>
-									提交后会把款项退回给付款人，并扣回该账户的余额。余额已消费的账户
-									会因此变为欠费。退款只能整单退，不支持部分退款。
-								</span>
+								<span>{t("refund.warning")}</span>
 							</p>
 						</div>
 					)}
@@ -129,16 +144,17 @@ export function RechargeRefundDialog({
 					{!alreadyRefunded && (
 						<div className="space-y-1.5">
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-								备注<span className="ml-1 text-red-400">*</span>
+								{t("shared.note")}
+								<span className="ml-1 text-red-400">*</span>
 							</Label>
 							<Input
 								value={note}
 								onChange={(e) => setNote(e.target.value)}
-								placeholder="例如：用户申请退款（工单 #123）"
+								placeholder={t("refund.notePlaceholder")}
 								className="text-sm"
 							/>
 							<p className="text-[11px] text-zinc-600">
-								会记入退款记录，用于日后查询。
+								{t("refund.noteHint")}
 							</p>
 						</div>
 					)}
@@ -154,7 +170,9 @@ export function RechargeRefundDialog({
 						onClick={onClose}
 						className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
 					>
-						{alreadyRefunded ? "关闭" : "取消"}
+						{alreadyRefunded
+							? t("common:action.close")
+							: t("common:action.cancel")}
 					</Button>
 					{!alreadyRefunded && (
 						<Button
@@ -162,7 +180,7 @@ export function RechargeRefundDialog({
 							disabled={saving || note.trim() === ""}
 							className="bg-violet-600 hover:bg-violet-500 text-white"
 						>
-							{saving ? "退款中..." : "确认退款"}
+							{saving ? t("refund.submitting") : t("refund.submit")}
 						</Button>
 					)}
 				</DialogFooter>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Puzzle,
   Plus,
@@ -25,73 +26,76 @@ import { SimpleSelect } from "@/components/ui/select";
 const MARKET_PLUGINS = [
   {
     id: "p1",
-    name: "天气查询",
+    nameKey: "plugins.market.weather.name",
     icon: "🌤️",
-    desc: "实时获取全球任意城市的天气信息，包括温度、湿度、风速和预报。",
-    tags: ["工具", "免费"],
+    descKey: "plugins.market.weather.desc",
+    tags: ["plugins.tags.tools", "plugins.tags.free"],
     installed: true,
   },
   {
     id: "p2",
-    name: "汇率换算",
+    nameKey: "plugins.market.exchange.name",
     icon: "💱",
-    desc: "实时汇率查询和货币换算，支持 180+ 种货币，数据来自 ExchangeRate-API。",
-    tags: ["金融", "免费"],
+    descKey: "plugins.market.exchange.desc",
+    tags: ["plugins.tags.finance", "plugins.tags.free"],
     installed: false,
   },
   {
     id: "p3",
-    name: "Wikipedia 搜索",
+    nameKey: "plugins.market.wikipedia.name",
     icon: "📖",
-    desc: "搜索 Wikipedia 百科词条，返回摘要和相关链接，支持多语言。",
-    tags: ["知识", "免费"],
+    descKey: "plugins.market.wikipedia.desc",
+    tags: ["plugins.tags.knowledge", "plugins.tags.free"],
     installed: true,
   },
   {
     id: "p4",
-    name: "Arxiv 论文",
+    nameKey: "plugins.market.arxiv.name",
     icon: "📄",
-    desc: "搜索 Arxiv 学术论文，返回标题、摘要、作者和链接。",
-    tags: ["学术", "免费"],
+    descKey: "plugins.market.arxiv.desc",
+    tags: ["plugins.tags.academic", "plugins.tags.free"],
     installed: false,
   },
 ];
 
 interface MyPlugin {
   id: string;
-  name: string;
+  name?: string;
+  nameKey?: string;
   url: string;
   method: string;
   authType: string;
-  desc: string;
+  desc?: string;
+  descKey?: string;
   createdAt: string;
 }
 
 const MOCK_MY_PLUGINS: MyPlugin[] = [
   {
     id: "mp1",
-    name: "公司内部 API",
+    nameKey: "plugins.my.companyApi.name",
     url: "https://api.internal.com/v1/query",
     method: "POST",
-    authType: "Bearer Token",
-    desc: "查询公司内部 CRM 数据",
+    authType: "bearer",
+    descKey: "plugins.my.companyApi.desc",
     createdAt: "2025-06-10",
   },
   {
     id: "mp2",
-    name: "产品库存查询",
+    nameKey: "plugins.my.stockQuery.name",
     url: "https://erp.company.com/api/stock",
     method: "GET",
-    authType: "API Key",
-    desc: "实时查询产品库存信息",
+    authType: "apiKey",
+    descKey: "plugins.my.stockQuery.desc",
     createdAt: "2025-05-28",
   },
 ];
 
 const METHODS = ["GET", "POST", "PUT", "DELETE"];
-const AUTH_TYPES = ["无鉴权", "Bearer Token", "API Key", "Basic Auth"];
+const AUTH_TYPES = ["none", "bearer", "apiKey", "basic"] as const;
 
 export default function PluginsPage() {
+  const { t } = useTranslation(["components", "common"]);
   const [installedIds, setInstalledIds] = useState<Set<string>>(
     new Set(["p1", "p3"]),
   );
@@ -101,7 +105,7 @@ export default function PluginsPage() {
     name: "",
     url: "",
     method: "POST",
-    authType: "无鉴权",
+    authType: "none",
     authValue: "",
     desc: "",
   });
@@ -122,7 +126,7 @@ export default function PluginsPage() {
       name: "",
       url: "",
       method: "POST",
-      authType: "无鉴权",
+      authType: "none",
       authValue: "",
       desc: "",
     });
@@ -134,9 +138,11 @@ export default function PluginsPage() {
       <div className="border-b border-zinc-800/80 px-8 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">插件管理</h1>
+            <h1 className="text-lg font-semibold text-white">
+              {t("plugins.title")}
+            </h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              插件本质是工具，由智能体在对话中自动调用
+              {t("plugins.subtitle")}
             </p>
           </div>
           <Button
@@ -144,7 +150,7 @@ export default function PluginsPage() {
             className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
           >
             <Plus className="w-4 h-4" />
-            添加 HTTP 插件
+            {t("plugins.addHttp")}
           </Button>
         </div>
       </div>
@@ -156,13 +162,13 @@ export default function PluginsPage() {
               value="market"
               className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
             >
-              市场
+              {t("market")}
             </TabsTrigger>
             <TabsTrigger
               value="mine"
               className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
             >
-              我的插件 ({myPlugins.length})
+              {t("plugins.tab.mine", { total: myPlugins.length })}
             </TabsTrigger>
           </TabsList>
 
@@ -177,18 +183,18 @@ export default function PluginsPage() {
                   >
                     <div className="text-2xl mb-3">{plugin.icon}</div>
                     <p className="font-medium text-sm text-white mb-1">
-                      {plugin.name}
+                      {t(plugin.nameKey)}
                     </p>
                     <p className="text-xs text-zinc-500 leading-relaxed mb-3 line-clamp-2">
-                      {plugin.desc}
+                      {t(plugin.descKey)}
                     </p>
                     <div className="flex flex-wrap gap-1 mb-4">
-                      {plugin.tags.map((t) => (
+                      {plugin.tags.map((tag) => (
                         <span
-                          key={t}
+                          key={tag}
                           className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50"
                         >
-                          {t}
+                          {t(tag)}
                         </span>
                       ))}
                     </div>
@@ -212,10 +218,10 @@ export default function PluginsPage() {
                       {isInstalled ? (
                         <span className="flex items-center gap-1.5">
                           <CheckCircle2 className="w-3 h-3" />
-                          已安装
+                          {t("installed")}
                         </span>
                       ) : (
-                        "安装"
+                        t("install")
                       )}
                     </Button>
                   </div>
@@ -230,16 +236,16 @@ export default function PluginsPage() {
                 <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
                   <Puzzle className="w-6 h-6 text-zinc-600" />
                 </div>
-                <p className="text-zinc-400 text-sm">还没有自定义插件</p>
+                <p className="text-zinc-400 text-sm">{t("plugins.mineEmpty")}</p>
                 <p className="text-zinc-600 text-xs mt-1 mb-4">
-                  通过 HTTP API 接入你自己的工具
+                  {t("plugins.mineEmptyHint")}
                 </p>
                 <Button
                   onClick={() => setAddOpen(true)}
                   className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-4 text-xs gap-1.5"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  添加 HTTP 插件
+                  {t("plugins.addHttp")}
                 </Button>
               </div>
             ) : (
@@ -258,14 +264,14 @@ export default function PluginsPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
                         <p className="font-medium text-sm text-white">
-                          {p.name}
+                          {p.nameKey ? t(p.nameKey) : p.name}
                         </p>
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700/50 text-zinc-400 font-mono">
                           {p.method}
                         </span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700/50 text-zinc-500 flex items-center gap-1">
                           <Lock className="w-2.5 h-2.5" />
-                          {p.authType}
+                          {t(`plugins.auth.${p.authType}`)}
                         </span>
                       </div>
                       <p className="text-xs text-zinc-500 font-mono truncate">
@@ -304,27 +310,27 @@ export default function PluginsPage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Zap className="w-4 h-4 text-violet-400" />
-              添加 HTTP API 插件
+              {t("plugins.dialog.title")}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2 space-y-1.5">
                 <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                  名称
+                  {t("common:field.name")}
                 </Label>
                 <Input
                   value={form.name}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, name: e.target.value }))
                   }
-                  placeholder="插件名称"
+                  placeholder={t("plugins.dialog.namePlaceholder")}
                   className="text-sm "
                 />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                  Method
+                  {t("plugins.method")}
                 </Label>
                 <SimpleSelect
                   value={form.method}
@@ -338,7 +344,7 @@ export default function PluginsPage() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                API URL
+                {t("plugins.apiUrl")}
               </Label>
               <Input
                 value={form.url}
@@ -352,7 +358,7 @@ export default function PluginsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                  鉴权方式
+                  {t("plugins.authType")}
                 </Label>
                 <SimpleSelect
                   value={form.authType}
@@ -361,18 +367,18 @@ export default function PluginsPage() {
                   }
                   options={AUTH_TYPES.map((authType) => ({
                     value: authType,
-                    label: authType,
+                    label: t(`plugins.auth.${authType}`),
                   }))}
                 />
               </div>
-              {form.authType !== "无鉴权" && (
+              {form.authType !== "none" && (
                 <div className="space-y-1.5">
                   <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                    {form.authType === "Bearer Token"
-                      ? "Token"
-                      : form.authType === "API Key"
-                        ? "API Key"
-                        : "密码"}
+                    {form.authType === "bearer"
+                      ? t("plugins.auth.tokenLabel")
+                      : form.authType === "apiKey"
+                        ? t("plugins.auth.apiKey")
+                        : t("plugins.auth.passwordLabel")}
                   </Label>
                   <Input
                     type="password"
@@ -388,14 +394,14 @@ export default function PluginsPage() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                描述（告诉智能体何时使用）
+                {t("plugins.dialog.descLabel")}
               </Label>
               <Input
                 value={form.desc}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, desc: e.target.value }))
                 }
-                placeholder="例：查询公司内部 CRM 数据时调用此接口"
+                placeholder={t("plugins.dialog.descPlaceholder")}
                 className="text-sm "
               />
             </div>
@@ -406,14 +412,14 @@ export default function PluginsPage() {
               onClick={() => setAddOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleAdd}
               disabled={!form.name.trim() || !form.url.trim()}
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              添加插件
+              {t("plugins.dialog.submit")}
             </Button>
           </DialogFooter>
         </DialogContent>

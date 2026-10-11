@@ -13,6 +13,7 @@
 // 页面零件复用计费页的（这一页本身就是一张计费报表，见 pages/billing/shared）。
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	Activity,
 	ChevronDown,
@@ -23,6 +24,7 @@ import {
 	TrendingUp,
 	type LucideIcon,
 } from "lucide-react";
+import i18n from "@/i18n";
 import {
 	billingApi,
 	type BillingModelUsage,
@@ -30,7 +32,6 @@ import {
 } from "@/lib/api";
 import { useDocumentTitle } from "@/lib/title";
 import {
-	BILLING_DISABLED_TITLE,
 	billingErrorMessage,
 	formatMicro,
 	formatQuantity,
@@ -56,27 +57,27 @@ import {
 } from "@/pages/billing/shared";
 
 const RANGE_OPTIONS = [
-	{ value: "today", label: "今日", days: 1 },
-	{ value: "7d", label: "近 7 天", days: 7 },
-	{ value: "30d", label: "近 30 天", days: 30 },
+	{ value: "today", labelKey: "monitor.range.today", days: 1 },
+	{ value: "7d", labelKey: "monitor.range.week", days: 7 },
+	{ value: "30d", labelKey: "monitor.range.month", days: 30 },
 ] as const;
 
 type RangeKey = (typeof RANGE_OPTIONS)[number]["value"];
 
 type SortKey = "amount" | "events" | "name";
 
-const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-	{ value: "amount", label: "按金额" },
-	{ value: "events", label: "按事件数" },
-	{ value: "name", label: "按名称" },
+const SORT_OPTIONS: { value: SortKey; labelKey: string }[] = [
+	{ value: "amount", labelKey: "monitor.sort.amount" },
+	{ value: "events", labelKey: "monitor.sort.events" },
+	{ value: "name", labelKey: "monitor.sort.name" },
 ];
 
-const MODEL_TYPE_LABELS: Record<string, string> = {
-	text: "文本",
-	vision: "视觉",
-	speech: "语音",
-	multimodal: "全模态",
-	embedding: "向量",
+const MODEL_TYPE_LABEL_KEYS: Record<string, string> = {
+	text: "type.text",
+	vision: "type.vision",
+	speech: "type.speech",
+	multimodal: "type.multimodal",
+	embedding: "type.embedding",
 };
 
 const MODEL_TYPE_TONES: Record<
@@ -103,8 +104,9 @@ function rangeStart(range: RangeKey): Date {
 }
 
 function modelTypeLabel(type: string): string {
-	if (!type) return "未标注";
-	return MODEL_TYPE_LABELS[type] ?? type;
+	if (!type) return i18n.t("models:monitor.noType");
+	const key = MODEL_TYPE_LABEL_KEYS[type];
+	return key ? i18n.t(`models:${key}`) : type;
 }
 
 function itemUnit(code: string): string {
@@ -163,10 +165,29 @@ function addCounts(a: EventStatusCounts, b: EventStatusCounts): EventStatusCount
 
 /** 「已计费 12 · 待结算 2 · 未计费 1」：只列非零的那些（已计费总是列出来）。 */
 function countsSummary(counts: EventStatusCounts): string[] {
-	const parts = [`已计费 ${counts.chargedEvents.toLocaleString()}`];
-	if (counts.pendingEvents > 0) parts.push(`待结算 ${counts.pendingEvents.toLocaleString()}`);
-	if (counts.unpaidEvents > 0) parts.push(`未计费 ${counts.unpaidEvents.toLocaleString()}`);
-	if (counts.skippedEvents > 0) parts.push(`跳过 ${counts.skippedEvents.toLocaleString()}`);
+	const parts = [
+		i18n.t("models:monitor.counts.charged", {
+			value: counts.chargedEvents.toLocaleString(),
+		}),
+	];
+	if (counts.pendingEvents > 0)
+		parts.push(
+			i18n.t("models:monitor.counts.pending", {
+				value: counts.pendingEvents.toLocaleString(),
+			}),
+		);
+	if (counts.unpaidEvents > 0)
+		parts.push(
+			i18n.t("models:monitor.counts.unpaid", {
+				value: counts.unpaidEvents.toLocaleString(),
+			}),
+		);
+	if (counts.skippedEvents > 0)
+		parts.push(
+			i18n.t("models:monitor.counts.skipped", {
+				value: counts.skippedEvents.toLocaleString(),
+			}),
+		);
 	return parts;
 }
 
@@ -178,7 +199,10 @@ function groupByModel(rows: BillingModelUsageRow[]): ModelUsageGroup[] {
 			group = {
 				modelId: row.aimodel_id,
 				// 模型行被删掉时事件里只剩 id；连 id 都没有 = 平台默认模型，量照样算。
-				name: row.model_name || row.aimodel_id || "未归属模型",
+				name:
+					row.model_name ||
+					row.aimodel_id ||
+					i18n.t("models:monitor.unassignedModel"),
 				type: row.model_type,
 				providerName: row.provider_name,
 				items: [],
@@ -218,7 +242,12 @@ function sortGroups(groups: ModelUsageGroup[], key: SortKey): ModelUsageGroup[] 
 			);
 			return sorted;
 		case "name":
-			sorted.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+			sorted.sort((a, b) =>
+				a.name.localeCompare(
+					b.name,
+					i18n.resolvedLanguage === "zh" ? "zh-Hans-CN" : "en",
+				),
+			);
 			return sorted;
 		default:
 			sorted.sort(
@@ -229,7 +258,8 @@ function sortGroups(groups: ModelUsageGroup[], key: SortKey): ModelUsageGroup[] 
 }
 
 export default function ModelMonitorPage() {
-	useDocumentTitle("模型监控");
+	const { t } = useTranslation(["models", "common"]);
+	useDocumentTitle(t("monitor.title"));
 
 	const [range, setRange] = useState<RangeKey>("7d");
 	const [sort, setSort] = useState<SortKey>("amount");
@@ -261,7 +291,7 @@ export default function ModelMonitorPage() {
 				}
 				setBanner({
 					kind: "error",
-					text: billingErrorMessage(err, "加载模型用量失败"),
+					text: billingErrorMessage(err, t("monitor.loadFailed")),
 				});
 			})
 			.finally(() => {
@@ -275,7 +305,7 @@ export default function ModelMonitorPage() {
 	const currency = usage?.currency ?? "CNY";
 	const groups = useMemo(
 		() => sortGroups(groupByModel(usage?.usage_by_model ?? []), sort),
-		[usage, sort],
+		[usage, sort, i18n.resolvedLanguage],
 	);
 	const totalAmount = groups.reduce((sum, group) => sum + group.amountMicro, 0);
 	const totalCounts = groups.reduce(
@@ -309,8 +339,8 @@ export default function ModelMonitorPage() {
 					<div className="bg-zinc-900 border border-zinc-800 rounded-xl">
 						<EmptyState
 							icon={Activity}
-							title={BILLING_DISABLED_TITLE}
-							hint="服务端没有开启计费模块（billing.enabled），用量事件不会被上报，这一页没有数据可看。"
+							title={t("billing:disabledTitle")}
+							hint={t("monitor.disabledHint")}
 						/>
 					</div>
 				</div>
@@ -327,37 +357,37 @@ export default function ModelMonitorPage() {
 
 				{loading && !usage ? (
 					<div className="bg-zinc-900 border border-zinc-800 rounded-xl">
-						<LoadingBlock label="加载模型用量..." />
+						<LoadingBlock label={t("monitor.loading")} />
 					</div>
 				) : groups.length === 0 ? (
 					<div className="bg-zinc-900 border border-zinc-800 rounded-xl">
 						<EmptyState
 							icon={Activity}
-							title="这段时间没有模型用量"
-							hint="用量事件在 turn 边界上报，会话跑过一轮才会有数据；换个时间段或等一轮会话再看。"
+							title={t("monitor.emptyTitle")}
+							hint={t("monitor.emptyHint")}
 						/>
 					</div>
 				) : (
 					<>
 						{totalCounts.unpaidEvents > 0 && (
 							<Hint tone="amber">
-								有 {totalCounts.unpaidEvents.toLocaleString()} 条事件没算成钱（状态
-								unpaid）：通常是这个计费项还没配价格，或者账户被停服。它们的用量照算在上面，
-								金额记 ¥0；控制面补上价格后这批事件重放即可结算。
+								{t("monitor.unpaidHint", {
+									value: totalCounts.unpaidEvents.toLocaleString(),
+								})}
 							</Hint>
 						)}
 
 						{/* 总览 */}
 						<div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 							<StatCard
-								label="覆盖模型"
+								label={t("monitor.stats.models")}
 								value={String(groups.length)}
-								hint="这段时间有用量的模型数"
+								hint={t("monitor.stats.modelsHint")}
 								icon={Layers}
 								tone="violet"
 							/>
 							<StatCard
-								label="用量事件"
+								label={t("monitor.stats.events")}
 								value={totalCounts.eventCount.toLocaleString()}
 								hint={countsSummary(totalCounts).join(" · ")}
 								icon={Activity}
@@ -369,19 +399,23 @@ export default function ModelMonitorPage() {
 								}
 							/>
 							<StatCard
-								label="已结算金额"
+								label={t("monitor.settledAmount")}
 								value={formatMicro(totalAmount, currency)}
-								hint="只算 charged 事件；待结算与未计费的不在内"
+								hint={t("monitor.stats.settledHint")}
 								icon={Coins}
 								tone="amber"
 							/>
 							<StatCard
-								label="最耗模型"
+								label={t("monitor.stats.topModel")}
 								value={top.name}
 								hint={
 									totalAmount > 0
-										? `占已结算金额 ${(ratio(top.amountMicro, totalAmount) * 100).toFixed(1)}%`
-										: "暂无已结算金额"
+										? t("monitor.stats.topShare", {
+												percent: (
+													ratio(top.amountMicro, totalAmount) * 100
+												).toFixed(1),
+											})
+										: t("monitor.stats.noSettled")
 								}
 								icon={TrendingUp}
 								tone="emerald"
@@ -390,8 +424,8 @@ export default function ModelMonitorPage() {
 
 						{/* 各模型明细 */}
 						<Panel
-							title="各模型用量"
-							description="一行一个模型：数量含未结算事件，金额只算已结算的；展开看计费项明细"
+							title={t("monitor.panel.title")}
+							description={t("monitor.panel.desc")}
 							actions={
 								<div className="flex gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
 									{SORT_OPTIONS.map((option) => (
@@ -404,7 +438,7 @@ export default function ModelMonitorPage() {
 													: "text-zinc-500 hover:text-zinc-300"
 											}`}
 										>
-											{option.label}
+											{t(option.labelKey)}
 										</button>
 									))}
 								</div>
@@ -414,11 +448,15 @@ export default function ModelMonitorPage() {
 							<TableShell
 								head={
 									<>
-										<Th className="w-72">模型</Th>
-										<Th className="text-right">事件数</Th>
-										<Th>用量明细</Th>
-										<Th className="text-right">已结算金额</Th>
-										<Th className="w-56">占比</Th>
+										<Th className="w-72">{t("field.model")}</Th>
+										<Th className="text-right">
+											{t("monitor.eventCount")}
+										</Th>
+										<Th>{t("monitor.table.usage")}</Th>
+										<Th className="text-right">
+											{t("monitor.settledAmount")}
+										</Th>
+										<Th className="w-56">{t("monitor.table.share")}</Th>
 									</>
 								}
 							>
@@ -437,7 +475,11 @@ export default function ModelMonitorPage() {
 															setExpanded(open ? null : group.modelId)
 														}
 														className="flex items-start gap-2 text-left w-full cursor-pointer"
-														title={open ? "收起计费项明细" : "展开计费项明细"}
+														title={
+															open
+																? t("monitor.collapse")
+																: t("monitor.expand")
+														}
 													>
 														{open ? (
 															<ChevronDown
@@ -470,8 +512,10 @@ export default function ModelMonitorPage() {
 																className="text-[11px] text-zinc-500 font-mono truncate mt-0.5"
 																title={`${group.providerName} · ${group.modelId}`}
 															>
-																{group.providerName || "未知厂商"} ·{" "}
-																{group.modelId || "无模型 ID"}
+																{group.providerName ||
+																	t("monitor.unknownProvider")}{" "}
+																·{" "}
+																{group.modelId || t("monitor.noModelId")}
 															</p>
 														</div>
 													</button>
@@ -480,12 +524,16 @@ export default function ModelMonitorPage() {
 													{group.eventCount.toLocaleString()}
 													{group.pendingEvents > 0 && (
 														<p className="text-[11px] text-amber-400/90 font-sans">
-															{group.pendingEvents.toLocaleString()} 待结算
+															{t("monitor.pendingCount", {
+																value: group.pendingEvents.toLocaleString(),
+															})}
 														</p>
 													)}
 													{group.unpaidEvents > 0 && (
 														<p className="text-[11px] text-red-400/90 font-sans">
-															{group.unpaidEvents.toLocaleString()} 未计费
+															{t("monitor.unpaidCount", {
+																value: group.unpaidEvents.toLocaleString(),
+															})}
 														</p>
 													)}
 												</Td>
@@ -507,7 +555,9 @@ export default function ModelMonitorPage() {
 														))}
 														{group.items.length > VISIBLE_ITEMS && (
 															<span className="text-[11px] text-zinc-500">
-																+{group.items.length - VISIBLE_ITEMS} 项
+																{t("monitor.moreItems", {
+																	value: group.items.length - VISIBLE_ITEMS,
+																})}
 															</span>
 														)}
 													</div>
@@ -537,11 +587,15 @@ export default function ModelMonitorPage() {
 														<table className="w-full">
 															<thead>
 																<tr className="border-b border-zinc-800">
-																	<Th>计费项</Th>
-																	<Th className="text-right">数量</Th>
-																	<Th className="text-right">事件数</Th>
+																	<Th>{t("monitor.table.item")}</Th>
 																	<Th className="text-right">
-																		已结算金额
+																		{t("monitor.table.quantity")}
+																	</Th>
+																	<Th className="text-right">
+																		{t("monitor.eventCount")}
+																	</Th>
+																	<Th className="text-right">
+																		{t("monitor.settledAmount")}
 																	</Th>
 																</tr>
 															</thead>
@@ -574,16 +628,18 @@ export default function ModelMonitorPage() {
 																				<span className="text-amber-400/90 font-sans">
 																					{" "}
 																					·{" "}
-																					{item.pending_events.toLocaleString()}{" "}
-																					待结算
+																					{t("monitor.pendingCount", {
+																						value: item.pending_events.toLocaleString(),
+																					})}
 																				</span>
 																			)}
 																			{item.unpaid_events > 0 && (
 																				<span className="text-red-400/90 font-sans">
 																					{" "}
 																					·{" "}
-																					{item.unpaid_events.toLocaleString()}{" "}
-																					未计费
+																					{t("monitor.unpaidCount", {
+																						value: item.unpaid_events.toLocaleString(),
+																					})}
 																				</span>
 																			)}
 																		</Td>
@@ -605,7 +661,7 @@ export default function ModelMonitorPage() {
 								})}
 								<Tr className="bg-zinc-800/30">
 									<Td className="text-xs font-semibold text-zinc-400">
-										合计 · {groups.length} 个模型
+										{t("monitor.total", { value: groups.length })}
 									</Td>
 									<Td className="text-right font-mono font-semibold text-zinc-300">
 										{totalCounts.eventCount.toLocaleString()}
@@ -621,13 +677,7 @@ export default function ModelMonitorPage() {
 					</>
 				)}
 
-				<Hint tone="zinc">
-					这一页只看自己账户的用量。数据来自计费的用量事件：每个 turn 的 token、合成字符数、
-					识别时长在 turn 边界上报，事件里带着当时的模型与厂商。事件数是事件条数而不是调用次数
-					（一次 LLM 调用会拆成输入 / 输出等几条），数量含未结算事件，金额只算已结算
-					（charged）的——worker 每 1~5 秒结算一轮，所以金额会比数量“慢一拍”；对不上时看
-					“待结算”与“未计费”那两个数。
-				</Hint>
+				<Hint tone="zinc">{t("monitor.footnote")}</Hint>
 			</div>
 		</div>
 	);
@@ -646,13 +696,17 @@ function MonitorHeader({
 	onReload: () => void;
 	reloading: boolean;
 }) {
+	const { t } = useTranslation(["models", "common"]);
 	return (
 		<div className="border-b border-zinc-800/80 px-8 py-5">
 			<div className="flex items-center justify-between gap-4">
 				<div>
-					<h1 className="text-lg font-semibold text-white">模型监控</h1>
+					<h1 className="text-lg font-semibold text-white">
+						{t("monitor.title")}
+					</h1>
 					<p className="text-sm text-zinc-500 mt-0.5">
-						各模型的用量与消耗{rangeHint ? ` · ${rangeHint}` : ""}
+						{t("monitor.subtitle")}
+						{rangeHint ? ` · ${rangeHint}` : ""}
 					</p>
 				</div>
 				<div className="flex items-center gap-2">
@@ -667,7 +721,7 @@ function MonitorHeader({
 										: "text-zinc-500 hover:text-zinc-300"
 								}`}
 							>
-								{option.label}
+								{t(option.labelKey)}
 							</button>
 						))}
 					</div>
@@ -680,7 +734,7 @@ function MonitorHeader({
 							className={`w-3.5 h-3.5 ${reloading ? "animate-spin" : ""}`}
 							strokeWidth={1.5}
 						/>
-						刷新
+						{t("common:action.refresh")}
 					</button>
 				</div>
 			</div>

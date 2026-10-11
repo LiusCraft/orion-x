@@ -3,6 +3,7 @@
 // 账户 ID 是内部主键（acct_ 前缀），不是 user id：计费主体落在账户这一行上（§12）。
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { HandCoins, RefreshCw, Search, SlidersHorizontal, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +11,6 @@ import { SimpleSelect } from "@/components/ui/select";
 import { billingAdminApi, type BillingAccount } from "@/lib/api";
 import {
 	accountStatusLabel,
-	BILLING_DISABLED_TITLE,
 	billingErrorMessage,
 	formatMicro,
 	formatTime,
@@ -42,6 +42,7 @@ const STATUS_TONES: Record<string, "emerald" | "red" | "zinc"> = {
 };
 
 export default function AccountsTab() {
+	const { t } = useTranslation(["billingAdmin", "common"]);
 	const [accounts, setAccounts] = useState<BillingAccount[]>([]);
 	const [total, setTotal] = useState(0);
 	const [page, setPage] = useState(1);
@@ -82,7 +83,10 @@ export default function AccountsTab() {
 					setDisabled(true);
 					return;
 				}
-				setBanner({ kind: "error", text: billingErrorMessage(err, "加载账户失败") });
+				setBanner({
+					kind: "error",
+					text: billingErrorMessage(err, t("accounts.loadFailed")),
+				});
 			})
 			.finally(() => {
 				if (!cancelled) setLoading(false);
@@ -90,15 +94,15 @@ export default function AccountsTab() {
 		return () => {
 			cancelled = true;
 		};
-	}, [page, subjectType, status, query, reloadKey]);
+	}, [page, subjectType, status, query, reloadKey, t]);
 
 	if (disabled) {
 		return (
 			<Panel bodyClassName="p-0">
 				<EmptyState
 					icon={SlidersHorizontal}
-					title={BILLING_DISABLED_TITLE}
-					hint="服务端没有开启计费模块（billing.enabled），账户、流水与定价都不可用。"
+					title={t("billing:disabledTitle")}
+					hint={t("accounts.disabledHint")}
 				/>
 			</Panel>
 		);
@@ -117,10 +121,10 @@ export default function AccountsTab() {
 					}}
 					className="w-36"
 					size="sm"
-					placeholder="全部主体"
+					placeholder={t("accounts.subjectPlaceholder")}
 					options={[
-						{ value: "user", label: "用户" },
-						{ value: "org", label: "组织" },
+						{ value: "user", label: subjectTypeLabel("user") },
+						{ value: "org", label: subjectTypeLabel("org") },
 					]}
 				/>
 				<SimpleSelect
@@ -131,11 +135,11 @@ export default function AccountsTab() {
 					}}
 					className="w-36"
 					size="sm"
-					placeholder="全部状态"
+					placeholder={t("shared.allStatuses")}
 					options={[
-						{ value: "active", label: "正常" },
-						{ value: "suspended", label: "已暂停" },
-						{ value: "closed", label: "已关闭" },
+						{ value: "active", label: accountStatusLabel("active") },
+						{ value: "suspended", label: accountStatusLabel("suspended") },
+						{ value: "closed", label: accountStatusLabel("closed") },
 					]}
 				/>
 				<div className="flex items-center gap-2 flex-1 min-w-56">
@@ -148,7 +152,7 @@ export default function AccountsTab() {
 								setPage(1);
 							}
 						}}
-						placeholder="账户 ID / 主体 ID"
+						placeholder={t("accounts.searchPlaceholder")}
 						className="h-7 text-xs font-mono"
 					/>
 					<Button
@@ -160,7 +164,7 @@ export default function AccountsTab() {
 						className="h-7 px-2.5 text-xs border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white gap-1"
 					>
 						<Search className="w-3.5 h-3.5" strokeWidth={1.5} />
-						搜索
+						{t("common:action.search")}
 					</Button>
 				</div>
 				<button
@@ -172,13 +176,13 @@ export default function AccountsTab() {
 						className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
 						strokeWidth={1.5}
 					/>
-					刷新
+					{t("common:action.refresh")}
 				</button>
 			</FilterBar>
 
 			<Panel
-				title="账户列表"
-				description="余额可以为负（后付欠款）；冻结 frozen 是会话预授权占用的金额"
+				title={t("accounts.panelTitle")}
+				description={t("accounts.panelDescription")}
 				bodyClassName="p-0"
 			>
 				{loading ? (
@@ -186,21 +190,21 @@ export default function AccountsTab() {
 				) : accounts.length === 0 ? (
 					<EmptyState
 						icon={Users}
-						title="没有匹配的账户"
-						hint="账户在用户第一次产生用量时自动创建，也可以换个过滤条件再试。"
+						title={t("accounts.emptyTitle")}
+						hint={t("accounts.emptyHint")}
 					/>
 				) : (
 					<TableShell
 						head={
 							<>
-								<Th>账户</Th>
-								<Th>主体</Th>
-								<Th className="text-right">可用余额</Th>
-								<Th className="text-right">预冻结</Th>
-								<Th className="text-right">信用额度</Th>
-								<Th>状态</Th>
-								<Th>创建时间</Th>
-								<Th className="text-right">操作</Th>
+								<Th>{t("shared.account")}</Th>
+								<Th>{t("accounts.columnSubject")}</Th>
+								<Th className="text-right">{t("accounts.columnBalance")}</Th>
+								<Th className="text-right">{t("accounts.columnFrozen")}</Th>
+								<Th className="text-right">{t("accounts.columnCreditLimit")}</Th>
+								<Th>{t("common:field.status")}</Th>
+								<Th>{t("common:field.createdAt")}</Th>
+								<Th className="text-right">{t("common:field.actions")}</Th>
 							</>
 						}
 					>
@@ -238,7 +242,9 @@ export default function AccountsTab() {
 										</span>
 										{account.balance_micro < 0 && (
 											<p className="text-[10px] text-red-400/80 mt-0.5">
-												{overdrawn ? "已超信用额度" : "欠费"}
+												{overdrawn
+													? t("accounts.overdrawn")
+													: t("accounts.arrears")}
 											</p>
 										)}
 									</Td>
@@ -271,7 +277,7 @@ export default function AccountsTab() {
 													className="w-3 h-3"
 													strokeWidth={1.5}
 												/>
-												调整
+												{t("accounts.adjust")}
 											</button>
 											<button
 												onClick={() =>
@@ -283,7 +289,7 @@ export default function AccountsTab() {
 													className="w-3 h-3"
 													strokeWidth={1.5}
 												/>
-												赠款
+												{t("accounts.grant")}
 											</button>
 										</div>
 									</Td>

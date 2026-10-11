@@ -20,6 +20,7 @@
 // 阶梯的不变量在服务端校验（up_to 严格递增、只有最后一档可为空），这里先拦一道。
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, Tag, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -105,6 +106,7 @@ export type PriceDialogProps =
 	| (PriceDialogBaseProps & { mode: "edit" | "adjust"; price: BillingPrice });
 
 export function PriceDialog(props: PriceDialogProps) {
+	const { t } = useTranslation(["billingAdmin", "common"]);
 	const { items, resources, mode, onClose, onDone } = props;
 	const price = props.price;
 	const editing = mode !== "create";
@@ -146,10 +148,7 @@ export function PriceDialog(props: PriceDialogProps) {
 	}, [mode, item]);
 
 	// 列表拉取失败或目录为空时都能走到这里：没有计费项就录不了价
-	const itemsError =
-		items.length === 0
-			? "计费项目录是空的：先确认服务端 seed 跑过，再来录价格（价格表为空时每个会话都会被 price_missing 拒掉）。"
-			: "";
+	const itemsError = items.length === 0 ? t("price.catalogEmpty") : "";
 
 	const unitSizeValue = Number(unitSize);
 	const unitSizeValid = Number.isInteger(unitSizeValue) && unitSizeValue > 0;
@@ -174,21 +173,24 @@ export function PriceDialog(props: PriceDialogProps) {
 			const row = tierRows[index];
 			const isLast = index === tierRows.length - 1;
 			if (row.upToText !== "" && (!Number.isInteger(row.upTo) || row.upTo <= 0)) {
-				return `第 ${index + 1} 档的上限必须是正整数`;
+				return t("price.tierUpToInteger", { n: index + 1 });
 			}
 			if (!isLast && row.upToText === "") {
-				return `第 ${index + 1} 档还没填上限：只有最后一档可以不封顶`;
+				return t("price.tierUpToRequired", { n: index + 1 });
 			}
 			if (row.upTo !== 0 && row.upTo <= previous) {
-				return `第 ${index + 1} 档的上限必须大于上一档（当前上一档是 ${previous}）`;
+				return t("price.tierUpToIncreasing", {
+					n: index + 1,
+					previous,
+				});
 			}
 			if (row.amountMicro === null || row.amountMicro < 0) {
-				return `第 ${index + 1} 档的单价不合法`;
+				return t("price.tierAmountInvalid", { n: index + 1 });
 			}
 			previous = row.upTo === 0 ? previous : row.upTo;
 		}
 		return "";
-	}, [tierRows]);
+	}, [tierRows, t]);
 
 	const previewPrice =
 		amountMicro === null || !unitSizeValid
@@ -204,10 +206,16 @@ export function PriceDialog(props: PriceDialogProps) {
 		const list = resourceOptions(resourceType, resources);
 		// 当前值不在列表里（别的用户的资源 / 列表没加载出来）也要能看见、不被静默清掉
 		if (resourceId && !list.some((option) => option.value === resourceId)) {
-			return [{ value: resourceId, label: `${resourceId}（不在列表里）` }, ...list];
+			return [
+				{
+					value: resourceId,
+					label: t("price.notInList", { id: resourceId }),
+				},
+				...list,
+			];
 		}
 		return list;
-	}, [resourceType, resources, resourceId]);
+	}, [resourceType, resources, resourceId, t]);
 
 	const manualResourceEntry = manualResource || options.length === 0;
 	const lockedResourceName = price
@@ -226,9 +234,17 @@ export function PriceDialog(props: PriceDialogProps) {
 
 	/** 提交时说清这一版是怎么来的，调价的那条路要额外把旧版本停掉。 */
 	const modeLabel =
-		mode === "create" ? "新增价格" : mode === "edit" ? "保存修改" : "创建新版本";
+		mode === "create"
+			? t("price.submitCreate")
+			: mode === "edit"
+				? t("price.submitEdit")
+				: t("price.submitAdjust");
 	const failureLabel =
-		mode === "create" ? "新增价格失败" : mode === "edit" ? "保存失败" : "调价失败";
+		mode === "create"
+			? t("price.failCreate")
+			: mode === "edit"
+				? t("price.failEdit")
+				: t("price.failAdjust");
 
 	const tierPayload = () =>
 		tierRows.map<BillingTier>((row) => ({
@@ -239,20 +255,22 @@ export function PriceDialog(props: PriceDialogProps) {
 	const submit = async () => {
 		setFormError("");
 		if (!unitSizeValid) {
-			setFormError("计价基数要是正整数：例如每 1000000 个 token 收 X 元。");
+			setFormError(t("price.errUnitSize"));
 			return;
 		}
 		if (amountMicro === null) {
-			setFormError("单价不合法：只接受数字，最多 6 位小数。");
+			setFormError(t("price.errUnitPrice"));
 			return;
 		}
 		if (minChargeMicro === null) {
-			setFormError("起步价不合法：只接受数字，最多 6 位小数。");
+			setFormError(t("price.errMinCharge"));
 			return;
 		}
 		if (resourceType !== "item" && resourceId.trim() === "") {
 			setFormError(
-				`停在 ${resourceTypeLabel(resourceType)} 这一级时必须填资源 ID；只做全平台兜底价就用 item 级。`,
+				t("price.errResourceRequired", {
+					type: resourceTypeLabel(resourceType),
+				}),
 			);
 			return;
 		}
@@ -267,7 +285,9 @@ export function PriceDialog(props: PriceDialogProps) {
 		const effectiveDate = effectiveValid ? parsedEffective : new Date();
 		if (mode === "adjust" && price && effectiveDate <= new Date(price.effective_from)) {
 			setFormError(
-				`新版本的生效时间必须晚于当前版本（${formatDate(price.effective_from)} 起生效），否则旧版本收不紧。`,
+				t("price.errEffectiveOrder", {
+					date: formatDate(price.effective_from),
+				}),
 			);
 			return;
 		}
@@ -286,7 +306,10 @@ export function PriceDialog(props: PriceDialogProps) {
 					effective_from: effectiveValid ? toRFC3339(parsedEffective) : undefined,
 				});
 				onDone(
-					`已保存「${itemLabel(price.item_code)}」未生效价格版本的改动（${scopeLabel(price, names)}）`,
+					t("price.successEdit", {
+						item: itemLabel(price.item_code),
+						scope: scopeLabel(price, names),
+					}),
 				);
 				return;
 			}
@@ -316,20 +339,33 @@ export function PriceDialog(props: PriceDialogProps) {
 						});
 					} catch (err) {
 						onDone(
-							`新版本已创建（${formatDate(created.effective_from)} 起生效），但旧版本自动停用失败：${billingErrorMessage(err, "停用失败")}。请在列表里手动「停用」旧版本。`,
+							t("price.adjustPartialFail", {
+								date: formatDate(created.effective_from),
+								error: billingErrorMessage(
+									err,
+									t("shared.deactivateFailed"),
+								),
+							}),
 							"error",
 						);
 						return;
 					}
 				}
 				onDone(
-					`已调价：「${itemLabel(created.item_code)}」（${scopeLabel(created, names)}）新版本 ${formatDate(created.effective_from)} 起生效，旧版本同时停用，历史账单不变`,
+					t("price.successAdjust", {
+						item: itemLabel(created.item_code),
+						scope: scopeLabel(created, names),
+						date: formatDate(created.effective_from),
+					}),
 				);
 				return;
 			}
 
 			onDone(
-				`已新增价格版本：${itemLabel(itemCode)} · ${previewPrice ? formatUnitPrice(previewPrice) : ""}`,
+				t("price.successCreate", {
+					item: itemLabel(itemCode),
+					price: previewPrice ? formatUnitPrice(previewPrice) : "",
+				}),
 			);
 		} catch (err) {
 			setFormError(billingErrorMessage(err, failureLabel));
@@ -345,18 +381,17 @@ export function PriceDialog(props: PriceDialogProps) {
 					<DialogTitle className="text-white flex items-center gap-2">
 						<Tag className="w-4 h-4 text-violet-400" strokeWidth={1.5} />
 						{mode === "create"
-							? "新建价格版本"
+							? t("price.titleCreate")
 							: mode === "edit"
-								? "编辑未生效的价格版本"
-								: "调价（新增价格版本）"}
+								? t("price.titleEdit")
+								: t("price.titleAdjust")}
 					</DialogTitle>
 				</DialogHeader>
 
 				<div className="space-y-4 py-2">
 					{mode === "adjust" && (
 						<p className="rounded-lg border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-300/90 leading-relaxed">
-							已生效的版本不原地改价：下面的数字会存成一版新价格，同时把旧版本的
-							effective_to 收到新版本生效时刻。结算按事件发生时刻的价格走，历史账单不变。
+							{t("price.adjustNotice")}
 						</p>
 					)}
 
@@ -364,33 +399,33 @@ export function PriceDialog(props: PriceDialogProps) {
 						<div className="rounded-lg bg-zinc-800/60 px-3 py-2.5 space-y-1">
 							<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
 								<span className="text-[11px] text-zinc-500">
-									适用范围
+									{t("price.scopeLabel")}
 									<span className="ml-1 text-zinc-300">
 										{scopeLabel(price, names)}
 									</span>
 								</span>
 								{price.account_id && (
 									<span className="text-[11px] text-zinc-500">
-										账户
+										{t("shared.account")}
 										<span className="ml-1 text-zinc-300 font-mono">
 											{price.account_id}
 										</span>
 									</span>
 								)}
 								<span className="text-[11px] text-zinc-500">
-									当前生效
+									{t("price.currentEffective")}
 									<span className="ml-1 text-zinc-300 font-mono">
 										{formatDate(price.effective_from)} ~{" "}
 										{price.effective_to
 											? formatDate(price.effective_to)
-											: "长期"}
+											: t("shared.forever")}
 									</span>
 								</span>
 							</div>
 							<p className="text-[11px] text-zinc-600">
 								{mode === "edit"
-									? "这一版还没生效，没有被任何用量事件匹配过；计费项与适用范围在创建时定死，这里只改价格本身。"
-									: "下面存的是新版本，旧版本从上面的生效时刻起停用；计费项与适用范围照抄当前版本。"}
+									? t("price.noteEdit")
+									: t("price.noteAdjust")}
 							</p>
 						</div>
 					)}
@@ -398,13 +433,13 @@ export function PriceDialog(props: PriceDialogProps) {
 					<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 						<div className="space-y-1.5">
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-								计费项
+								{t("shared.item")}
 							</Label>
 							<SimpleSelect
 								value={itemCode}
 								onValueChange={setItemCode}
 								disabled={editing}
-								placeholder="选择计费项"
+								placeholder={t("price.itemPlaceholder")}
 								className="font-mono"
 								options={items.map((option) => ({
 									value: option.code,
@@ -415,7 +450,7 @@ export function PriceDialog(props: PriceDialogProps) {
 						</div>
 						<div className="space-y-1.5">
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-								生效时间
+								{t("price.effectiveFrom")}
 							</Label>
 							<Input
 								type="datetime-local"
@@ -425,10 +460,10 @@ export function PriceDialog(props: PriceDialogProps) {
 							/>
 							<p className="text-[11px] text-zinc-600">
 								{mode === "adjust"
-									? "留空按“现在”处理；这一刻也是旧版本的停用时刻。"
+									? t("price.effectiveHintAdjust")
 									: mode === "edit"
-										? "改的是还没生效的版本，调整生效时间不影响已产生的账单。"
-										: "留空按“现在”处理；同一 scope 同一时刻只能有一版价格。"}
+										? t("price.effectiveHintEdit")
+										: t("price.effectiveHintCreate")}
 							</p>
 						</div>
 					</div>
@@ -440,19 +475,19 @@ export function PriceDialog(props: PriceDialogProps) {
 					{item && (
 						<div className="rounded-lg bg-zinc-800/60 px-3 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-1">
 							<span className="text-[11px] text-zinc-500">
-								单位
+								{t("price.unitLabel")}
 								<span className="ml-1 text-zinc-300 font-mono">
 									{unitLabel(item.unit)}
 								</span>
 							</span>
 							<span className="text-[11px] text-zinc-500">
-								模式
+								{t("price.modeLabel")}
 								<span className="ml-1 text-zinc-300">
 									{chargeModeLabel(item.charge_mode)}
 								</span>
 							</span>
 							<span className="text-[11px] text-zinc-500">
-								默认舍入
+								{t("price.defaultRoundingLabel")}
 								<span className="ml-1 text-zinc-300">
 									{roundingLabel(
 										item.charge_mode === "duration" ? "ceil" : "none",
@@ -464,16 +499,16 @@ export function PriceDialog(props: PriceDialogProps) {
 
 					<div className="space-y-2">
 						<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-							单价
+							{t("price.unitPrice")}
 							<span className="ml-1 text-zinc-600 normal-case">
-								每 N 个 {unitLabel(item?.unit)} 收 X 元
+								{t("price.unitPricePer", { unit: unitLabel(item?.unit) })}
 							</span>
 						</Label>
 						<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 							<div className="space-y-1.5">
 								<div className="flex items-center gap-2">
 									<span className="text-xs text-zinc-500 whitespace-nowrap">
-										每
+										{t("price.per")}
 									</span>
 									<Input
 										value={unitSize}
@@ -482,7 +517,7 @@ export function PriceDialog(props: PriceDialogProps) {
 										className="text-sm font-mono"
 									/>
 									<span className="text-xs text-zinc-500 whitespace-nowrap">
-										个
+										{t("price.countUnit")}
 									</span>
 								</div>
 								<p
@@ -492,13 +527,13 @@ export function PriceDialog(props: PriceDialogProps) {
 											: "text-[11px] text-red-400"
 									}
 								>
-									unit_size 必须是正整数
+									{t("price.unitSizeHint")}
 								</p>
 							</div>
 							<div className="space-y-1.5">
 								<div className="flex items-center gap-2">
 									<span className="text-xs text-zinc-500 whitespace-nowrap">
-										收
+										{t("price.charge")}
 									</span>
 									<Input
 										value={amount}
@@ -508,7 +543,7 @@ export function PriceDialog(props: PriceDialogProps) {
 										className="text-sm font-mono"
 									/>
 									<span className="text-xs text-zinc-500 whitespace-nowrap">
-										元
+										{t("price.currencyUnit")}
 									</span>
 								</div>
 								<p
@@ -519,16 +554,20 @@ export function PriceDialog(props: PriceDialogProps) {
 									}
 								>
 									{amount.trim() === ""
-										? "最多 6 位小数"
+										? t("price.maxDecimals")
 										: amountMicro === null
-											? "格式不对"
-											: `unit_price_micro = ${amountMicro.toLocaleString("en-US")}`}
+											? t("price.invalidFormat")
+											: t("price.microEquals", {
+													amount: amountMicro.toLocaleString("en-US"),
+												})}
 								</p>
 							</div>
 						</div>
 						{previewPrice && (
 							<div className="rounded-lg border border-violet-500/20 bg-violet-600/10 px-3 py-2 flex items-center gap-2">
-								<span className="text-[11px] text-zinc-400">换算结果</span>
+								<span className="text-[11px] text-zinc-400">
+									{t("price.converted")}
+								</span>
 								<span className="text-xs text-violet-300 font-mono">
 									{formatUnitPrice(previewPrice)}
 								</span>
@@ -538,22 +577,19 @@ export function PriceDialog(props: PriceDialogProps) {
 							</div>
 						)}
 						<p className="text-[11px] text-zinc-600 leading-relaxed">
-							单价必须是整数微元（1e-6 元），精度不够就抬 unit_size，别把价格舍成 0：
-							例如「每 token ¥0.0000008」写成「每 1000 万个 token ¥8」
-							（unit_price_micro = 8,000,000，unit_size = 10,000,000）。结算时
-							qty × 单价 ÷ unit_size 在一次结算内只舍入一次。
+							{t("price.microNote")}
 						</p>
 					</div>
 
 					<div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
 						<div className="space-y-1.5">
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-								起步价（元）
+								{t("price.minCharge")}
 							</Label>
 							<Input
 								value={minCharge}
 								onChange={(e) => setMinCharge(e.target.value)}
-								placeholder="留空 = 0"
+								placeholder={t("price.minChargePlaceholder")}
 								inputMode="decimal"
 								className="text-sm font-mono"
 							/>
@@ -565,13 +601,13 @@ export function PriceDialog(props: PriceDialogProps) {
 								}
 							>
 								{minChargeMicro === null
-									? "格式不对"
-									: "舍入后取 max(qty × 单价, 起步价)"}
+									? t("price.invalidFormat")
+									: t("price.minChargeHint")}
 							</p>
 						</div>
 						<div className="space-y-1.5">
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-								舍入口径
+								{t("price.roundingLabel")}
 							</Label>
 							<SimpleSelect
 								value={rounding}
@@ -586,12 +622,12 @@ export function PriceDialog(props: PriceDialogProps) {
 								)}
 							/>
 							<p className="text-[11px] text-zinc-600">
-								duration 类默认向上取整，usage 类默认精确
+								{t("price.roundingHint")}
 							</p>
 						</div>
 						<div className="space-y-1.5">
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-								币种
+								{t("price.currency")}
 							</Label>
 							<Input
 								value={currency}
@@ -599,7 +635,7 @@ export function PriceDialog(props: PriceDialogProps) {
 								className="text-sm font-mono"
 							/>
 							<p className="text-[11px] text-zinc-600">
-								单币种部署，P1 不做汇率
+								{t("price.currencyHint")}
 							</p>
 						</div>
 					</div>
@@ -607,7 +643,7 @@ export function PriceDialog(props: PriceDialogProps) {
 					<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 						<div className="space-y-1.5">
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-								资源粒度
+								{t("price.resourceTypeLabel")}
 							</Label>
 							<SimpleSelect
 								value={resourceType}
@@ -623,18 +659,18 @@ export function PriceDialog(props: PriceDialogProps) {
 									value,
 									label:
 										value === "item"
-											? "计费项（全平台兜底价）"
+											? t("price.resourceTypeItem")
 											: resourceTypeLabel(value),
 								}))}
 							/>
 							<p className="text-[11px] text-zinc-600">
-								匹配优先级：账户协议价 → 音色 → 模型 → 厂商 → 计费项
+								{t("price.priorityHint")}
 							</p>
 						</div>
 						<div className="space-y-1.5">
 							<div className="flex items-center justify-between gap-2">
 								<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-									资源
+									{t("price.resourceLabel")}
 									<IdHint resourceType={resourceType} />
 								</Label>
 								{!editing &&
@@ -647,7 +683,9 @@ export function PriceDialog(props: PriceDialogProps) {
 											}
 											className="text-[11px] text-violet-400 hover:text-violet-300 transition-colors cursor-pointer"
 										>
-											{manualResource ? "从列表选择" : "手动填 ID"}
+											{manualResource
+												? t("price.listToggle")
+												: t("price.manualToggle")}
 										</button>
 									)}
 							</div>
@@ -656,7 +694,7 @@ export function PriceDialog(props: PriceDialogProps) {
 									value={lockedResourceName}
 									disabled
 									title={price?.resource_id}
-									placeholder="item 级价格不带 resource_id"
+									placeholder={t("price.lockedPlaceholder")}
 									className="text-sm font-mono disabled:opacity-40"
 								/>
 							) : manualResourceEntry ? (
@@ -666,8 +704,8 @@ export function PriceDialog(props: PriceDialogProps) {
 									disabled={resourceType === "item"}
 									placeholder={
 										resourceType === "item"
-											? "item 级价格不带 resource_id"
-											: "库里的记录 ID（不是厂商的模型名 / 音色名）"
+											? t("price.lockedPlaceholder")
+											: t("price.manualPlaceholder")
 									}
 									className="text-sm font-mono disabled:opacity-40"
 								/>
@@ -675,25 +713,28 @@ export function PriceDialog(props: PriceDialogProps) {
 								<SimpleSelect
 									value={resourceId}
 									onValueChange={setResourceId}
-									placeholder={`选择${resourceTypeLabel(resourceType)}`}
+									placeholder={t("price.selectPlaceholder", {
+										type: resourceTypeLabel(resourceType),
+									})}
 									options={options}
 								/>
 							)}
 							<p className="text-[11px] text-zinc-600">
 								{editing
-									? "换资源只能新增一版，不能原地改。"
+									? t("price.resourceHintEdit")
 									: resourceType === "item"
-										? "item 级价格不带 resource_id，作用在全部资源上（兜底价）。"
+										? t("price.resourceHintItem")
 										: manualResourceEntry
-											? "填的是库里的记录 ID（ai_models.id / providers.id / model_voices.id），不是厂商侧的模型名或音色名——写错不会报错，只是永远匹配不上。"
-											: "下拉里是当前账号可见的资源；其它用户的资源，或列表加载失败时，切「手动填 ID」。"}
+											? t("price.resourceHintManual")
+											: t("price.resourceHintSelect")}
 							</p>
 							{!editing &&
 								resourceType !== "item" &&
 								resources.missing.includes(resourceType) && (
 									<p className="text-[11px] text-amber-400/80">
-										{resourceTypeLabel(resourceType)}
-										列表没加载出来，只能手动填 ID；刷新页面可重试。
+										{t("price.resourceMissing", {
+											type: resourceTypeLabel(resourceType),
+										})}
 									</p>
 								)}
 						</div>
@@ -702,9 +743,9 @@ export function PriceDialog(props: PriceDialogProps) {
 					<div className="space-y-2">
 						<div className="flex items-center justify-between">
 							<Label className="text-xs text-zinc-400 uppercase tracking-wide">
-								阶梯价
+								{t("price.tiers")}
 								<span className="ml-1 text-zinc-600 normal-case">
-									可选，按账期累计量分档累进
+									{t("price.tiersHint")}
 								</span>
 							</Label>
 							<button
@@ -712,12 +753,12 @@ export function PriceDialog(props: PriceDialogProps) {
 								className="inline-flex items-center gap-1 text-[11px] text-violet-400 hover:text-violet-300 transition-colors cursor-pointer"
 							>
 								<Plus className="w-3 h-3" strokeWidth={1.5} />
-								添加一档
+								{t("price.addTier")}
 							</button>
 						</div>
 						{tiers.length === 0 ? (
 							<p className="text-[11px] text-zinc-600">
-								不用阶梯就留空，全部按上面的单价算。
+								{t("price.noTiers")}
 							</p>
 						) : (
 							<div className="space-y-2">
@@ -727,7 +768,7 @@ export function PriceDialog(props: PriceDialogProps) {
 										className="flex items-center gap-2"
 									>
 										<span className="text-[11px] text-zinc-500 w-10">
-											第 {index + 1} 档
+											{t("price.tierN", { n: index + 1 })}
 										</span>
 										<Input
 											value={tier.upTo}
@@ -744,7 +785,7 @@ export function PriceDialog(props: PriceDialogProps) {
 													),
 												)
 											}
-											placeholder="累计上限（最后一档留空 = 不封顶）"
+											placeholder={t("price.tierUpToPlaceholder")}
 											inputMode="numeric"
 											className="h-8 text-xs font-mono flex-1"
 										/>
@@ -763,7 +804,9 @@ export function PriceDialog(props: PriceDialogProps) {
 													),
 												)
 											}
-											placeholder={`单价（元 / ${unitSize || "N"} 个）`}
+											placeholder={t("price.tierAmountPlaceholder", {
+												size: unitSize || "N",
+											})}
 											inputMode="decimal"
 											className="h-8 text-xs font-mono flex-1"
 										/>
@@ -774,7 +817,7 @@ export function PriceDialog(props: PriceDialogProps) {
 												)
 											}
 											className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors cursor-pointer"
-											aria-label="删除这一档"
+											aria-label={t("price.removeTier")}
 										>
 											<Trash2
 												className="w-3.5 h-3.5"
@@ -784,8 +827,7 @@ export function PriceDialog(props: PriceDialogProps) {
 									</div>
 								))}
 								<p className="text-[11px] text-zinc-600 leading-relaxed">
-									阶梯单价按同一个 unit_size 计；中间档必须填上限且严格递增，只有最后一档可以为空。
-									阶梯是分档累进（像个税），不是达标后全量按新价。
+									{t("price.tiersNote")}
 								</p>
 								{tierError && (
 									<p className="text-[11px] text-red-400">{tierError}</p>
@@ -805,14 +847,14 @@ export function PriceDialog(props: PriceDialogProps) {
 						onClick={onClose}
 						className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
 					>
-						取消
+						{t("common:action.cancel")}
 					</Button>
 					<Button
 						onClick={submit}
 						disabled={!canSubmit}
 						className="bg-violet-600 hover:bg-violet-500 text-white"
 					>
-						{saving ? "提交中..." : modeLabel}
+						{saving ? t("common:action.submitting") : modeLabel}
 					</Button>
 				</DialogFooter>
 			</DialogContent>
@@ -821,12 +863,15 @@ export function PriceDialog(props: PriceDialogProps) {
 }
 
 function IdHint({ resourceType }: { resourceType: BillingResourceType }) {
+	const { t } = useTranslation("billingAdmin");
 	if (resourceType === "item") {
-		return <span className="ml-1 text-zinc-600 normal-case">（item 级留空）</span>;
+		return (
+			<span className="ml-1 text-zinc-600 normal-case">{t("price.idHintItem")}</span>
+		);
 	}
 	return (
 		<span className="ml-1 text-zinc-600 normal-case">
-			（{resourceTypeLabel(resourceType)} 级必填，填内部记录 ID）
+			{t("price.idHintOther", { type: resourceTypeLabel(resourceType) })}
 		</span>
 	);
 }

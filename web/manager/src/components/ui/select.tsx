@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 import { Select as SelectPrimitive } from "@base-ui/react/select";
 
 import { cn } from "@/lib/utils";
@@ -24,15 +25,17 @@ interface SimpleSelectProps {
 }
 
 function SimpleSelect({
-  value,
-  onValueChange,
-  options,
-  placeholder = "请选择",
-  className,
-  size = "default",
-  disabled,
+	value,
+	onValueChange,
+	options,
+	placeholder,
+	className,
+	size = "default",
+	disabled,
 }: SimpleSelectProps) {
-  const selected = options.find((option) => option.value === value);
+	const { t } = useTranslation("common");
+	const hint = placeholder ?? t("action.select");
+	const selected = options.find((option) => option.value === value);
   const groups = [
     ...new Set(options.map((option) => option.group).filter(Boolean)),
   ] as string[];
@@ -53,11 +56,11 @@ function SimpleSelect({
             !selected && "text-[hsl(var(--muted-foreground))]",
           )}
         >
-          {selected?.label ?? placeholder}
+          {selected?.label ?? hint}
         </span>
       </SelectTrigger>
       <SelectContent>
-        {!value && <SelectItem value="__empty">{placeholder}</SelectItem>}
+        {!value && <SelectItem value="__empty">{hint}</SelectItem>}
         {ungrouped.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {option.label}

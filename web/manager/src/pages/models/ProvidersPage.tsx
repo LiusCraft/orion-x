@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Building2,
   Plus,
@@ -31,11 +32,11 @@ import {
   type ViewMode,
 } from "@/pages/models/shared";
 
-const CATEGORY_LABEL: Record<string, string> = {
-  llm: "LLM 大语言模型",
-  asr: "ASR 语音识别",
-  tts: "TTS 语音合成",
-  embedding: "Embedding 向量",
+const CATEGORY_LABEL_KEY: Record<string, string> = {
+  llm: "providers.category.llm",
+  asr: "providers.category.asr",
+  tts: "providers.category.tts",
+  embedding: "providers.category.embedding",
 };
 
 const CATEGORY_BADGE: Record<string, string> = {
@@ -50,10 +51,11 @@ const CUSTOM_SLUG = "__custom__";
 
 /** 官方厂商的标记，和「我的模型」页保持一致：图标 + 文字。 */
 function OfficialBadge() {
+  const { t } = useTranslation(["models", "common"]);
   return (
     <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border bg-violet-600/15 text-violet-400 border-violet-500/20 shrink-0">
       <Shield className="w-2.5 h-2.5" />
-      官方
+      {t("official")}
     </span>
   );
 }
@@ -78,7 +80,8 @@ function SlugChips({ slug }: { slug: string }) {
 }
 
 export default function ProvidersPage() {
-  useDocumentTitle("厂商管理");
+  const { t } = useTranslation(["models", "common"]);
+  useDocumentTitle(t("providers.title"));
 
   const isAdmin = useAuthStore((state) => state.isAdmin);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -188,14 +191,21 @@ export default function ProvidersPage() {
     scope === "all" ? true : scope === "system" ? p.is_system : !p.is_system,
   );
 
+  const categoryLabel = (category: string) => {
+    const key = CATEGORY_LABEL_KEY[category];
+    return key ? t(key) : category;
+  };
+
   return (
     <div className="min-h-full">
       <div className="border-b border-zinc-800/80 px-8 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">厂商管理</h1>
+            <h1 className="text-lg font-semibold text-white">
+              {t("providers.title")}
+            </h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              管理 AI 服务厂商的接入配置和 API Key
+              {t("providers.subtitle")}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -206,7 +216,7 @@ export default function ProvidersPage() {
               className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
             >
               <Plus className="w-4 h-4" />
-              添加厂商
+              {t("providers.add")}
             </Button>
           </div>
         </div>
@@ -223,17 +233,17 @@ export default function ProvidersPage() {
               <Building2 className="w-6 h-6 text-zinc-600" />
             </div>
             <p className="text-zinc-400 text-sm">
-              {scope === "mine" ? "你还没有添加厂商" : "还没有厂商"}
+              {scope === "mine" ? t("providers.emptyMine") : t("providers.empty")}
             </p>
             <p className="text-zinc-600 text-xs mt-1 mb-4">
-              添加厂商后即可在该厂商下创建模型
+              {t("providers.emptyHint")}
             </p>
             <Button
               onClick={openAdd}
               className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-4 text-xs gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
-              添加厂商
+              {t("providers.add")}
             </Button>
           </div>
         ) : viewMode === "grid" ? (
@@ -289,7 +299,7 @@ export default function ProvidersPage() {
                 <div className="flex items-center justify-between mt-3">
                   <span className="flex items-center gap-1 text-[11px] text-emerald-400">
                     <CheckCircle2 className="w-3 h-3" />
-                    已配置
+                    {t("providers.configured")}
                   </span>
                   <span className="text-[11px] text-zinc-600 font-mono">
                     {p.created_at.slice(0, 10)}
@@ -303,11 +313,17 @@ export default function ProvidersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-zinc-800 text-left text-[11px] text-zinc-500 uppercase tracking-wide">
-                  <th className="px-4 py-3 font-medium">厂商</th>
-                  <th className="px-4 py-3 font-medium">类型</th>
+                  <th className="px-4 py-3 font-medium">{t("field.provider")}</th>
+                  <th className="px-4 py-3 font-medium">
+                    {t("common:field.type")}
+                  </th>
                   <th className="px-4 py-3 font-medium">Base URL</th>
-                  <th className="px-4 py-3 font-medium">状态</th>
-                  <th className="px-4 py-3 font-medium">创建时间</th>
+                  <th className="px-4 py-3 font-medium">
+                    {t("common:field.status")}
+                  </th>
+                  <th className="px-4 py-3 font-medium">
+                    {t("common:field.createdAt")}
+                  </th>
                   <th className="px-4 py-3 font-medium w-20" />
                 </tr>
               </thead>
@@ -332,7 +348,7 @@ export default function ProvidersPage() {
                     <td className="px-4 py-3">
                       <span className="flex items-center gap-1 text-[11px] text-emerald-400">
                         <CheckCircle2 className="w-3 h-3" />
-                        已配置
+                        {t("providers.configured")}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-zinc-600 font-mono">
@@ -371,7 +387,7 @@ export default function ProvidersPage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Building2 className="w-4 h-4 text-violet-400" />
-              {editTarget ? "编辑厂商" : "添加厂商"}
+              {editTarget ? t("providers.edit") : t("providers.add")}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -403,7 +419,7 @@ export default function ProvidersPage() {
                     }}
                     className="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer transition-colors"
                   >
-                    从内置列表选择
+                    {t("providers.form.chooseBuiltin")}
                   </button>
                 </div>
               ) : (
@@ -418,34 +434,34 @@ export default function ProvidersPage() {
                     handleSlugChange(value);
                   }}
                   className="font-mono"
-                  placeholder="选择厂商类型"
+                  placeholder={t("providers.form.slugPlaceholder")}
                   options={[
                     ...slugOptions.map((option) => ({
                       value: option.slug,
                       label: `${option.name} (${option.slug})`,
-                      group: CATEGORY_LABEL[option.category] ?? option.category,
+                      group: categoryLabel(option.category),
                     })),
-                    { value: CUSTOM_SLUG, label: "自定义…" },
+                    { value: CUSTOM_SLUG, label: t("providers.form.customOption") },
                   ]}
                 />
               )}
               {!editTarget && customSlug && (
                 <p className="text-[11px] text-zinc-500">
-                  自定义 slug 形如 llm:deepseek；未注册的 llm 厂商按 OpenAI 兼容协议接入。
+                  {t("providers.form.customHint")}
                 </p>
               )}
               {!editTarget &&
                 form.is_system &&
                 slugOptions.some((option) => option.slug === form.slug) && (
                   <p className="text-[11px] text-amber-400/80">
-                    该 slug 已有内置记录；上架会新建一条独立记录，通常直接编辑内置记录即可。
+                    {t("providers.form.duplicateHint")}
                   </p>
                 )}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                  名称
+                  {t("common:field.name")}
                 </Label>
                 <Input
                   value={form.name}
@@ -475,7 +491,7 @@ export default function ProvidersPage() {
                 API Key
                 {editTarget && (
                   <span className="ml-1 text-zinc-600 normal-case">
-                    (留空不修改)
+                    {t("providers.form.keepKey")}
                   </span>
                 )}
               </Label>
@@ -504,9 +520,9 @@ export default function ProvidersPage() {
             {!editTarget && isAdmin && (
               <div className="flex items-center justify-between gap-3 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2">
                 <div>
-                  <p className="text-sm text-zinc-200">官方</p>
+                  <p className="text-sm text-zinc-200">{t("official")}</p>
                   <p className="text-[11px] text-zinc-500">
-                    所有用户可见、仅管理员可修改；不开则仅自己可见
+                    {t("officialHint")}
                   </p>
                 </div>
                 <Switch
@@ -514,7 +530,7 @@ export default function ProvidersPage() {
                   onCheckedChange={(checked: boolean) =>
                     setForm((f) => ({ ...f, is_system: checked }))
                   }
-                  aria-label="官方厂商"
+                  aria-label={t("providers.form.officialAria")}
                 />
               </div>
             )}
@@ -525,7 +541,7 @@ export default function ProvidersPage() {
               onClick={() => setAddOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleSave}
@@ -537,7 +553,7 @@ export default function ProvidersPage() {
               }
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              {editTarget ? "保存" : "添加"}
+              {editTarget ? t("common:action.save") : t("common:action.add")}
             </Button>
           </DialogFooter>
         </DialogContent>

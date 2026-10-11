@@ -9,6 +9,7 @@
 //     不原地改价：按事件发生时刻匹配价格的机制下，原地改会改写整个生效窗口。
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Ban, Pencil, Plus, RefreshCw, Tag, TrendingUp, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SimpleSelect } from "@/components/ui/select";
@@ -68,6 +69,7 @@ type PriceDialogState =
 	| { mode: "edit" | "adjust"; price: BillingPrice };
 
 export default function PricesTab() {
+	const { t } = useTranslation(["billingAdmin", "common"]);
 	const [prices, setPrices] = useState<BillingPrice[]>([]);
 	const [items, setItems] = useState<BillingItem[]>([]);
 	const [accounts, setAccounts] = useState<BillingAccount[]>([]);
@@ -104,14 +106,14 @@ export default function PricesTab() {
 				if (!isBillingDisabled(err)) {
 					setBanner({
 						kind: "error",
-						text: billingErrorMessage(err, "加载计费项 / 账户失败"),
+						text: billingErrorMessage(err, t("prices.loadItemsAccountsFailed")),
 					});
 				}
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [reloadKey]);
+	}, [reloadKey, t]);
 
 	// 资源名称只影响展示，不阻断页面：三个列表各自容错，失败的那类在文案里说明。
 	useEffect(() => {
@@ -151,7 +153,7 @@ export default function PricesTab() {
 				}
 				setBanner({
 					kind: "error",
-					text: billingErrorMessage(err, "加载价格版本失败"),
+					text: billingErrorMessage(err, t("prices.loadFailed")),
 				});
 			})
 			.finally(() => {
@@ -160,7 +162,7 @@ export default function PricesTab() {
 		return () => {
 			cancelled = true;
 		};
-	}, [itemCode, resourceType, scope, accountId, activeOnly, page, reloadKey]);
+	}, [itemCode, resourceType, scope, accountId, activeOnly, page, reloadKey, t]);
 
 	const names = useMemo(() => resourceNameIndex(resources), [resources]);
 
@@ -173,9 +175,10 @@ export default function PricesTab() {
 
 	const deactivate = async (price: BillingPrice) => {
 		const ok = window.confirm(
-			`停用「${itemLabel(price.item_code)}」的这版价格（${scopeLabel(price, names)}）？\n\n` +
-				"停用会把 effective_to 收到当前时刻，之后不再匹配新的用量事件；\n" +
-				"已经产生的历史账单不受影响——结算按事件发生时刻的价格走，历史账单永不因调价而变动。",
+			t("prices.deactivateConfirm", {
+				item: itemLabel(price.item_code),
+				scope: scopeLabel(price, names),
+			}),
 		);
 		if (!ok) return;
 		setBusyId(price.id);
@@ -186,11 +189,16 @@ export default function PricesTab() {
 			});
 			setBanner({
 				kind: "ok",
-				text: `已停用「${itemLabel(price.item_code)}」的这版价格（历史账单不受影响）`,
+				text: t("prices.deactivateSuccess", {
+					item: itemLabel(price.item_code),
+				}),
 			});
 			setReloadKey((key) => key + 1);
 		} catch (err) {
-			setBanner({ kind: "error", text: billingErrorMessage(err, "停用失败") });
+			setBanner({
+				kind: "error",
+				text: billingErrorMessage(err, t("shared.deactivateFailed")),
+			});
 		} finally {
 			setBusyId(null);
 		}
@@ -198,8 +206,10 @@ export default function PricesTab() {
 
 	const remove = async (price: BillingPrice) => {
 		const ok = window.confirm(
-			`删除这版还没生效的价格（${scopeLabel(price, names)}，${formatDate(price.effective_from)} 起生效）？\n\n` +
-				"它从来没有匹配过任何用量事件，也没有被任何流水引用，删除后不可恢复。",
+			t("prices.deleteConfirm", {
+				scope: scopeLabel(price, names),
+				date: formatDate(price.effective_from),
+			}),
 		);
 		if (!ok) return;
 		setBusyId(price.id);
@@ -208,11 +218,16 @@ export default function PricesTab() {
 			await billingAdminApi.deletePrice(price.id);
 			setBanner({
 				kind: "ok",
-				text: `已删除未生效的价格版本（${itemLabel(price.item_code)}）`,
+				text: t("prices.deleteSuccess", {
+					item: itemLabel(price.item_code),
+				}),
 			});
 			setReloadKey((key) => key + 1);
 		} catch (err) {
-			setBanner({ kind: "error", text: billingErrorMessage(err, "删除失败") });
+			setBanner({
+				kind: "error",
+				text: billingErrorMessage(err, t("common:error.deleteFailed")),
+			});
 		} finally {
 			setBusyId(null);
 		}
@@ -223,8 +238,8 @@ export default function PricesTab() {
 			<Panel bodyClassName="p-0">
 				<EmptyState
 					icon={Tag}
-					title="计费未启用"
-					hint="服务端没有开启计费模块（billing.enabled），价格版本不可用。"
+					title={t("billing:disabledTitle")}
+					hint={t("prices.disabledHint")}
 				/>
 			</Panel>
 		);
@@ -251,7 +266,7 @@ export default function PricesTab() {
 					}}
 					className="w-72"
 					size="sm"
-					placeholder="全部计费项"
+					placeholder={t("shared.allItems")}
 					options={items.map((item) => ({
 						value: item.code,
 						label: `${item.name}（${item.code}）`,
@@ -265,7 +280,7 @@ export default function PricesTab() {
 					}}
 					className="w-40"
 					size="sm"
-					placeholder="全部粒度"
+					placeholder={t("prices.resourceTypePlaceholder")}
 					options={(["item", "provider", "model", "voice"] as const).map(
 						(value) => ({ value, label: resourceTypeLabel(value) }),
 					)}
@@ -278,10 +293,10 @@ export default function PricesTab() {
 					}}
 					className="w-52"
 					size="sm"
-					placeholder="全部 scope"
+					placeholder={t("prices.scopePlaceholder")}
 					options={[
-						{ value: "platform", label: "平台标准价（本页过滤）" },
-						{ value: "account", label: "账户协议价" },
+						{ value: "platform", label: t("prices.scopePlatform") },
+						{ value: "account", label: t("billing:scope.account") },
 					]}
 				/>
 				{scope === "account" && (
@@ -293,7 +308,7 @@ export default function PricesTab() {
 						}}
 						className="w-64"
 						size="sm"
-						placeholder="全部账户（本页过滤）"
+						placeholder={t("prices.accountPlaceholder")}
 						options={accounts.map((account) => ({
 							value: account.id,
 							label: `${subjectTypeLabel(account.subject_type)} · ${account.id}`,
@@ -308,9 +323,9 @@ export default function PricesTab() {
 							setPage(1);
 						}}
 						size="sm"
-						aria-label="只看生效中"
+						aria-label={t("prices.activeOnly")}
 					/>
-					<span className="text-xs text-zinc-400">只看生效中</span>
+					<span className="text-xs text-zinc-400">{t("prices.activeOnly")}</span>
 				</div>
 				<div className="flex items-center gap-2 ml-auto">
 					<button
@@ -322,7 +337,7 @@ export default function PricesTab() {
 							className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
 							strokeWidth={1.5}
 						/>
-						刷新
+						{t("common:action.refresh")}
 					</button>
 					<Button
 						onClick={() => setDialog({ mode: "create" })}
@@ -330,28 +345,26 @@ export default function PricesTab() {
 						className="h-7 px-2.5 text-xs bg-violet-600 hover:bg-violet-500 text-white gap-1"
 					>
 						<Plus className="w-3.5 h-3.5" strokeWidth={1.5} />
-						新建价格
+						{t("prices.newPrice")}
 					</Button>
 				</div>
 			</FilterBar>
 
 			<Hint tone="zinc" icon={Tag}>
-				改价 = 新增一版 effective_from 更晚的价格，不覆盖历史。同一 scope
-				（计费项 + 账户 + 资源粒度）同一时刻只能有一版价格，命中优先级是
-				账户协议价 → 音色 → 模型 → 厂商 → 计费项兜底。未生效的版本可以直接编辑；
-				已生效的版本用「调价」一键新增一版并停用旧版。
+				{t("prices.markupHint")}
 			</Hint>
 
 			{resources.missing.length > 0 && (
 				<Hint tone="zinc" icon={Tag}>
-					{resources.missing.map(resourceTypeLabel).join(" / ")}
-					列表没加载出来，这些价格的适用范围暂时显示内部 ID；刷新页面可重试。
+					{t("prices.missingResources", {
+						types: resources.missing.map(resourceTypeLabel).join(" / "),
+					})}
 				</Hint>
 			)}
 
 			<Panel
-				title="价格版本"
-				description="含未生效与已停用的版本；状态的唯一来源是 effective_from / effective_to"
+				title={t("prices.panelTitle")}
+				description={t("prices.panelDescription")}
 				bodyClassName="p-0"
 			>
 				{loading ? (
@@ -359,21 +372,21 @@ export default function PricesTab() {
 				) : visible.length === 0 ? (
 					<EmptyState
 						icon={Tag}
-						title="没有匹配的价格版本"
-						hint="价格表为空时每个会话都会被 price_missing 拒掉，上线前记得把真实价格录一遍。"
+						title={t("prices.emptyTitle")}
+						hint={t("prices.emptyHint")}
 					/>
 				) : (
 					<TableShell
 						head={
 							<>
-								<Th>计费项</Th>
-								<Th>适用范围</Th>
-								<Th className="text-right">单价</Th>
-								<Th>舍入</Th>
-								<Th className="text-right">起步价</Th>
-								<Th>生效区间</Th>
-								<Th>状态</Th>
-								<Th className="text-right">操作</Th>
+								<Th>{t("shared.item")}</Th>
+								<Th>{t("prices.columnScope")}</Th>
+								<Th className="text-right">{t("prices.columnUnitPrice")}</Th>
+								<Th>{t("prices.columnRounding")}</Th>
+								<Th className="text-right">{t("prices.columnMinCharge")}</Th>
+								<Th>{t("prices.columnEffectiveRange")}</Th>
+								<Th>{t("common:field.status")}</Th>
+								<Th className="text-right">{t("common:field.actions")}</Th>
 							</>
 						}
 					>
@@ -404,7 +417,9 @@ export default function PricesTab() {
 											</Pill>
 											{price.tiers && price.tiers.length > 0 && (
 												<span className="text-[11px] text-zinc-500">
-													阶梯 {price.tiers.length} 档：
+													{t("prices.tiersSummary", {
+														n: price.tiers.length,
+													})}
 													{price.tiers
 														.map(
 															(tier) =>
@@ -447,7 +462,7 @@ export default function PricesTab() {
 										{" ~ "}
 										{price.effective_to
 											? formatDate(price.effective_to)
-											: "长期"}
+											: t("shared.forever")}
 									</Td>
 									<Td>
 										<Pill
@@ -476,7 +491,7 @@ export default function PricesTab() {
 														className="w-3 h-3"
 														strokeWidth={1.5}
 													/>
-													调价
+													{t("prices.adjust")}
 												</button>
 											)}
 											{effective && (
@@ -489,7 +504,7 @@ export default function PricesTab() {
 														className="w-3 h-3"
 														strokeWidth={1.5}
 													/>
-													停用
+													{t("prices.deactivate")}
 												</button>
 											)}
 											{pending && (
@@ -504,7 +519,7 @@ export default function PricesTab() {
 														className="w-3 h-3"
 														strokeWidth={1.5}
 													/>
-													编辑
+													{t("common:action.edit")}
 												</button>
 											)}
 											{pending && (
@@ -517,12 +532,12 @@ export default function PricesTab() {
 														className="w-3 h-3"
 														strokeWidth={1.5}
 													/>
-													删除
+													{t("common:action.delete")}
 												</button>
 											)}
 											{!effective && !pending && (
 												<span className="text-[11px] text-zinc-600">
-													已停用，仅历史账单引用
+													{t("prices.retiredHint")}
 												</span>
 											)}
 										</div>

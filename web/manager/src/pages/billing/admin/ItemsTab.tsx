@@ -5,11 +5,11 @@
 // （tts:characters 与 tts:audio:seconds），避免同一份用量被计两次（§3.1 / §12）。
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AlertCircle, ListFilter, RefreshCw } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { billingAdminApi, type BillingItem } from "@/lib/api";
 import {
-	BILLING_DISABLED_TITLE,
 	chargeModeLabel,
 	conflictingItemHints,
 	exclusiveHintsFor,
@@ -34,6 +34,7 @@ import {
 } from "../shared";
 
 export default function ItemsTab() {
+	const { t } = useTranslation(["billingAdmin", "common"]);
 	const [items, setItems] = useState<BillingItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [savingCode, setSavingCode] = useState<string | null>(null);
@@ -74,7 +75,7 @@ export default function ItemsTab() {
 				}
 				setBanner({
 					kind: "error",
-					text: billingErrorMessage(err, "加载计费项目录失败"),
+					text: billingErrorMessage(err, t("items.loadFailed")),
 				});
 			})
 			.finally(() => {
@@ -83,7 +84,7 @@ export default function ItemsTab() {
 		return () => {
 			cancelled = true;
 		};
-	}, [reloadKey]);
+	}, [reloadKey, t]);
 
 	const toggle = async (item: BillingItem, enabled: boolean) => {
 		setSavingCode(item.code);
@@ -92,13 +93,16 @@ export default function ItemsTab() {
 			await billingAdminApi.setItem(item.code, enabled);
 			setBanner({
 				kind: "ok",
-				text: `已${enabled ? "启用" : "停用"}「${itemLabel(item.code)}」（${item.code}）`,
+				text: t(enabled ? "items.toggleEnabled" : "items.toggleDisabled", {
+					item: itemLabel(item.code),
+					code: item.code,
+				}),
 			});
 			setReloadKey((key) => key + 1);
 		} catch (err) {
 			setBanner({
 				kind: "error",
-				text: billingErrorMessage(err, "更新计费项失败"),
+				text: billingErrorMessage(err, t("items.updateFailed")),
 			});
 		} finally {
 			setSavingCode(null);
@@ -110,8 +114,8 @@ export default function ItemsTab() {
 			<Panel bodyClassName="p-0">
 				<EmptyState
 					icon={ListFilter}
-					title={BILLING_DISABLED_TITLE}
-					hint="服务端没有开启计费模块（billing.enabled），计费项目录不可用。"
+					title={t("billing:disabledTitle")}
+					hint={t("items.disabledHint")}
 				/>
 			</Panel>
 		);
@@ -127,13 +131,13 @@ export default function ItemsTab() {
 
 			{conflicts.map((conflict) => (
 				<Hint key={conflict.codes.join(":")} icon={AlertCircle}>
-					互斥口径同时启用：{conflict.note}
+					{t("items.conflict", { note: conflict.note })}
 				</Hint>
 			))}
 
 			<Panel
-				title="计费项目录"
-				description="内置项由服务端 seed 同步，管理端只能启停；停用一个计费项后，它的事件仍会入库但不会计费"
+				title={t("items.panelTitle")}
+				description={t("items.panelDescription")}
 				actions={
 					<button
 						onClick={() => setReloadKey((key) => key + 1)}
@@ -144,7 +148,7 @@ export default function ItemsTab() {
 							className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
 							strokeWidth={1.5}
 						/>
-						刷新
+						{t("common:action.refresh")}
 					</button>
 				}
 				bodyClassName="p-0"
@@ -154,20 +158,20 @@ export default function ItemsTab() {
 				) : items.length === 0 ? (
 					<EmptyState
 						icon={ListFilter}
-						title="计费项目录为空"
-						hint="服务端启动时会按 internal/billing 里的 seed 补齐目录，空表通常意味着 seed 没跑。"
+						title={t("items.emptyTitle")}
+						hint={t("items.emptyHint")}
 					/>
 				) : (
 					<TableShell
 						head={
 							<>
-								<Th>计费项</Th>
-								<Th>计量点</Th>
-								<Th>计费模式</Th>
-								<Th>单位</Th>
-								<Th>口径提示</Th>
-								<Th>来源</Th>
-								<Th className="text-right">启用</Th>
+								<Th>{t("shared.item")}</Th>
+								<Th>{t("items.columnMeterSource")}</Th>
+								<Th>{t("items.columnChargeMode")}</Th>
+								<Th>{t("items.columnUnit")}</Th>
+								<Th>{t("items.columnHints")}</Th>
+								<Th>{t("items.columnSource")}</Th>
+								<Th className="text-right">{t("items.columnEnabled")}</Th>
 							</>
 						}
 					>
@@ -216,16 +220,16 @@ export default function ItemsTab() {
 									</Td>
 									<Td>
 										{item.is_system ? (
-											<Pill tone="violet">内置</Pill>
+											<Pill tone="violet">{t("items.builtin")}</Pill>
 										) : (
-											<Pill>自定义</Pill>
+											<Pill>{t("items.custom")}</Pill>
 										)}
 									</Td>
 									<Td>
 										<div className="flex items-center justify-end gap-2">
 											{saving && (
 												<span className="text-[11px] text-zinc-500">
-													保存中
+													{t("items.saving")}
 												</span>
 											)}
 											<Switch
@@ -234,7 +238,9 @@ export default function ItemsTab() {
 												onCheckedChange={(checked: boolean) =>
 													toggle(item, checked)
 												}
-												aria-label={`启用 ${item.code}`}
+												aria-label={t("items.enableAria", {
+													code: item.code,
+												})}
 											/>
 										</div>
 									</Td>

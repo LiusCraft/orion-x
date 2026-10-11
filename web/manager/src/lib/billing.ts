@@ -19,6 +19,7 @@ import type {
 	BillingUnit,
 	BillingUsageStatus,
 } from "@/lib/api";
+import i18n from "@/i18n";
 
 /** 微单位基数：1 元 = 1_000_000 微元（对应 billing.MicroPerUnit）。 */
 export const MICRO_PER_YUAN = 1_000_000;
@@ -127,16 +128,21 @@ export function yuanToMicro(input: string): number | null {
 }
 
 /** 数量级的单位前缀：unit_size = 1_000_000 读作"百万"。 */
-const UNIT_SCALES: Record<number, string> = {
-	[10 ** 2]: "百",
-	[10 ** 3]: "千",
-	[10 ** 4]: "万",
-	[10 ** 5]: "十万",
-	[10 ** 6]: "百万",
-	[10 ** 7]: "千万",
-	[10 ** 8]: "亿",
-	[10 ** 9]: "十亿",
+const UNIT_SCALE_KEYS: Record<number, string> = {
+	[10 ** 2]: "hundred",
+	[10 ** 3]: "thousand",
+	[10 ** 4]: "tenThousand",
+	[10 ** 5]: "hundredThousand",
+	[10 ** 6]: "million",
+	[10 ** 7]: "tenMillion",
+	[10 ** 8]: "hundredMillion",
+	[10 ** 9]: "billion",
 };
+
+function unitScaleLabel(size: number): string {
+	const key = UNIT_SCALE_KEYS[size];
+	return key ? i18n.t(`billing:scale.${key}`) : groupThousands(String(size));
+}
 
 /**
  * 单价的展示：`unit_price_micro` 与 `unit_size` 合读。
@@ -151,10 +157,7 @@ export function formatUnitPrice(
 	unit?: BillingUnit | string,
 ): string {
 	const label = unitLabel(unit ?? itemMeta(price.item_code)?.unit ?? "");
-	const per =
-		price.unit_size <= 1
-			? ""
-			: `${UNIT_SCALES[price.unit_size] ?? groupThousands(String(price.unit_size))} `;
+	const per = price.unit_size <= 1 ? "" : `${unitScaleLabel(price.unit_size)} `;
 	return `${currencySymbol(price.currency)}${microToYuan(price.unit_price_micro)} / ${per}${label}`;
 }
 
@@ -164,16 +167,18 @@ export function formatTierPrice(
 	price: Pick<BillingPrice, "item_code" | "currency" | "unit_size">,
 ): string {
 	const label = unitLabel(itemMeta(price.item_code)?.unit ?? "");
-	const per =
-		price.unit_size <= 1
-			? ""
-			: `${UNIT_SCALES[price.unit_size] ?? groupThousands(String(price.unit_size))} `;
+	const per = price.unit_size <= 1 ? "" : `${unitScaleLabel(price.unit_size)} `;
 	return `${currencySymbol(price.currency)}${microToYuan(tier.unit_price_micro)} / ${per}${label}`;
 }
 
 /** 阶梯的分档说明：`1. 前 5,000,000 个；2. 最后一档，不封顶`。 */
 export function formatTierRange(upTo: number): string {
-	return upTo > 0 ? `账期内累计前 ${groupThousands(String(upTo))}` : "最后一档，不封顶";
+	if (upTo > 0) {
+		return i18n.t("billing:tierRange.cumulative", {
+			amount: groupThousands(String(upTo)),
+		});
+	}
+	return i18n.t("billing:tierRange.last");
 }
 
 /** 可以按万 / 亿压缩的量级单位；次数、账期这类小数量保持原样更好读。 */
@@ -183,9 +188,9 @@ const COMPACT_UNITS = new Set<string>(["token", "char", "byte"]);
 const LATIN_UNITS = new Set<string>(["token", "byte"]);
 
 /**
- * 数量的展示值。token / char 到万、亿级换成可读量级，秒数拆成时分秒，次数只加千分位：
- * `12_300_000 token → "1,230 万 token"`、`90 second → "1 分 30 秒"`、`12840 call → "12,840 次"`。
- * 完整的原始数字用 formatQuantityExact 放在 title 里。
+ * 数量的展示值。中文的 token / char 到万、亿级换量级；英文用 K / M / B：
+ * `12_300_000 token → "1,230 万 token" / "12.3M tokens"`、`90 second → "1 分 30 秒"`、
+ * `12840 call → "12,840 次"`。完整的原始数字用 formatQuantityExact 放在 title 里。
  */
 export function formatQuantity(quantity: number, unit: BillingUnit | string): string {
 	if (!Number.isFinite(quantity)) return "—";
@@ -193,8 +198,18 @@ export function formatQuantity(quantity: number, unit: BillingUnit | string): st
 	if (unit === "second") return formatSeconds(quantity);
 	const abs = Math.abs(quantity);
 	if (COMPACT_UNITS.has(unit)) {
-		if (abs >= 1e8) return joinQuantity(trimDecimal(quantity / 1e8, 2), "亿", label);
-		if (abs >= 1e4) return joinQuantity(trimDecimal(quantity / 1e4, 1), "万", label);
+		if (i18n.language.startsWith("zh")) {
+			if (abs >= 1e8) {
+				return joinQuantity(trimDecimal(quantity / 1e8, 2), i18n.t("billing:quantity.yi"), label);
+			}
+			if (abs >= 1e4) {
+				return joinQuantity(trimDecimal(quantity / 1e4, 1), i18n.t("billing:quantity.wan"), label);
+			}
+		} else {
+			if (abs >= 1e9) return joinQuantity(trimDecimal(quantity / 1e9, 2), "B", label);
+			if (abs >= 1e6) return joinQuantity(trimDecimal(quantity / 1e6, 1), "M", label);
+			if (abs >= 1e3) return joinQuantity(trimDecimal(quantity / 1e3, 1), "K", label);
+		}
 	}
 	return joinQuantity(groupThousands(String(quantity)), "", label);
 }
@@ -207,11 +222,14 @@ export function formatQuantityExact(
 	return joinQuantity(groupThousands(String(quantity)), "", unitLabel(unit));
 }
 
-/** `12,840 次` / `1,230 万 token` / `42.8 万字符`：万 / 亿紧跟数字，拉丁单位再留一个空格。 */
+/** `12,840 calls` / `1,230 万 token`：中文量级后缀紧跟数字，英文量级后缀也不留空格。 */
 function joinQuantity(value: string, suffix: string, label: string): string {
 	if (label === "") return `${value}${suffix}`;
 	if (suffix === "") return `${value} ${label}`;
-	return `${value} ${suffix}${LATIN_UNITS.has(label) ? " " : ""}${label}`;
+	if (i18n.language.startsWith("zh")) {
+		return `${value} ${suffix}${LATIN_UNITS.has(label) ? " " : ""}${label}`;
+	}
+	return `${value}${suffix} ${label}`;
 }
 
 function trimDecimal(value: number, decimals: number): string {
@@ -226,9 +244,17 @@ function formatSeconds(seconds: number): string {
 	const hours = Math.floor(total / 3600);
 	const minutes = Math.floor((total % 3600) / 60);
 	const rest = total % 60;
-	if (hours > 0) return minutes > 0 ? `${hours} 时 ${minutes} 分` : `${hours} 时`;
-	if (minutes > 0) return rest > 0 ? `${minutes} 分 ${rest} 秒` : `${minutes} 分`;
-	return `${rest} 秒`;
+	if (hours > 0) {
+		return minutes > 0
+			? i18n.t("billing:seconds.hoursMinutes", { hours, minutes })
+			: i18n.t("billing:seconds.hours", { hours });
+	}
+	if (minutes > 0) {
+		return rest > 0
+			? i18n.t("billing:seconds.minutesSeconds", { minutes, seconds: rest })
+			: i18n.t("billing:seconds.minutes", { minutes });
+	}
+	return i18n.t("billing:seconds.seconds", { seconds: rest });
 }
 
 /** 占比（0~1）：用于 Top 计费项的占比条，0 分布时返回 0。 */
@@ -240,61 +266,67 @@ export function ratio(numerator: number, denominator: number): number {
 }
 
 // ---------------------------------------------------------------- 口径文案
+//
+// 标签统一走 billing 命名空间；未知取值原样显示（code 是权威标识）。
 
 const UNIT_LABELS: Record<string, string> = {
-	call: "次",
-	second: "秒",
-	token: "token",
-	char: "字符",
-	byte: "字节",
-	period: "账期",
+	call: "unit.call",
+	second: "unit.second",
+	token: "unit.token",
+	char: "unit.char",
+	byte: "unit.byte",
+	period: "unit.period",
 };
 
 export function unitLabel(unit: BillingUnit | string | undefined): string {
 	if (!unit) return "";
-	return UNIT_LABELS[unit] ?? unit;
+	const key = UNIT_LABELS[unit];
+	return key ? i18n.t(`billing:${key}`) : unit;
 }
 
 const CHARGE_MODE_LABELS: Record<string, string> = {
-	count: "按次",
-	duration: "按时长",
-	usage: "按用量",
-	recurring: "按期（包月）",
+	count: "chargeMode.count",
+	duration: "chargeMode.duration",
+	usage: "chargeMode.usage",
+	recurring: "chargeMode.recurring",
 };
 
 export function chargeModeLabel(mode: BillingChargeMode | string): string {
-	return CHARGE_MODE_LABELS[mode] ?? mode;
+	const key = CHARGE_MODE_LABELS[mode];
+	return key ? i18n.t(`billing:${key}`) : mode;
 }
 
 const METER_SOURCE_LABELS: Record<string, string> = {
-	llm: "LLM 调用",
-	tts: "TTS 合成",
-	asr: "ASR 识别",
-	"voice:clone": "音色",
-	session: "会话",
-	mcp: "MCP 工具",
-	kb: "知识库",
+	llm: "meterSource.llm",
+	tts: "meterSource.tts",
+	asr: "meterSource.asr",
+	"voice:clone": "meterSource.voiceClone",
+	session: "meterSource.session",
+	mcp: "meterSource.mcp",
+	kb: "meterSource.kb",
 };
 
 export function meterSourceLabel(source: BillingMeterSource | string): string {
-	return METER_SOURCE_LABELS[source] ?? source;
+	const key = METER_SOURCE_LABELS[source];
+	return key ? i18n.t(`billing:${key}`) : source;
 }
 
 const RESOURCE_TYPE_LABELS: Record<string, string> = {
-	item: "计费项（兜底）",
-	provider: "厂商",
-	model: "模型",
-	voice: "音色",
+	item: "resourceType.item",
+	provider: "resourceType.provider",
+	model: "resourceType.model",
+	voice: "resourceType.voice",
 };
 
 export function resourceTypeLabel(type: BillingResourceType | string): string {
-	return RESOURCE_TYPE_LABELS[type] ?? type;
+	const key = RESOURCE_TYPE_LABELS[type];
+	return key ? i18n.t(`billing:${key}`) : type;
 }
 
 const ROUNDING_LABELS: Record<string, string> = {
-	none: "精确（截断到微元）",
-	ceil: "向上取整",
-	"half:up": "四舍五入",
+	none: "rounding.none",
+	ceil: "rounding.ceil",
+	"half:up": "rounding.halfUp",
 };
 
 export function roundingLabel(rounding: BillingRounding | string): string {
@@ -340,7 +372,11 @@ export function scopeLabel(
 	price: Pick<BillingPrice, "account_id" | "resource_type" | "resource_id">,
 	names?: BillingResourceNames,
 ): string {
-	const parts = [price.account_id ? "账户协议价" : "平台标准价"];
+	const parts = [
+		price.account_id
+			? i18n.t("billing:scope.account")
+			: i18n.t("billing:scope.platform"),
+	];
 	if (price.resource_type !== "item" && price.resource_id) {
 		const name = resourceName(names, price.resource_type, price.resource_id);
 		parts.push(`${resourceTypeLabel(price.resource_type)} ${name || price.resource_id}`);
@@ -353,101 +389,117 @@ export function scopeTitle(
 	price: Pick<BillingPrice, "account_id" | "resource_type" | "resource_id">,
 	names?: BillingResourceNames,
 ): string {
-	const parts = [price.account_id ? `账户协议价 ${price.account_id}` : "平台标准价"];
+	const parts = [
+		price.account_id
+			? `${i18n.t("billing:scope.account")} ${price.account_id}`
+			: i18n.t("billing:scope.platform"),
+	];
 	if (price.resource_type !== "item" && price.resource_id) {
 		const name = resourceName(names, price.resource_type, price.resource_id);
 		parts.push(
-			`${resourceTypeLabel(price.resource_type)} ${name ? `${name}（${price.resource_id}）` : price.resource_id}`,
+			`${resourceTypeLabel(price.resource_type)} ${
+				name
+					? i18n.t("billing:resourceOption.model", {
+							name,
+							id: price.resource_id,
+						})
+					: price.resource_id
+			}`,
 		);
 	}
 	return parts.join(" · ");
 }
 
 const LEDGER_KIND_LABELS: Record<string, string> = {
-	charge: "消费",
-	grant: "赠款",
-	recharge: "充值",
-	refund: "退款",
-	adjust: "人工调整",
-	reserve: "预冻结",
-	release: "解冻",
-	expire: "赠款过期",
+	charge: "ledgerKind.charge",
+	grant: "ledgerKind.grant",
+	recharge: "ledgerKind.recharge",
+	refund: "ledgerKind.refund",
+	adjust: "ledgerKind.adjust",
+	reserve: "ledgerKind.reserve",
+	release: "ledgerKind.release",
+	expire: "ledgerKind.expire",
 };
 
 export function ledgerKindLabel(kind: string): string {
-	return LEDGER_KIND_LABELS[kind] ?? kind;
+	const key = LEDGER_KIND_LABELS[kind];
+	return key ? i18n.t(`billing:${key}`) : kind;
 }
 
 /** 流水的方向：debit 减余额、credit 加余额；reserve/release 只动冻结不动余额。 */
 export function directionLabel(direction: string): string {
 	switch (direction) {
 		case "debit":
-			return "支出";
+			return i18n.t("billing:direction.debit");
 		case "credit":
-			return "入账";
+			return i18n.t("billing:direction.credit");
 		default:
 			return direction;
 	}
 }
 
 const USAGE_STATUS_LABELS: Record<string, string> = {
-	pending: "待结算",
-	charged: "已计费",
-	skipped: "不计费",
-	unpaid: "欠费未扣",
-	rejected: "未入账",
+	pending: "usageStatus.pending",
+	charged: "usageStatus.charged",
+	skipped: "usageStatus.skipped",
+	unpaid: "usageStatus.unpaid",
+	rejected: "usageStatus.rejected",
 };
 
 export function eventStatusLabel(status: BillingUsageStatus | string): string {
-	return USAGE_STATUS_LABELS[status] ?? status;
+	const key = USAGE_STATUS_LABELS[status];
+	return key ? i18n.t(`billing:${key}`) : status;
 }
 
 const ACCOUNT_STATUS_LABELS: Record<string, string> = {
-	active: "正常",
-	suspended: "已暂停",
-	closed: "已关闭",
+	active: "accountStatus.active",
+	suspended: "accountStatus.suspended",
+	closed: "accountStatus.closed",
 };
 
 export function accountStatusLabel(status: BillingAccountStatus | string): string {
-	return ACCOUNT_STATUS_LABELS[status] ?? status;
+	const key = ACCOUNT_STATUS_LABELS[status];
+	return key ? i18n.t(`billing:${key}`) : status;
 }
 
 export function subjectTypeLabel(type: BillingSubjectType | string): string {
 	switch (type) {
 		case "user":
-			return "用户";
+			return i18n.t("billing:subjectType.user");
 		case "org":
-			return "组织";
+			return i18n.t("billing:subjectType.org");
 		default:
 			return type;
 	}
 }
 
 const REF_TYPE_LABELS: Record<string, string> = {
-	"usage:event": "用量事件",
-	reservation: "预冻结",
-	order: "充值订单",
-	manual: "人工",
-	"voice:clone": "音色复刻",
+	"usage:event": "refType.usageEvent",
+	reservation: "refType.reservation",
+	order: "refType.order",
+	manual: "refType.manual",
+	"voice:clone": "refType.voiceClone",
 };
 
 export function refTypeLabel(refType: string): string {
 	if (refType === "") return "—";
-	return REF_TYPE_LABELS[refType] ?? refType;
+	const key = REF_TYPE_LABELS[refType];
+	return key ? i18n.t(`billing:${key}`) : refType;
 }
 
 // ---------------------------------------------------------------- 充值 / 支付订单
 
 const PAYMENT_STATUS_LABELS: Record<string, string> = {
-	"order:pending": "待支付",
-	"order:paid": "支付成功",
-	"order:credited": "已到账",
-	"order:closed": "已关闭",
-	"order:refunded": "已退款",
+	"order:pending": "paymentStatus.pending",
+	"order:paid": "paymentStatus.paid",
+	"order:credited": "paymentStatus.credited",
+	"order:closed": "paymentStatus.closed",
+	"order:refunded": "paymentStatus.refunded",
 };
 
 export function paymentStatusLabel(status: string): string {
-	return PAYMENT_STATUS_LABELS[status] ?? status;
+	const key = PAYMENT_STATUS_LABELS[status];
+	return key ? i18n.t(`billing:${key}`) : status;
 }
 
 export type PaymentTone = "zinc" | "emerald" | "amber" | "red" | "violet";
@@ -468,13 +520,14 @@ export function paymentStatusTone(status: string): PaymentTone {
 }
 
 const PAYMENT_CHANNEL_LABELS: Record<string, string> = {
-	"epay:alipay": "支付宝",
-	"epay:wxpay": "微信支付",
-	"epay:qqpay": "QQ 钱包",
+	"epay:alipay": "paymentChannel.alipay",
+	"epay:wxpay": "paymentChannel.wxpay",
+	"epay:qqpay": "paymentChannel.qqpay",
 };
 
 export function paymentChannelLabel(channel: string): string {
-	return PAYMENT_CHANNEL_LABELS[channel] ?? channel;
+	const key = PAYMENT_CHANNEL_LABELS[channel];
+	return key ? i18n.t(`billing:${key}`) : channel;
 }
 
 /**
@@ -506,10 +559,12 @@ export function paymentExpiryHint(
 	const minutes = Math.floor(rest / 60000);
 	if (minutes >= 60) {
 		const hours = Math.floor(minutes / 60);
-		return `剩 ${hours} 小时 ${minutes % 60} 分`;
+		return i18n.t("billing:expiry.hoursMinutes", { hours, minutes: minutes % 60 });
 	}
-	if (minutes >= 1) return `剩 ${minutes} 分钟`;
-	return `剩 ${Math.max(1, Math.floor(rest / 1000))} 秒`;
+	if (minutes >= 1) return i18n.t("billing:expiry.minutes", { minutes });
+	return i18n.t("billing:expiry.seconds", {
+		seconds: Math.max(1, Math.floor(rest / 1000)),
+	});
 }
 
 /** 充值金额的快捷档位（元）——只是减少输入，不是限额；限额在服务端。 */
@@ -547,9 +602,9 @@ export function priceStateLabel(
 	price: Pick<BillingPrice, "effective_from" | "effective_to">,
 	now = new Date(),
 ): string {
-	if (isPricePending(price, now)) return "未生效";
-	if (isPriceExpired(price, now)) return "已停用";
-	return "生效中";
+	if (isPricePending(price, now)) return i18n.t("billing:priceState.pending");
+	if (isPriceExpired(price, now)) return i18n.t("billing:priceState.expired");
+	return i18n.t("billing:priceState.active");
 }
 
 // ---------------------------------------------------------------- 计费项目录
@@ -559,25 +614,26 @@ export function priceStateLabel(
 // 这里只做兜底。加了新计费项就两边一起补。
 
 export interface BillingItemMeta {
-	name: string;
+	/** billing 命名空间下的展示名 key */
+	labelKey: string;
 	unit: BillingUnit;
 	chargeMode: BillingChargeMode;
 	meterSource: BillingMeterSource;
 }
 
 export const BILLING_ITEM_CATALOG: Record<string, BillingItemMeta> = {
-	"llm:tokens:input": { name: "LLM 输入 token", unit: "token", chargeMode: "usage", meterSource: "llm" },
-	"llm:tokens:output": { name: "LLM 输出 token", unit: "token", chargeMode: "usage", meterSource: "llm" },
-	"llm:tokens:reasoning": { name: "LLM 推理 token", unit: "token", chargeMode: "usage", meterSource: "llm" },
-	"llm:tokens:cache:read": { name: "LLM 缓存命中 token", unit: "token", chargeMode: "usage", meterSource: "llm" },
-	"llm:tokens:cache:write": { name: "LLM 缓存写入 token", unit: "token", chargeMode: "usage", meterSource: "llm" },
-	"tts:characters": { name: "TTS 合成字符", unit: "char", chargeMode: "usage", meterSource: "tts" },
-	"tts:audio:seconds": { name: "TTS 音频时长", unit: "second", chargeMode: "duration", meterSource: "tts" },
-	"asr:audio:seconds": { name: "ASR 识别时长", unit: "second", chargeMode: "duration", meterSource: "asr" },
-	"voice:clone": { name: "音色复刻", unit: "call", chargeMode: "count", meterSource: "voice:clone" },
-	"voice:retention": { name: "音色保留", unit: "period", chargeMode: "recurring", meterSource: "voice:clone" },
-	"mcp:tool:call": { name: "MCP 工具调用", unit: "call", chargeMode: "count", meterSource: "mcp" },
-	"kb:embedding:tokens": { name: "知识库入库 token", unit: "token", chargeMode: "usage", meterSource: "kb" },
+	"llm:tokens:input": { labelKey: "item.llmInput", unit: "token", chargeMode: "usage", meterSource: "llm" },
+	"llm:tokens:output": { labelKey: "item.llmOutput", unit: "token", chargeMode: "usage", meterSource: "llm" },
+	"llm:tokens:reasoning": { labelKey: "item.llmReasoning", unit: "token", chargeMode: "usage", meterSource: "llm" },
+	"llm:tokens:cache:read": { labelKey: "item.llmCacheRead", unit: "token", chargeMode: "usage", meterSource: "llm" },
+	"llm:tokens:cache:write": { labelKey: "item.llmCacheWrite", unit: "token", chargeMode: "usage", meterSource: "llm" },
+	"tts:characters": { labelKey: "item.ttsCharacters", unit: "char", chargeMode: "usage", meterSource: "tts" },
+	"tts:audio:seconds": { labelKey: "item.ttsAudioSeconds", unit: "second", chargeMode: "duration", meterSource: "tts" },
+	"asr:audio:seconds": { labelKey: "item.asrAudioSeconds", unit: "second", chargeMode: "duration", meterSource: "asr" },
+	"voice:clone": { labelKey: "item.voiceClone", unit: "call", chargeMode: "count", meterSource: "voice:clone" },
+	"voice:retention": { labelKey: "item.voiceRetention", unit: "period", chargeMode: "recurring", meterSource: "voice:clone" },
+	"mcp:tool:call": { labelKey: "item.mcpToolCall", unit: "call", chargeMode: "count", meterSource: "mcp" },
+	"kb:embedding:tokens": { labelKey: "item.kbEmbeddingTokens", unit: "token", chargeMode: "usage", meterSource: "kb" },
 };
 
 /** 内置计费项的 code 列表，顺序与 seed 一致。 */
@@ -589,7 +645,8 @@ export function itemMeta(code: string): BillingItemMeta | undefined {
 
 /** 计费项的展示名；不认识的 code 原样显示（code 是权威标识）。 */
 export function itemLabel(code: string): string {
-	return itemMeta(code)?.name ?? code;
+	const key = itemMeta(code)?.labelKey;
+	return key ? i18n.t(`billing:${key}`) : code;
 }
 
 /** 计费项的计量点文案；未知 code 用 code 的第一段兜底。 */
@@ -608,28 +665,34 @@ export interface ExclusiveItemHint {
 	note: string;
 }
 
-export const EXCLUSIVE_ITEM_HINTS: ExclusiveItemHint[] = [
+const EXCLUSIVE_ITEM_HINT_DEFS: { codes: string[]; noteKey: string }[] = [
 	{
 		codes: ["tts:characters", "tts:audio:seconds"],
-		note: "TTS 的两种口径互斥：按字符与按音频时长只能启用一组，否则同一份合成长度会被计两次。",
+		noteKey: "billing:exclusive.tts",
 	},
 	{
 		codes: ["asr:audio:seconds"],
-		note: "ASR 按厂商返回的时长计费；启用它就不要再启用按通话时长打包计价的口径。",
+		noteKey: "billing:exclusive.asr",
 	},
 ];
 
+function exclusiveHint(noteKey: string, codes: string[]): ExclusiveItemHint {
+	return { codes, note: i18n.t(noteKey) };
+}
+
 /** 某个计费项参与的互斥口径提示。 */
 export function exclusiveHintsFor(code: string): ExclusiveItemHint[] {
-	return EXCLUSIVE_ITEM_HINTS.filter((hint) => hint.codes.includes(code));
+	return EXCLUSIVE_ITEM_HINT_DEFS.filter((hint) => hint.codes.includes(code)).map(
+		(hint) => exclusiveHint(hint.noteKey, hint.codes),
+	);
 }
 
 /** 已经同时启用的互斥项（≥2 个 code 同时 enabled），用来在管理端报警。 */
 export function conflictingItemHints(enabledCodes: string[]): ExclusiveItemHint[] {
 	const enabled = new Set(enabledCodes);
-	return EXCLUSIVE_ITEM_HINTS.filter(
+	return EXCLUSIVE_ITEM_HINT_DEFS.filter(
 		(hint) => hint.codes.filter((code) => enabled.has(code)).length >= 2,
-	);
+	).map((hint) => exclusiveHint(hint.noteKey, hint.codes));
 }
 
 // ---------------------------------------------------------------- 时间
@@ -715,11 +778,16 @@ export function endOfLocalDay(value: Date | string): Date | null {
 /** 账期预设：自然月，按浏览器本地时区切边界。 */
 export type PeriodPreset = "current" | "last" | "last3";
 
-export const PERIOD_PRESETS: { value: PeriodPreset; label: string }[] = [
-	{ value: "current", label: "本月" },
-	{ value: "last", label: "上月" },
-	{ value: "last3", label: "最近 3 月" },
+export const PERIOD_PRESETS: { value: PeriodPreset; labelKey: string }[] = [
+	{ value: "current", labelKey: "billing:periods.current" },
+	{ value: "last", labelKey: "billing:periods.last" },
+	{ value: "last3", labelKey: "billing:periods.last3" },
 ];
+
+function periodPresetLabel(preset: PeriodPreset): string {
+	const key = PERIOD_PRESETS.find((item) => item.value === preset)?.labelKey;
+	return key ? i18n.t(key) : preset;
+}
 
 export interface PeriodRange {
 	preset: PeriodPreset;
@@ -757,7 +825,7 @@ export function periodRange(preset: PeriodPreset, now = new Date()): PeriodRange
 			from = monthStart(now, 0);
 			to = now;
 	}
-	const label = PERIOD_PRESETS.find((item) => item.value === preset)?.label ?? preset;
+	const label = periodPresetLabel(preset);
 	return {
 		preset,
 		label,
@@ -819,5 +887,3 @@ export function billingErrorMessage(err: unknown, fallback: string): string {
 	if (err instanceof Error && err.message) return err.message;
 	return fallback;
 }
-
-export const BILLING_DISABLED_TITLE = "计费未启用";

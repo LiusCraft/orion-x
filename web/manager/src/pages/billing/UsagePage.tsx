@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
 	Activity,
@@ -22,7 +23,6 @@ import { billingApi, type BillingSummary, type BillingUsageEvent } from "@/lib/a
 import { useDocumentTitle } from "@/lib/title";
 import {
 	accountStatusLabel,
-	BILLING_DISABLED_TITLE,
 	BILLING_ITEM_CODES,
 	billingErrorMessage,
 	eventStatusLabel,
@@ -70,7 +70,8 @@ const ACCOUNT_STATUS_TONES: Record<string, "emerald" | "red" | "zinc"> = {
 };
 
 export default function UsagePage() {
-	useDocumentTitle("用量与余额");
+	const { t, i18n } = useTranslation(["billingPages", "common"]);
+	useDocumentTitle(t("usage.title"));
 
 	const [preset, setPreset] = useState<PeriodPreset>("current");
 	const [summary, setSummary] = useState<BillingSummary | null>(null);
@@ -85,7 +86,7 @@ export default function UsagePage() {
 	const [rechargeAvailable, setRechargeAvailable] = useState(false);
 	const [reloadKey, setReloadKey] = useState(0);
 
-	const range = useMemo(() => periodRange(preset), [preset]);
+	const range = useMemo(() => periodRange(preset), [preset, i18n.language]);
 
 	// 充值入口只在服务端接了支付渠道时才给：没接的话点进去只有一句「暂不支持在线充值」，
 	// 与其给个死胡同，不如不给这个按钮。判据是 recharge/config 返回 503（和计费未启用
@@ -122,7 +123,7 @@ export default function UsagePage() {
 					setDisabled(true);
 					return;
 				}
-				setError(billingErrorMessage(err, "加载账户概览失败"));
+				setError(billingErrorMessage(err, t("usage.loadSummaryFailed")));
 			})
 			.finally(() => {
 				if (!cancelled) setSummaryLoading(false);
@@ -155,7 +156,7 @@ export default function UsagePage() {
 					setDisabled(true);
 					return;
 				}
-				setError(billingErrorMessage(err, "加载用量明细失败"));
+				setError(billingErrorMessage(err, t("usage.loadUsageFailed")));
 			})
 			.finally(() => {
 				if (!cancelled) setListLoading(false);
@@ -185,8 +186,8 @@ export default function UsagePage() {
 					<div className="bg-zinc-900 border border-zinc-800 rounded-xl">
 						<EmptyState
 							icon={Coins}
-							title={BILLING_DISABLED_TITLE}
-							hint="服务端没有开启计费模块（billing.enabled），余额、用量与价格都不可用。"
+							title={t("billing:disabledTitle")}
+							hint={t("usage.disabledHint")}
 						/>
 					</div>
 				</div>
@@ -217,14 +218,14 @@ export default function UsagePage() {
 
 				{summaryLoading && !summary ? (
 					<div className="bg-zinc-900 border border-zinc-800 rounded-xl">
-						<LoadingBlock label="加载账户概览..." />
+						<LoadingBlock label={t("usage.loadingSummary")} />
 					</div>
 				) : !account ? (
 					<div className="bg-zinc-900 border border-zinc-800 rounded-xl">
 						<EmptyState
 							icon={CircleDollarSign}
-							title="还没有计费账户"
-							hint="第一次产生用量时会自动开通账户（含注册赠款），这里会显示余额与本账期消耗。也可以先充值，到账后账户自动开通。"
+							title={t("usage.noAccountTitle")}
+							hint={t("usage.noAccountHint")}
 							action={rechargeAvailable ? <RechargeButton /> : undefined}
 						/>
 					</div>
@@ -234,7 +235,9 @@ export default function UsagePage() {
 						<div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 							<div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
 								<div className="flex items-center justify-between mb-3">
-									<p className="text-xs text-zinc-500">可用余额</p>
+									<p className="text-xs text-zinc-500">
+										{t("usage.availableBalance")}
+									</p>
 									<div className="w-8 h-8 rounded-lg bg-amber-400/10 flex items-center justify-center">
 										<Coins
 											className="w-4 h-4 text-amber-400"
@@ -255,22 +258,37 @@ export default function UsagePage() {
 								<p className="text-[11px] text-zinc-600 mt-0.5">
 									{balance < 0 ? (
 										<span className="text-red-400/90">
-											余额为负，已欠费
+											{t("usage.negativeBalance")}
 											{account.credit_limit_micro > 0
-												? `（信用额度 ${formatMicro(account.credit_limit_micro, currency)}）`
-												: "（纯预付费账户）"}
+												? t(
+														"usage.creditLimitParenthetical",
+														{
+															amount: formatMicro(
+																account.credit_limit_micro,
+																currency,
+															),
+														},
+													)
+												: t("usage.prepaidParenthetical")}
 										</span>
 									) : account.credit_limit_micro > 0 ? (
-										`信用额度 ${formatMicro(account.credit_limit_micro, currency)}`
+										t("usage.creditLimit", {
+											amount: formatMicro(
+												account.credit_limit_micro,
+												currency,
+											),
+										})
 									) : (
-										"纯预付费账户"
+										t("usage.prepaidAccount")
 									)}
 								</p>
 							</div>
 
 							<div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
 								<div className="flex items-center justify-between mb-3">
-									<p className="text-xs text-zinc-500">预冻结</p>
+									<p className="text-xs text-zinc-500">
+										{t("usage.frozen")}
+									</p>
 									<div className="w-8 h-8 rounded-lg bg-sky-400/10 flex items-center justify-center">
 										<Lock
 											className="w-4 h-4 text-sky-400"
@@ -282,14 +300,16 @@ export default function UsagePage() {
 									{formatMicro(summary?.frozen_micro ?? 0, currency)}
 								</p>
 								<p className="text-[11px] text-zinc-600 mt-0.5">
-									会话预授权占用，会话结束结算后释放
+									{t("usage.frozenHint")}
 								</p>
 							</div>
 
 							<div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
 								<div className="flex items-center justify-between mb-3">
 									<p className="text-xs text-zinc-500">
-										{range.label}消耗
+										{t("usage.periodConsumption", {
+											period: range.label,
+										})}
 									</p>
 									<div className="w-8 h-8 rounded-lg bg-violet-400/10 flex items-center justify-center">
 										<Activity
@@ -311,7 +331,9 @@ export default function UsagePage() {
 
 							<div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
 								<div className="flex items-center justify-between mb-3">
-									<p className="text-xs text-zinc-500">账户状态</p>
+									<p className="text-xs text-zinc-500">
+										{t("usage.accountStatus")}
+									</p>
 									<div className="w-8 h-8 rounded-lg bg-emerald-400/10 flex items-center justify-center">
 										<BarChart3
 											className="w-4 h-4 text-emerald-400"
@@ -343,12 +365,12 @@ export default function UsagePage() {
 
 						{/* Top 计费项 */}
 						<Panel
-							title={`${range.label} Top 计费项`}
-							description="按金额降序，占比以本列表合计为分母"
+							title={t("usage.topItemsTitle", { period: range.label })}
+							description={t("usage.topItemsHint")}
 						>
 							{topItems.length === 0 ? (
 								<p className="text-xs text-zinc-600 py-2">
-									这段时间还没有已计费的用量。
+									{t("usage.noChargedUsage")}
 								</p>
 							) : (
 								<div className="space-y-3">
@@ -406,7 +428,7 @@ export default function UsagePage() {
 									})}
 									<div className="flex items-center justify-between pt-2 border-t border-zinc-800">
 										<span className="text-xs text-zinc-500">
-											合计
+											{t("usage.total")}
 										</span>
 										<span className="text-sm text-amber-300 font-mono">
 											{formatMicro(topTotal, currency)}
@@ -420,8 +442,8 @@ export default function UsagePage() {
 
 				{/* 用量明细 */}
 				<Panel
-					title="用量明细"
-					description="每条记录是一个计量点上报的事实；金额按事件发生时刻的价格结算"
+					title={t("usage.detailsTitle")}
+					description={t("usage.detailsHint")}
 					actions={
 						<>
 							<SimpleSelect
@@ -432,7 +454,7 @@ export default function UsagePage() {
 								}}
 								className="w-56"
 								size="sm"
-								placeholder="全部计费项"
+								placeholder={t("usage.allItems")}
 								options={BILLING_ITEM_CODES.map((code) => ({
 									value: code,
 									label: itemLabel(code),
@@ -447,7 +469,7 @@ export default function UsagePage() {
 									className={`w-3.5 h-3.5 ${listLoading ? "animate-spin" : ""}`}
 									strokeWidth={1.5}
 								/>
-								刷新
+								{t("common:action.refresh")}
 							</button>
 						</>
 					}
@@ -460,21 +482,27 @@ export default function UsagePage() {
 							icon={Coins}
 							title={
 								itemCode
-									? `本期没有「${itemLabel(itemCode)}」的用量`
-									: "本期暂无用量"
+									? t("usage.emptyWithItem", {
+											item: itemLabel(itemCode),
+										})
+									: t("usage.empty")
 							}
-							hint="换个账期或清掉计费项筛选再看看；用量事件在 turn 边界上报，结算有几秒延迟。"
+							hint={t("usage.emptyHint")}
 						/>
 					) : (
 						<TableShell
 							head={
 								<>
-									<Th>时间</Th>
-									<Th>计费项</Th>
-									<Th className="text-right">数量</Th>
-									<Th>状态</Th>
-									<Th className="text-right">金额</Th>
-									<Th>会话</Th>
+									<Th>{t("usage.column.time")}</Th>
+									<Th>{t("usage.column.item")}</Th>
+									<Th className="text-right">
+										{t("usage.column.quantity")}
+									</Th>
+									<Th>{t("usage.column.status")}</Th>
+									<Th className="text-right">
+										{t("usage.column.amount")}
+									</Th>
+									<Th>{t("usage.column.session")}</Th>
 								</>
 							}
 						>
@@ -518,7 +546,7 @@ export default function UsagePage() {
 												</Pill>
 												{event.byok && (
 													<Pill tone="sky">
-														自带 key，不计费
+														{t("usage.byok")}
 													</Pill>
 												)}
 											</div>
@@ -546,7 +574,9 @@ export default function UsagePage() {
 														{event.session_id}
 													</span>
 													<span className="text-[11px] text-zinc-600">
-														第 {event.turn_index} 轮
+														{t("usage.turnIndex", {
+															index: event.turn_index,
+														})}
 													</span>
 												</div>
 											) : (
@@ -579,6 +609,7 @@ export default function UsagePage() {
  * 跳 `/billing/recharge` 的按钮，付钱的事全在那边（这里不做任何下单）。
  */
 function RechargeButton({ className }: { className?: string }) {
+	const { t } = useTranslation(["billingPages", "common"]);
 	const navigate = useNavigate();
 	return (
 		<button
@@ -589,7 +620,7 @@ function RechargeButton({ className }: { className?: string }) {
 			)}
 		>
 			<Plus className="w-3.5 h-3.5" strokeWidth={2} />
-			充值
+			{t("usage.rechargeAction")}
 		</button>
 	);
 }
@@ -607,13 +638,16 @@ function UsageHeader({
 	onReload: () => void;
 	reloading: boolean;
 }) {
+	const { t } = useTranslation(["billingPages", "common"]);
 	return (
 		<div className="border-b border-zinc-800/80 px-8 py-5">
 			<div className="flex items-center justify-between gap-4">
 				<div>
-					<h1 className="text-lg font-semibold text-white">用量与余额</h1>
+					<h1 className="text-lg font-semibold text-white">
+						{t("usage.title")}
+					</h1>
 					<p className="text-sm text-zinc-500 mt-0.5">
-						账户余额、账期消耗与用量明细 · {rangeHint}
+						{t("usage.subtitle", { range: rangeHint })}
 					</p>
 				</div>
 				<div className="flex items-center gap-2">
@@ -628,7 +662,7 @@ function UsageHeader({
 										: "text-zinc-500 hover:text-zinc-300"
 								}`}
 							>
-								{option.label}
+								{t(option.labelKey)}
 							</button>
 						))}
 					</div>
@@ -641,7 +675,7 @@ function UsageHeader({
 							className={`w-3.5 h-3.5 ${reloading ? "animate-spin" : ""}`}
 							strokeWidth={1.5}
 						/>
-						刷新
+						{t("common:action.refresh")}
 					</button>
 				</div>
 			</div>

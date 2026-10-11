@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import {
   Wand2,
@@ -31,12 +32,7 @@ import { useDocumentTitle } from "@/lib/title";
 
 type CloneStatus = "idle" | "uploading" | "cloning" | "done";
 
-const TIPS = [
-  "录制环境应安静，无回声和背景音",
-  "说话应自然清晰，语速适中",
-  "音频时长建议 30 秒至 3 分钟",
-  "支持 WAV、MP3、M4A、FLAC 格式，最大 20MB",
-];
+const TIP_KEYS = ["tips.quiet", "tips.natural", "tips.duration", "tips.format"];
 
 const ALLOWED_EXTS = [".wav", ".mp3", ".m4a", ".flac"];
 const MAX_SAMPLE_SIZE = 20 * 1024 * 1024;
@@ -55,7 +51,9 @@ function formatSize(bytes: number): string {
 }
 
 export default function VoiceClonePage() {
-  useDocumentTitle("语音复刻");
+  const { t } = useTranslation(["voice", "common"]);
+
+  useDocumentTitle(t("clone.title"));
 
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -112,7 +110,7 @@ export default function VoiceClonePage() {
       setAsset(data);
       setStep(2);
     } catch (err) {
-      setError(errorMessage(err, "参考音频上传失败，请重试"));
+      setError(errorMessage(err, t("clone.uploadFailed")));
     } finally {
       setStatus("idle");
     }
@@ -122,11 +120,11 @@ export default function VoiceClonePage() {
     if (!picked) return;
     const lower = picked.name.toLowerCase();
     if (!ALLOWED_EXTS.some((ext) => lower.endsWith(ext))) {
-      setError(`仅支持 ${ALLOWED_EXTS.join(" / ")} 格式的音频`);
+      setError(t("clone.invalidFormat", { ext: ALLOWED_EXTS.join(" / ") }));
       return;
     }
     if (picked.size > MAX_SAMPLE_SIZE) {
-      setError("参考音频不能超过 20MB");
+      setError(t("clone.fileTooLarge"));
       return;
     }
     setFile(picked);
@@ -150,7 +148,7 @@ export default function VoiceClonePage() {
       setStatus("done");
     } catch (err) {
       setStatus("idle");
-      setError(errorMessage(err, "复刻失败，请重试"));
+      setError(errorMessage(err, t("clone.cloneFailed")));
       setStep(2);
     }
   };
@@ -182,9 +180,11 @@ export default function VoiceClonePage() {
     <div className="min-h-full">
       <div className="border-b border-zinc-800/80 px-8 py-5">
         <div>
-          <h1 className="text-lg font-semibold text-white">语音复刻</h1>
+          <h1 className="text-lg font-semibold text-white">
+            {t("clone.title")}
+          </h1>
           <p className="text-sm text-zinc-500 mt-0.5">
-            上传参考音频，克隆专属音色
+            {t("clone.subtitle")}
           </p>
         </div>
       </div>
@@ -192,12 +192,12 @@ export default function VoiceClonePage() {
       <div className="px-8 py-8 max-w-2xl">
         {/* Steps */}
         <div className="flex items-center gap-2 mb-8">
-          {["上传音频", "填写信息", "开始复刻"].map((label, i) => {
+          {["steps.upload", "steps.info", "steps.clone"].map((stepKey, i) => {
             const idx = i + 1;
             const isDone = step > idx;
             const isActive = step === idx;
             return (
-              <div key={label} className="flex items-center gap-2">
+              <div key={stepKey} className="flex items-center gap-2">
                 <div
                   className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-all ${
                     isDone
@@ -212,7 +212,7 @@ export default function VoiceClonePage() {
                 <span
                   className={`text-xs ${isActive ? "text-white font-medium" : isDone ? "text-emerald-400" : "text-zinc-600"}`}
                 >
-                  {label}
+                  {t(stepKey)}
                 </span>
                 {i < 2 && <div className="w-12 h-px bg-zinc-800 mx-1" />}
               </div>
@@ -264,7 +264,7 @@ export default function VoiceClonePage() {
                     <Loader2 className="w-7 h-7 text-violet-400 animate-spin" />
                   </div>
                   <p className="text-sm text-zinc-300 font-medium mb-1">
-                    正在上传 {file?.name}
+                    {t("clone.uploading", { name: file?.name })}
                   </p>
                   <div className="w-56 mx-auto mt-4">
                     <div className="w-full bg-zinc-800 rounded-full h-1.5 mb-2">
@@ -282,12 +282,14 @@ export default function VoiceClonePage() {
                     <Mic className="w-7 h-7 text-zinc-500" strokeWidth={1.5} />
                   </div>
                   <p className="text-sm text-zinc-300 font-medium mb-1">
-                    拖拽音频文件到此处
+                    {t("clone.dropHint")}
                   </p>
-                  <p className="text-xs text-zinc-500 mb-4">或点击选择文件</p>
+                  <p className="text-xs text-zinc-500 mb-4">
+                    {t("clone.clickHint")}
+                  </p>
                   <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-xs text-zinc-400">
                     <Upload className="w-3.5 h-3.5" />
-                    选择音频文件
+                    {t("clone.chooseFile")}
                   </div>
                 </>
               )}
@@ -301,30 +303,30 @@ export default function VoiceClonePage() {
                 <div className="min-w-0">
                   <p className="text-sm text-white truncate">{asset.name}</p>
                   <p className="text-xs text-zinc-500">
-                    {formatSize(asset.size)} · 已上传
+                    {formatSize(asset.size)} · {t("clone.uploaded")}
                   </p>
                 </div>
                 <button
                   onClick={() => setStep(2)}
                   className="ml-auto text-xs text-violet-400 hover:text-violet-300 cursor-pointer transition-colors"
                 >
-                  下一步 →
+                  {t("clone.nextStep")} →
                 </button>
               </div>
             )}
 
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
               <p className="text-xs font-semibold text-zinc-400 mb-3">
-                录制建议
+                {t("clone.recordingTips")}
               </p>
               <ul className="space-y-2">
-                {TIPS.map((tip) => (
+                {TIP_KEYS.map((tipKey) => (
                   <li
-                    key={tip}
+                    key={tipKey}
                     className="flex items-start gap-2 text-xs text-zinc-500"
                   >
                     <span className="w-1 h-1 rounded-full bg-violet-500 mt-1.5 shrink-0" />
-                    {tip}
+                    {t(tipKey)}
                   </li>
                 ))}
               </ul>
@@ -343,47 +345,46 @@ export default function VoiceClonePage() {
                 <p className="text-sm text-white truncate">
                   {asset?.name ?? file?.name}
                 </p>
-                <p className="text-xs text-zinc-500">已上传，准备就绪</p>
+                <p className="text-xs text-zinc-500">{t("clone.ready")}</p>
               </div>
               <button
                 onClick={() => setStep(1)}
                 className="ml-auto text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer transition-colors"
               >
-                重新上传
+                {t("clone.reupload")}
               </button>
             </div>
 
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                音色名称 <span className="text-red-400">*</span>
+                {t("clone.voiceName")} <span className="text-red-400">*</span>
               </Label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="给你的音色取个名字"
+                placeholder={t("clone.voiceNamePlaceholder")}
                 autoFocus
               />
             </div>
 
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                描述（可选）
+                {t("clone.descriptionOptional")}
               </Label>
               <Input
                 value={desc}
                 onChange={(e) => setDesc(e.target.value)}
-                placeholder="例：温柔女声，适合客服场景"
+                placeholder={t("clone.descPlaceholder")}
               />
             </div>
 
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                复刻模型 <span className="text-red-400">*</span>
+                {t("clone.cloneModel")} <span className="text-red-400">*</span>
               </Label>
               {models.length === 0 ? (
                 <p className="text-xs text-amber-400/90">
-                  没有可用的复刻模型：请在「模型与供应商」中添加支持 voice_clone
-                  的 TTS 模型，并配置供应商 API Key。
+                  {t("clone.noCloneModel")}
                 </p>
               ) : (
                 <Select
@@ -400,12 +401,14 @@ export default function VoiceClonePage() {
                           </span>
                           {!selectedModel.configured && (
                             <span className="text-amber-400 ml-2 text-xs">
-                              未配置 API Key
+                              {t("clone.apiKeyMissing")}
                             </span>
                           )}
                         </>
                       ) : (
-                        <span className="text-zinc-500">选择复刻模型</span>
+                        <span className="text-zinc-500">
+                          {t("clone.selectCloneModel")}
+                        </span>
                       )}
                     </span>
                   </SelectTrigger>
@@ -419,7 +422,7 @@ export default function VoiceClonePage() {
                         <span>{m.name}</span>
                         <span className="text-zinc-500 ml-2 text-xs">
                           {m.provider_name}
-                          {!m.configured && " · 未配置 API Key"}
+                          {!m.configured && ` · ${t("clone.apiKeyMissing")}`}
                         </span>
                       </SelectItem>
                     ))}
@@ -431,7 +434,7 @@ export default function VoiceClonePage() {
             {languages.length > 0 && (
               <div className="space-y-1.5">
                 <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                  语言（可选）
+                  {t("clone.languageOptional")}
                 </Label>
                 <div className="flex flex-wrap gap-2">
                   {languages.map((l) => {
@@ -453,7 +456,7 @@ export default function VoiceClonePage() {
                   })}
                 </div>
                 <p className="text-[11px] text-zinc-600">
-                  用于提示厂商参考音频的语言，可多选
+                  {t("clone.languageHint")}
                 </p>
               </div>
             )}
@@ -464,7 +467,7 @@ export default function VoiceClonePage() {
                 onClick={() => setStep(1)}
                 className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
               >
-                上一步
+                {t("clone.prevStep")}
               </Button>
               <Button
                 onClick={startClone}
@@ -472,7 +475,7 @@ export default function VoiceClonePage() {
                 className="flex-1 bg-violet-600 hover:bg-violet-500 text-white gap-1.5 shadow-md shadow-violet-600/20"
               >
                 <Wand2 className="w-4 h-4" />
-                开始复刻
+                {t("clone.steps.clone")}
               </Button>
             </div>
           </div>
@@ -486,9 +489,11 @@ export default function VoiceClonePage() {
                 <div className="w-16 h-16 rounded-2xl bg-violet-600/10 flex items-center justify-center mx-auto mb-5">
                   <Loader2 className="w-8 h-8 text-violet-400 animate-spin" />
                 </div>
-                <p className="text-white font-medium mb-1">正在复刻中...</p>
+                <p className="text-white font-medium mb-1">
+                  {t("clone.cloning")}
+                </p>
                 <p className="text-xs text-zinc-500">
-                  正在向厂商提交参考音频并创建音色，请稍候
+                  {t("clone.cloningHint")}
                 </p>
               </>
             )}
@@ -497,9 +502,11 @@ export default function VoiceClonePage() {
                 <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto mb-5">
                   <CheckCircle2 className="w-8 h-8 text-emerald-400" />
                 </div>
-                <p className="text-white font-medium mb-1">复刻成功！</p>
+                <p className="text-white font-medium mb-1">
+                  {t("clone.cloneSuccess")}
+                </p>
                 <p className="text-xs text-zinc-500 mb-6">
-                  音色「{createdName}」已创建，可在已有音色中找到并绑定到智能体
+                  {t("clone.cloneSuccessHint", { name: createdName })}
                 </p>
                 <div className="flex gap-3 justify-center">
                   <Button
@@ -508,13 +515,13 @@ export default function VoiceClonePage() {
                     className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white gap-1.5"
                   >
                     <RefreshCw className="w-4 h-4" />
-                    再复刻一个
+                    {t("clone.cloneAgain")}
                   </Button>
                   <Button
                     onClick={() => navigate("/voice")}
                     className="bg-violet-600 hover:bg-violet-500 text-white"
                   >
-                    查看已有音色
+                    {t("clone.viewVoices")}
                   </Button>
                 </div>
               </>

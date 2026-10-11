@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   voicebotApi,
   modelApi,
@@ -78,14 +79,15 @@ function parseConfig(configJson: string): ParsedConfig {
   }
 }
 
-const MEMORY_LABEL: Record<string, string> = {
-  none: "无记忆",
-  session: "会话记忆",
-  long_term: "长期记忆",
+const MEMORY_LABEL_KEY: Record<string, string> = {
+  none: "memory.none",
+  session: "memory.session",
+  long_term: "memory.longTerm",
 };
 
 export default function AgentListPage() {
-  useDocumentTitle("我的智能体");
+  const { t, i18n } = useTranslation(["agentsList", "common"]);
+  useDocumentTitle(t("list.title"));
 
   const [bots, setBots] = useState<Voicebot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,6 +108,11 @@ export default function AgentListPage() {
   const toggleView = (mode: "grid" | "list") => {
     setViewMode(mode);
     localStorage.setItem("agentViewMode", mode);
+  };
+
+  const memoryLabel = (mode: string) => {
+    const key = MEMORY_LABEL_KEY[mode];
+    return key ? t(key) : mode;
   };
 
   const filtered = bots.filter(
@@ -178,9 +185,9 @@ export default function AgentListPage() {
       <div className="border-b border-zinc-800/80 px-8 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">我的智能体</h1>
+            <h1 className="text-lg font-semibold text-white">{t("list.title")}</h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              管理你的语音机器人，配置模型与语音
+              {t("list.subtitle")}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -200,7 +207,7 @@ export default function AgentListPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索智能体..."
+              placeholder={t("list.searchPlaceholder")}
               className="w-48"
             />
             <Button
@@ -208,7 +215,7 @@ export default function AgentListPage() {
               className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20"
             >
               <Plus className="w-4 h-4" />
-              新建智能体
+              {t("list.create")}
             </Button>
           </div>
         </div>
@@ -218,23 +225,23 @@ export default function AgentListPage() {
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-20 text-zinc-500 text-sm">
             <div className="w-4 h-4 border-2 border-zinc-700 border-t-violet-500 rounded-full animate-spin" />
-            加载中...
+            {t("common:state.loading")}
           </div>
         ) : bots.length === 0 ? (
           <div className="flex flex-col items-center py-20">
             <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
               <Bot className="w-6 h-6 text-zinc-600" />
             </div>
-            <p className="text-zinc-400 text-sm">还没有智能体</p>
+            <p className="text-zinc-400 text-sm">{t("list.emptyTitle")}</p>
             <p className="text-zinc-600 text-xs mt-1 mb-4">
-              创建第一个，配置 LLM / ASR / TTS 后绑定设备
+              {t("list.emptyHint")}
             </p>
             <Button
               onClick={() => setCreateOpen(true)}
               className="bg-violet-600 hover:bg-violet-500 text-white h-8 px-4 text-xs gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
-              新建智能体
+              {t("list.create")}
             </Button>
           </div>
         ) : filtered.length === 0 ? (
@@ -242,8 +249,8 @@ export default function AgentListPage() {
             <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
               <Bot className="w-6 h-6 text-zinc-600" />
             </div>
-            <p className="text-zinc-400 text-sm">没有匹配的智能体</p>
-            <p className="text-zinc-600 text-xs mt-1">试试其他关键词</p>
+            <p className="text-zinc-400 text-sm">{t("list.noMatchTitle")}</p>
+            <p className="text-zinc-600 text-xs mt-1">{t("list.noMatchHint")}</p>
           </div>
         ) : viewMode === "grid" ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -279,7 +286,7 @@ export default function AgentListPage() {
                         setDeleteTarget(bot);
                       }}
                       className="text-zinc-600 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-400/10 opacity-0 group-hover:opacity-100"
-                      title="删除"
+                      title={t("common:action.delete")}
                     >
                       <Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
                     </button>
@@ -293,7 +300,7 @@ export default function AgentListPage() {
                           className="w-3 h-3 text-zinc-600"
                           strokeWidth={1.5}
                         />
-                        <p className="text-[10px] text-zinc-600">聊天模型</p>
+                        <p className="text-[10px] text-zinc-600">{t("list.chatModel")}</p>
                       </div>
                       <p className="text-[11px] text-zinc-300 font-mono truncate">
                         {modelMap[cfg.llmModel] || cfg.llmModel}
@@ -305,7 +312,7 @@ export default function AgentListPage() {
                           className="w-3 h-3 text-zinc-600"
                           strokeWidth={1.5}
                         />
-                        <p className="text-[10px] text-zinc-600">音色</p>
+                        <p className="text-[10px] text-zinc-600">{t("list.voice")}</p>
                       </div>
                       <p className="text-[11px] text-zinc-300 font-mono truncate">
                         {voiceMap[cfg.ttsVoice] || cfg.ttsVoice}
@@ -317,7 +324,7 @@ export default function AgentListPage() {
                           className="w-3 h-3 text-zinc-600"
                           strokeWidth={1.5}
                         />
-                        <p className="text-[10px] text-zinc-600">语音识别</p>
+                        <p className="text-[10px] text-zinc-600">{t("list.asr")}</p>
                       </div>
                       <p className="text-[11px] text-zinc-300 font-mono truncate">
                         {modelMap[cfg.asrModel] || cfg.asrModel}
@@ -329,10 +336,10 @@ export default function AgentListPage() {
                           className="w-3 h-3 text-zinc-600"
                           strokeWidth={1.5}
                         />
-                        <p className="text-[10px] text-zinc-600">记忆</p>
+                        <p className="text-[10px] text-zinc-600">{t("list.memory")}</p>
                       </div>
                       <p className="text-[11px] text-zinc-300 truncate">
-                        {MEMORY_LABEL[cfg.memoryMode] ?? cfg.memoryMode}
+                        {memoryLabel(cfg.memoryMode)}
                       </p>
                     </div>
                   </div>
@@ -358,7 +365,7 @@ export default function AgentListPage() {
                       )}
                     </div>
                     <p className="text-[11px] text-zinc-600 font-mono">
-                      {new Date(bot.updated_at).toLocaleString("zh-CN", {
+                      {new Date(bot.updated_at).toLocaleString(i18n.language, {
                         hour12: false,
                       })}
                     </p>
@@ -372,13 +379,13 @@ export default function AgentListPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-zinc-800 text-left text-[11px] text-zinc-500 uppercase tracking-wide">
-                  <th className="px-4 py-3 font-medium">名称</th>
-                  <th className="px-4 py-3 font-medium">聊天模型</th>
-                  <th className="px-4 py-3 font-medium">音色</th>
-                  <th className="px-4 py-3 font-medium">语音识别</th>
-                  <th className="px-4 py-3 font-medium">语言</th>
-                  <th className="px-4 py-3 font-medium">记忆</th>
-                  <th className="px-4 py-3 font-medium">更新时间</th>
+                  <th className="px-4 py-3 font-medium">{t("common:field.name")}</th>
+                  <th className="px-4 py-3 font-medium">{t("list.chatModel")}</th>
+                  <th className="px-4 py-3 font-medium">{t("list.voice")}</th>
+                  <th className="px-4 py-3 font-medium">{t("list.asr")}</th>
+                  <th className="px-4 py-3 font-medium">{t("list.language")}</th>
+                  <th className="px-4 py-3 font-medium">{t("list.memory")}</th>
+                  <th className="px-4 py-3 font-medium">{t("common:field.updatedAt")}</th>
                   <th className="px-4 py-3 font-medium w-10" />
                 </tr>
               </thead>
@@ -424,10 +431,10 @@ export default function AgentListPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs text-zinc-400">
-                        {MEMORY_LABEL[cfg.memoryMode] ?? cfg.memoryMode}
+                        {memoryLabel(cfg.memoryMode)}
                       </td>
                       <td className="px-4 py-3 text-xs text-zinc-600 font-mono">
-                        {new Date(bot.updated_at).toLocaleString("zh-CN", {
+                        {new Date(bot.updated_at).toLocaleString(i18n.language, {
                           hour12: false,
                         })}
                       </td>
@@ -438,7 +445,7 @@ export default function AgentListPage() {
                             setDeleteTarget(bot);
                           }}
                           className="text-zinc-600 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-400/10"
-                          title="删除"
+                          title={t("common:action.delete")}
                         >
                           <Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
                         </button>
@@ -457,24 +464,24 @@ export default function AgentListPage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-violet-400" />
-              新建智能体
+              {t("list.create")}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400 uppercase tracking-wide">
-                名称
+                {t("common:field.name")}
               </Label>
               <Input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="客厅助手 / 车载音箱..."
+                placeholder={t("list.namePlaceholder")}
                 onKeyDown={(e) => e.key === "Enter" && handleCreate()}
                 autoFocus
               />
             </div>
             <p className="text-xs text-zinc-600">
-              创建后进入配置页面设置 LLM、ASR、TTS 等参数
+              {t("list.createHint")}
             </p>
           </div>
           <DialogFooter>
@@ -483,14 +490,14 @@ export default function AgentListPage() {
               onClick={() => setCreateOpen(false)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleCreate}
               disabled={creating || !newName.trim()}
               className="bg-violet-600 hover:bg-violet-500 text-white"
             >
-              {creating ? "创建中..." : "创建"}
+              {creating ? t("common:action.creating") : t("common:action.create")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -500,10 +507,10 @@ export default function AgentListPage() {
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle className="text-white">确认删除</DialogTitle>
+            <DialogTitle className="text-white">{t("deleteDialog.title")}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-zinc-400 py-2">
-            确定要删除「{deleteTarget?.name}」吗？此操作无法撤销，该智能体关联的设备也将失去配置。
+            {t("deleteDialog.body", { name: deleteTarget?.name })}
           </p>
           <DialogFooter>
             <Button
@@ -511,7 +518,7 @@ export default function AgentListPage() {
               onClick={() => setDeleteTarget(null)}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleDelete}
@@ -521,7 +528,7 @@ export default function AgentListPage() {
               {deleting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                "删除"
+                t("common:action.delete")
               )}
             </Button>
           </DialogFooter>

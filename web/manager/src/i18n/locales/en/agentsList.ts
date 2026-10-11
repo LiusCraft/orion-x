@@ -1,0 +1,41 @@
+// Agent plaza and "My Agents" list page strings.
+export default {
+	plaza: {
+		title: "Agent Plaza",
+		subtitle: "Start from a template or build your own agent from scratch",
+		createFromScratch: "Create from Scratch",
+		searchPlaceholder: "Search agent templates...",
+		categoryAll: "All",
+		useCount: "{{value}} uses",
+		createFromTemplate: "Use This Template",
+		createFailed: "Failed to create, please try again",
+		emptyTitle: "No matching templates",
+		emptyHint: "Try another keyword or category",
+	},
+	list: {
+		title: "My Agents",
+		subtitle: "Manage your voice bots and configure models and voices",
+		searchPlaceholder: "Search agents...",
+		create: "New Agent",
+		namePlaceholder: "Living room assistant / Car speaker...",
+		createHint: "Set up LLM, ASR, TTS and more after creation",
+		emptyTitle: "No agents yet",
+		emptyHint: "Create your first agent, configure LLM / ASR / TTS, then bind a device",
+		noMatchTitle: "No matching agents",
+		noMatchHint: "Try another keyword",
+		chatModel: "Chat Model",
+		voice: "Voice",
+		asr: "Speech Recognition",
+		memory: "Memory",
+		language: "Language",
+	},
+	memory: {
+		none: "No memory",
+		session: "Session memory",
+		longTerm: "Long-term memory",
+	},
+	deleteDialog: {
+		title: "Delete Agent",
+		body: "Delete \"{{name}}\"? This cannot be undone, and devices bound to this agent will lose their configuration.",
+	},
+};

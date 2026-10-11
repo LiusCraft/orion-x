@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Cpu,
   Plus,
@@ -120,10 +121,13 @@ function PaginationBar({
   onPageChange: (p: number) => void;
   onPageSizeChange: (s: number) => void;
 }) {
+  const { t } = useTranslation(["components", "common"]);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   return (
     <div className="flex items-center justify-between mt-4">
-      <span className="text-xs text-zinc-500">共 {total} 条</span>
+      <span className="text-xs text-zinc-500">
+        {t("common:unit.totalItems", { total })}
+      </span>
       <div className="flex items-center gap-2">
         <SimpleSelect
           value={String(pageSize)}
@@ -132,7 +136,7 @@ function PaginationBar({
           size="sm"
           options={[10, 20, 30, 50].map((size) => ({
             value: String(size),
-            label: `${size} 条/页`,
+            label: t("common:unit.perPage", { size }),
           }))}
         />
         <div className="flex items-center gap-1">
@@ -141,7 +145,7 @@ function PaginationBar({
             disabled={page <= 1}
             className="h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
-            上一页
+            {t("pagination.prev")}
           </button>
           {page > 2 && (
             <>
@@ -189,7 +193,7 @@ function PaginationBar({
             disabled={page >= totalPages}
             className="h-7 px-2 text-xs rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
-            下一页
+            {t("pagination.next")}
           </button>
         </div>
       </div>
@@ -198,7 +202,8 @@ function PaginationBar({
 }
 
 export default function McpPage() {
-  useDocumentTitle("MCP 管理");
+  const { t } = useTranslation(["components", "common"]);
+  useDocumentTitle(t("mcp.title"));
 
   const [market, setMarket] = useState<MCPMarketEntry[]>([]);
   const [servers, setServers] = useState<MCPServer[]>([]);
@@ -469,9 +474,9 @@ export default function McpPage() {
         setToolsList(data.tools);
         // Init args for each tool from schema defaults
         const init: Record<string, Record<string, unknown>> = {};
-        for (const t of data.tools) {
-          if (t.input_schema?.properties) {
-            const props = t.input_schema.properties as Record<
+        for (const tool of data.tools) {
+          if (tool.input_schema?.properties) {
+            const props = tool.input_schema.properties as Record<
               string,
               { type?: string; default?: unknown }
             >;
@@ -489,9 +494,9 @@ export default function McpPage() {
                       : "";
               }
             }
-            init[t.name] = vals;
+            init[tool.name] = vals;
           } else {
-            init[t.name] = {};
+            init[tool.name] = {};
           }
         }
         setToolArgs(init);
@@ -522,7 +527,8 @@ export default function McpPage() {
       });
       setCallResult(data);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "请求失败";
+      const msg =
+        err instanceof Error ? err.message : t("common:error.requestFailed");
       setCallResult({ success: false, message: msg });
     } finally {
       setCalling(false);
@@ -560,7 +566,8 @@ export default function McpPage() {
         handleListTools();
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "请求失败";
+      const msg =
+        err instanceof Error ? err.message : t("common:error.requestFailed");
       setTestResult({ success: false, message: msg });
     } finally {
       setTesting(false);
@@ -583,10 +590,10 @@ export default function McpPage() {
       <div className="border-b border-zinc-800/80 px-8 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">MCP 管理</h1>
-            <p className="text-sm text-zinc-500 mt-0.5">
-              Model Context Protocol 服务管理，安装后可被智能体引用
-            </p>
+            <h1 className="text-lg font-semibold text-white">
+              {t("mcp.title")}
+            </h1>
+            <p className="text-sm text-zinc-500 mt-0.5">{t("mcp.subtitle")}</p>
           </div>
           <div /> {/* placeholder for layout */}
         </div>
@@ -600,13 +607,13 @@ export default function McpPage() {
                 value="market"
                 className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
               >
-                市场
+                {t("market")}
               </TabsTrigger>
               <TabsTrigger
                 value="mine"
                 className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white text-zinc-500 h-8 px-4"
               >
-                已开通 ({servers.length})
+                {t("mcp.tab.installed", { total: servers.length })}
               </TabsTrigger>
             </TabsList>
             <Button
@@ -614,7 +621,7 @@ export default function McpPage() {
               className="bg-violet-600 hover:bg-violet-500 text-white h-9 px-4 text-sm gap-1.5 shadow-md shadow-violet-600/20 shrink-0"
             >
               <Plus className="w-4 h-4" />
-              自定义 MCP
+              {t("mcp.custom")}
             </Button>
           </div>
 
@@ -625,8 +632,12 @@ export default function McpPage() {
                   <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
                     <Cpu className="w-6 h-6 text-zinc-600" />
                   </div>
-                  <p className="text-zinc-400 text-sm">暂无官方 MCP</p>
-                  <p className="text-zinc-600 text-xs mt-1">敬请期待</p>
+                  <p className="text-zinc-400 text-sm">
+                    {t("mcp.marketEmpty")}
+                  </p>
+                  <p className="text-zinc-600 text-xs mt-1">
+                    {t("mcp.marketEmptyHint")}
+                  </p>
                 </div>
               ) : (
                 market.map((mcp) => {
@@ -663,10 +674,10 @@ export default function McpPage() {
                         {installed ? (
                           <>
                             <CheckCircle2 className="w-3 h-3 mr-1" />
-                            已安装
+                            {t("installed")}
                           </>
                         ) : (
-                          "安装"
+                          t("install")
                         )}
                       </Button>
                       <div className="flex items-start gap-3 mb-3">
@@ -730,9 +741,9 @@ export default function McpPage() {
                 <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
                   <Cpu className="w-6 h-6 text-zinc-600" />
                 </div>
-                <p className="text-zinc-400 text-sm">还没有开通任何 MCP</p>
+                <p className="text-zinc-400 text-sm">{t("mcp.mineEmpty")}</p>
                 <p className="text-zinc-600 text-xs mt-1">
-                  从市场安装或添加自定义 MCP
+                  {t("mcp.mineEmptyHint")}
                 </p>
               </div>
             ) : (
@@ -750,7 +761,7 @@ export default function McpPage() {
                           removeServer(s.id);
                         }}
                         className="absolute top-3 right-3 text-zinc-500 hover:text-red-400 p-1 rounded hover:bg-red-400/10 transition-colors cursor-pointer"
-                        title="删除"
+                        title={t("common:action.delete")}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -766,7 +777,7 @@ export default function McpPage() {
                             </span>
                             {s.market_id && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-600/20 text-violet-400 border border-violet-500/20">
-                                市场
+                                {t("market")}
                               </span>
                             )}
                           </p>
@@ -837,7 +848,7 @@ export default function McpPage() {
                   {selectedMarket?.name}
                   {selectedMarket?.provider === "官方" && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-600/20 text-violet-400 border border-violet-500/20 font-normal shrink-0">
-                      市场
+                      {t("market")}
                     </span>
                   )}
                 </SheetTitle>
@@ -952,10 +963,10 @@ export default function McpPage() {
               servers.some((s) => s.market_id === selectedMarket.id) ? (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-                  已安装
+                  {t("installed")}
                 </>
               ) : (
-                "安装"
+                t("install")
               )}
             </Button>
           </div>
@@ -971,14 +982,14 @@ export default function McpPage() {
               <div>
                 <SheetTitle>
                   {drawerMode === "new"
-                    ? "添加自定义 MCP 服务器"
+                    ? t("mcp.addTitle")
                     : isOfficial
                       ? editTarget?.name
-                      : "编辑 MCP 服务器"}
+                      : t("mcp.editTitle")}
                 </SheetTitle>
                 {isOfficial && (
                   <p className="text-[11px] text-zinc-500 mt-0.5">
-                    官方 MCP · 部分配置由系统管理
+                    {t("mcp.officialHint")}
                   </p>
                 )}
               </div>
@@ -1009,7 +1020,7 @@ export default function McpPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs text-zinc-400">
                     <Terminal className="w-3.5 h-3.5" strokeWidth={1.5} />
-                    <span className="font-medium">体验工具</span>
+                    <span className="font-medium">{t("mcp.tools.title")}</span>
                     {toolsLoading && (
                       <Loader2 className="w-3 h-3 animate-spin" />
                     )}
@@ -1018,12 +1029,12 @@ export default function McpPage() {
                     type="button"
                     onClick={handleListTools}
                     className="text-[11px] text-violet-400 hover:text-violet-300 transition-colors flex items-center gap-1"
-                    title="刷新工具列表"
+                    title={t("mcp.tools.refreshTitle")}
                   >
                     <RefreshCw
                       className={`w-3 h-3 ${toolsLoading ? "animate-spin" : ""}`}
                     />
-                    刷新
+                    {t("common:action.refresh")}
                   </button>
                 </div>
 
@@ -1083,7 +1094,7 @@ export default function McpPage() {
                                 ) : (
                                   <Play className="w-3 h-3" />
                                 )}
-                                调用
+                                {t("mcp.tools.invoke")}
                               </Button>
                               {callResult && (
                                 <div className="flex-1 min-w-0">
@@ -1099,7 +1110,9 @@ export default function McpPage() {
                 )}
 
                 {toolsOpen && !toolsLoading && toolsList.length === 0 && (
-                  <p className="text-xs text-zinc-600">未获取到工具列表</p>
+                  <p className="text-xs text-zinc-600">
+                    {t("mcp.tools.empty")}
+                  </p>
                 )}
               </div>
             )}
@@ -1123,7 +1136,7 @@ export default function McpPage() {
                   className="border-zinc-700 text-red-400 hover:bg-red-400/10 hover:text-red-300 h-8 text-xs gap-1.5"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  删除
+                  {t("common:action.delete")}
                 </Button>
               )}
               <Button
@@ -1138,14 +1151,14 @@ export default function McpPage() {
                 ) : (
                   <Cpu className="w-3.5 h-3.5" />
                 )}
-                测试连接
+                {t("mcp.testConnection")}
               </Button>
               <Button
                 variant="outline"
                 onClick={handleClose}
                 className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
               >
-                取消
+                {t("common:action.cancel")}
               </Button>
               <Button
                 onClick={handleSave}
@@ -1157,7 +1170,9 @@ export default function McpPage() {
                 }
                 className="bg-violet-600 hover:bg-violet-500 text-white ml-auto"
               >
-                {drawerMode === "new" ? "添加" : "保存"}
+                {drawerMode === "new"
+                  ? t("common:action.add")
+                  : t("common:action.save")}
               </Button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/lib/store";
 import { useDocumentTitle } from "@/lib/title";
 import { authApi, type OAuthBinding, type OAuthProvider } from "@/lib/api";
@@ -84,24 +85,30 @@ function ChangePasswordDialog({
   onClose: () => void;
   hasPassword: boolean;
 }) {
+  const { t } = useTranslation(["account", "common"]);
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [showOld, setShowOld] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState("");
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg("");
+    setMsg(null);
     setLoading(true);
     try {
       await authApi.changePassword(hasPassword ? oldPassword : "", newPassword);
-      setMsg("密码设置成功");
+      setMsg({ text: t("passwordChange.success"), ok: true });
       setOldPassword("");
       setNewPassword("");
     } catch {
-      setMsg(hasPassword ? "旧密码不正确" : "设置失败，请稍后重试");
+      setMsg({
+        text: hasPassword
+          ? t("passwordChange.wrongOld")
+          : t("passwordChange.failed"),
+        ok: false,
+      });
     } finally {
       setLoading(false);
     }
@@ -117,13 +124,13 @@ function ChangePasswordDialog({
       <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-white">
-            {hasPassword ? "密码修改" : "设置密码"}
+            {hasPassword ? t("passwordChange.title") : t("passwordChange.titleSet")}
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           {hasPassword && (
             <div className="space-y-1.5">
-              <label className="text-xs text-zinc-500">当前密码</label>
+              <label className="text-xs text-zinc-500">{t("passwordChange.old")}</label>
               <div className="relative">
                 <Input
                   type={showOld ? "text" : "password"}
@@ -147,7 +154,7 @@ function ChangePasswordDialog({
             </div>
           )}
           <div className="space-y-1.5">
-            <label className="text-xs text-zinc-500">新密码</label>
+            <label className="text-xs text-zinc-500">{t("passwordChange.new")}</label>
             <div className="relative">
               <Input
                 type={showNew ? "text" : "password"}
@@ -172,9 +179,9 @@ function ChangePasswordDialog({
           </div>
           {msg && (
             <p
-              className={`text-xs ${msg === "密码设置成功" ? "text-emerald-400" : "text-red-400"}`}
+              className={`text-xs ${msg.ok ? "text-emerald-400" : "text-red-400"}`}
             >
-              {msg}
+              {msg.text}
             </p>
           )}
           <Button
@@ -182,7 +189,11 @@ function ChangePasswordDialog({
             disabled={loading}
             className="w-full bg-violet-600 hover:bg-violet-500 text-white cursor-pointer"
           >
-            {loading ? "提交中..." : hasPassword ? "确认修改" : "确认设置"}
+            {loading
+              ? t("common:action.submitting")
+              : hasPassword
+                ? t("passwordChange.confirmChange")
+                : t("passwordChange.confirmSet")}
           </Button>
         </form>
       </DialogContent>
@@ -203,6 +214,7 @@ function UnbindOAuthDialog({
   provider: string;
   name: string;
 }) {
+  const { t } = useTranslation(["account", "common"]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -214,7 +226,7 @@ function UnbindOAuthDialog({
       onUnbound();
       onClose();
     } catch {
-      setMsg("解绑失败，请稍后重试");
+      setMsg(t("unbind.failed"));
     } finally {
       setLoading(false);
     }
@@ -229,11 +241,13 @@ function UnbindOAuthDialog({
     >
       <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle className="text-white">解绑 {name}</DialogTitle>
+          <DialogTitle className="text-white">
+            {t("unbind.title", { name })}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <p className="text-sm text-zinc-400">
-            解绑后将无法通过 {name} 快速登录，但仍可使用邮箱+密码登录。确定解绑？
+            {t("unbind.message", { name })}
           </p>
           {msg && <p className="text-xs text-red-400">{msg}</p>}
           <div className="flex gap-3">
@@ -242,14 +256,14 @@ function UnbindOAuthDialog({
               onClick={onClose}
               className="flex-1 cursor-pointer"
             >
-              取消
+              {t("common:action.cancel")}
             </Button>
             <Button
               onClick={handleConfirm}
               disabled={loading}
               className="flex-1 bg-red-500 hover:bg-red-400 text-white cursor-pointer"
             >
-              {loading ? "解绑中..." : "确认解绑"}
+              {loading ? t("unbind.unbinding") : t("unbind.confirm")}
             </Button>
           </div>
         </div>
@@ -267,9 +281,10 @@ function BindEmailDialog({
   onClose: () => void;
   currentEmail: string | null;
 }) {
+  const { t } = useTranslation(["account", "common"]);
   const [email, setEmail] = useState(currentEmail ?? "");
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState("");
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   useEffect(() => {
     if (open) setEmail(currentEmail ?? "");
@@ -277,13 +292,13 @@ function BindEmailDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg("");
+    setMsg(null);
     setLoading(true);
     try {
       const { data } = await authApi.bindEmail(email);
-      setMsg(data.message);
+      setMsg({ text: data.message, ok: true });
     } catch {
-      setMsg("绑定失败，请检查邮箱格式");
+      setMsg({ text: t("bindEmail.failed"), ok: false });
     } finally {
       setLoading(false);
     }
@@ -298,11 +313,11 @@ function BindEmailDialog({
     >
       <DialogContent className="bg-zinc-900 border-zinc-800 text-white sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle className="text-white">邮箱绑定</DialogTitle>
+          <DialogTitle className="text-white">{t("bindEmail.title")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs text-zinc-500">邮箱地址</label>
+            <label className="text-xs text-zinc-500">{t("bindEmail.email")}</label>
             <Input
               type="email"
               value={email}
@@ -313,9 +328,9 @@ function BindEmailDialog({
           </div>
           {msg && (
             <p
-              className={`text-xs ${msg === "绑定失败，请检查邮箱格式" ? "text-red-400" : "text-emerald-400"}`}
+              className={`text-xs ${msg.ok ? "text-emerald-400" : "text-red-400"}`}
             >
-              {msg}
+              {msg.text}
             </p>
           )}
           <Button
@@ -323,7 +338,7 @@ function BindEmailDialog({
             disabled={loading}
             className="w-full bg-violet-600 hover:bg-violet-500 text-white cursor-pointer"
           >
-            {loading ? "提交中..." : "确认绑定"}
+            {loading ? t("common:action.submitting") : t("bindEmail.confirm")}
           </Button>
         </form>
       </DialogContent>
@@ -332,7 +347,8 @@ function BindEmailDialog({
 }
 
 		export default function AccountPage() {
-  			useDocumentTitle("账号");
+			const { t } = useTranslation(["account", "common"]);
+  			useDocumentTitle(t("title"));
 
   			const { username, userId } = useAuthStore();
   			const [showPwd, setShowPwd] = useState(false);
@@ -367,7 +383,7 @@ function BindEmailDialog({
 				<div className="w-7 h-7 rounded-full border border-zinc-700 flex items-center justify-center">
 					<User className="w-4 h-4 text-zinc-400" strokeWidth={1.5} />
 				</div>
-				<span className="text-white font-medium">账号</span>
+				<span className="text-white font-medium">{t("title")}</span>
 				<ChevronRight className="w-4 h-4 text-zinc-600" strokeWidth={1.5} />
 			</div>
 
@@ -376,14 +392,14 @@ function BindEmailDialog({
 					<Lock className="w-4 h-4 text-amber-400 shrink-0" strokeWidth={1.5} />
 					<div className="flex-1 min-w-0">
 						<p className="text-sm font-medium text-amber-400">
-							您的账号尚未设置密码，建议设置后可通过邮箱+密码登录
+							{t("noPasswordWarning")}
 						</p>
 					</div>
 					<Button
 						onClick={() => setShowPwd(true)}
 						className="shrink-0 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold cursor-pointer"
 					>
-						去设置
+						{t("goSetPassword")}
 					</Button>
 				</div>
 			)}
@@ -415,13 +431,13 @@ function BindEmailDialog({
                 strokeWidth={1.5}
               />
             }
-            label="账号 ID"
+            label={t("accountId")}
             value={userId}
             copyValue={userId ?? undefined}
           />
           <InfoField
             icon={<Mail className="w-4 h-4 text-zinc-400" strokeWidth={1.5} />}
-            label="绑定邮箱"
+            label={t("boundEmail")}
             value={email}
           />
           				{providers.map((p) => {
@@ -442,7 +458,7 @@ function BindEmailDialog({
           								)
           							}
           							label={p.name}
-          							value={linked ? "已绑定" : "未绑定"}
+          							value={linked ? t("bound") : t("unbound")}
           							action={
           								linked ? (
           									<Button
@@ -453,10 +469,14 @@ function BindEmailDialog({
           												? setUnbindTarget(p)
           												: setShowPwd(true)
           										}
-          										title={hasPassword ? `解绑 ${p.name}` : "设置密码后可解绑"}
+          										title={
+          											hasPassword
+          												? t("unbind.title", { name: p.name })
+          												: t("unbind.setPasswordFirst")
+          										}
           										className="shrink-0 border-red-500/30 text-red-400 hover:bg-red-500/10 cursor-pointer"
           									>
-          										解绑
+          										{t("unbind.action")}
           									</Button>
           								) : (
           									<Button
@@ -466,7 +486,7 @@ function BindEmailDialog({
           										}}
           										className="shrink-0 bg-violet-600 hover:bg-violet-500 text-white cursor-pointer"
           									>
-          										绑定
+          										{t("bind.action")}
           									</Button>
           								)
           							}
@@ -485,9 +505,9 @@ function BindEmailDialog({
             <Lock className="w-4 h-4 text-zinc-400" strokeWidth={1.5} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-white">密码修改</p>
+            <p className="text-sm font-medium text-white">{t("passwordChange.title")}</p>
             <p className="text-xs text-zinc-500 mt-0.5">
-              定期更换密码可提高账号安全性
+              {t("passwordChange.desc")}
             </p>
           </div>
           <ChevronRight
@@ -503,9 +523,9 @@ function BindEmailDialog({
             <Mail className="w-4 h-4 text-zinc-400" strokeWidth={1.5} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-white">邮箱绑定</p>
+            <p className="text-sm font-medium text-white">{t("bindEmail.title")}</p>
             <p className="text-xs text-zinc-500 mt-0.5">
-              绑定邮箱后可接收系统通知和重置密码
+              {t("bindEmail.desc")}
             </p>
           </div>
           <ChevronRight
