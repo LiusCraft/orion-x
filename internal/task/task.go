@@ -14,14 +14,13 @@ type Task struct {
 	ID              string
 	Title           string
 	Status          Status
-	SubAgentID      string
+	RunID           string
 	MountedSessions []string
 	Progress        string
 	CreatedAt       time.Time
 }
 
 type CreateTaskRequest struct {
-	ID         string
-	Title      string
-	SubAgentID string
+	ID    string
+	Title string
 }

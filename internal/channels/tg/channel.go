@@ -297,20 +297,15 @@ func (c *TGChannel) handleText(ctx context.Context, deviceID string, chat *tgbot
 		c.reply(deviceID, chat.ID, "初始化失败，请稍后再试。")
 		return
 	}
-	for _, spec := range c.tasks.ToolSpecs(sess.ID, func(_ context.Context, taskRecord *task.Task) error {
-		taskMgr := connMgr.Clone()
-		taskAgent, err := agent.NewWithClient(agentCfg, llmClient, taskMgr, c.memSvc)
-		if err != nil {
-			return err
-		}
-		taskSession := session.New(session.SessionMeta{Model: agentCfg.Model})
-		taskSession.Add(session.Message{Role: session.RoleUser, Content: taskRecord.Title})
-		subAgent := agent.NewSubAgent("sub_"+taskRecord.ID, taskRecord.ID, taskAgent)
-		if err := subAgent.Start(c.rootCtx, taskSession); err != nil {
-			return err
-		}
-		return c.tasks.AttachSubAgent(taskRecord.ID, subAgent)
-	}) {
+	taskRunner := task.NewLocalRunner(c.rootCtx, task.LocalConfig{
+		Client:          llmClient,
+		Tools:           connMgr.CloneRegistry,
+		Model:           agentCfg.Model,
+		Thinking:        agentCfg.Thinking,
+		Options:         agentCfg.ProviderOptions,
+		MaxOutputTokens: agentCfg.MaxOutputTokens,
+	})
+	for _, spec := range c.tasks.ToolSpecs(sess.ID, taskRunner) {
 		connMgr.Registry().Add(spec)
 	}
 	agt, err := agent.NewWithClient(agentCfg, llmClient, connMgr, c.memSvc)
