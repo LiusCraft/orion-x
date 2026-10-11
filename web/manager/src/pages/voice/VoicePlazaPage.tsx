@@ -119,7 +119,7 @@ export default function VoicePlazaPage() {
         </div>
         <div className="mt-4 space-y-3">
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-zinc-400 w-10 shrink-0">
+            <span className="text-zinc-400 min-w-10 shrink-0">
               {t("plaza.filterGender")}
             </span>
             <div className="flex gap-1.5 flex-wrap">
@@ -135,7 +135,7 @@ export default function VoicePlazaPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-zinc-400 w-10 shrink-0">
+            <span className="text-zinc-400 min-w-10 shrink-0">
               {t("plaza.filterLanguage")}
             </span>
             <div className="flex gap-1.5 flex-wrap">
@@ -151,7 +151,7 @@ export default function VoicePlazaPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-zinc-400 w-10 shrink-0">
+            <span className="text-zinc-400 min-w-10 shrink-0">
               {t("plaza.filterTag")}
             </span>
             <div className="flex gap-1.5 flex-wrap">
@@ -168,7 +168,7 @@ export default function VoicePlazaPage() {
           </div>
           {allEmotions.length > 0 && (
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-zinc-400 w-10 shrink-0">
+              <span className="text-zinc-400 min-w-10 shrink-0">
                 {t("plaza.filterEmotion")}
               </span>
               <div className="flex gap-1.5 flex-wrap">
@@ -218,29 +218,29 @@ export default function VoicePlazaPage() {
                       <img
                         src={voice.avatar_url}
                         alt={voice.name}
-                        className="w-12 h-12 rounded-xl object-cover shadow-lg"
+                        className="w-12 h-12 shrink-0 rounded-xl object-cover shadow-lg"
                       />
                     ) : (
                       <div
-                        className={`w-12 h-12 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center text-2xl font-bold text-white shadow-lg`}
+                        className={`w-12 h-12 shrink-0 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center text-2xl font-bold text-white shadow-lg`}
                       >
                         {voice.name[0]}
                       </div>
                     )}
-                    <div>
-                      <p className="font-semibold text-sm text-white">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-sm text-white truncate">
                         {voice.name}
                       </p>
-                      <div className="flex items-center gap-1.5 mt-0.5">
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                         {voice.gender && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50">
+                          <span className="text-[10px] whitespace-nowrap px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50">
                             {genderLabel(voice.gender)}
                           </span>
                         )}
                         {tags.slice(0, 2).map((tg) => (
                           <span
                             key={tg}
-                            className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50"
+                            className="text-[10px] whitespace-nowrap px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50"
                           >
                             {tg}
                           </span>
@@ -251,7 +251,7 @@ export default function VoicePlazaPage() {
                               .map((l) => langNames[l] || l)
                               .join(", ")}
                           >
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50">
+                            <span className="text-[10px] whitespace-nowrap px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700/50">
                               {langNames[langs[0]] || langs[0]}
                               {langs.length > 1 ? ` +${langs.length - 1}` : ""}
                             </span>
@@ -261,7 +261,7 @@ export default function VoicePlazaPage() {
                           <Tooltip
                             content={Object.keys(voice.emotions).join(", ")}
                           >
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-500 border border-amber-800/40">
+                            <span className="text-[10px] whitespace-nowrap px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-500 border border-amber-800/40">
                               {t("plaza.emotionCount", {
                                 n: Object.keys(voice.emotions).length,
                               })}
