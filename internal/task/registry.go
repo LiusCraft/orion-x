@@ -17,12 +17,11 @@ import (
 	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
-// Registry owns task metadata and the background agents executing tasks.
+// Registry owns task metadata and the background executions dispatched for tasks.
 type Registry struct {
-	mu        sync.RWMutex
-	tasks     map[string]*Task
-	subAgents map[string]*agent.SubAgent
-	sessions  *session.Manager
+	mu       sync.RWMutex
+	tasks    map[string]*Task
+	sessions *session.Manager
 }
 
 func NewRegistry(sessions ...*session.Manager) *Registry {
@@ -30,7 +29,7 @@ func NewRegistry(sessions ...*session.Manager) *Registry {
 	if len(sessions) > 0 {
 		manager = sessions[0]
 	}
-	return &Registry{tasks: make(map[string]*Task), subAgents: make(map[string]*agent.SubAgent), sessions: manager}
+	return &Registry{tasks: make(map[string]*Task), sessions: manager}
 }
 
 func (r *Registry) Create(req CreateTaskRequest) (*Task, error) {
@@ -42,25 +41,16 @@ func (r *Registry) Create(req CreateTaskRequest) (*Task, error) {
 	if _, exists := r.tasks[req.ID]; exists {
 		return nil, errors.New("task already exists")
 	}
-	t := &Task{ID: req.ID, Title: req.Title, Status: StatusActive, SubAgentID: req.SubAgentID, CreatedAt: time.Now().UTC()}
+	t := &Task{ID: req.ID, Title: req.Title, Status: StatusActive, CreatedAt: time.Now().UTC()}
 	r.tasks[t.ID] = t
 	return cloneTask(t), nil
 }
 
-func (r *Registry) RegisterSubAgent(sa *agent.SubAgent) {
-	if r == nil || sa == nil || sa.ID == "" {
-		return
-	}
-	r.mu.Lock()
-	r.subAgents[sa.ID] = sa
-	r.mu.Unlock()
-}
-
-// AttachSubAgent associates a running sub-agent with a task and fans its
-// output into every mounted session's final pipeline output.
-func (r *Registry) AttachSubAgent(taskID string, sa *agent.SubAgent) error {
-	if r == nil || sa == nil || sa.ID == "" {
-		return errors.New("task and sub-agent are required")
+// Attach binds a running execution to a task and fans its events into every
+// mounted session's pipeline.
+func (r *Registry) Attach(taskID string, run Run) error {
+	if r == nil || run == nil {
+		return errors.New("task and run are required")
 	}
 	r.mu.Lock()
 	t, ok := r.tasks[taskID]
@@ -68,16 +58,19 @@ func (r *Registry) AttachSubAgent(taskID string, sa *agent.SubAgent) error {
 		r.mu.Unlock()
 		return errors.New("task not found")
 	}
-	t.SubAgentID = sa.ID
-	r.subAgents[sa.ID] = sa
+	t.RunID = run.Ref()
 	r.mu.Unlock()
-	go r.forwardOutput(taskID, sa.OutputCh)
+	go r.forwardOutput(taskID, run)
 	return nil
 }
 
-func (r *Registry) forwardOutput(taskID string, output <-chan pipeline.Message) {
-	for msg := range output {
-		r.updateFromMessage(taskID, msg)
+func (r *Registry) forwardOutput(taskID string, run Run) {
+	for event := range run.Events() {
+		r.updateFromEvent(taskID, event)
+		msg, ok := eventMessage(taskID, event)
+		if !ok {
+			continue
+		}
 		for _, sessionID := range r.mountedSessionIDs(taskID) {
 			if r.sessions == nil {
 				continue
@@ -91,25 +84,49 @@ func (r *Registry) forwardOutput(taskID string, output <-chan pipeline.Message) 
 	}
 }
 
-func (r *Registry) updateFromMessage(taskID string, msg pipeline.Message) {
+func (r *Registry) updateFromEvent(taskID string, event Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	t, ok := r.tasks[taskID]
 	if !ok {
 		return
 	}
-	switch msg.Type {
-	case pipeline.MessageTypeData:
-		if text, ok := msg.Payload.(string); ok && strings.TrimSpace(text) != "" {
-			t.Progress += text
+	switch event.Type {
+	case EventText:
+		if strings.TrimSpace(event.Text) != "" {
+			t.Progress += event.Text
 		}
-	case pipeline.MessageTypeFinished:
+	case EventDone:
 		t.Status = StatusCompleted
-	case pipeline.MessageTypeError:
+	case EventError:
 		t.Status = StatusCancelled
-		if msg.Metadata.Error != nil {
-			t.Progress = msg.Metadata.Error.Error()
+		if event.Err != nil {
+			t.Progress = event.Err.Error()
 		}
+	}
+}
+
+// eventMessage 把执行事件转换成会话 pipeline 消息。source 保持
+// "sub_agent" 以免影响各渠道对已有输出流的路由。
+func eventMessage(taskID string, event Event) (pipeline.Message, bool) {
+	switch event.Type {
+	case EventText:
+		msg := pipeline.NewMessage(pipeline.MessageTypeData, event.Text)
+		msg.Metadata.Extra = map[string]interface{}{"source": "sub_agent", "task_id": taskID}
+		return msg, true
+	case EventDone:
+		msg := pipeline.NewMessage(pipeline.MessageTypeFinished, nil)
+		msg.Metadata.Extra = map[string]interface{}{"source": "sub_agent", "task_id": taskID}
+		if event.Usage != nil {
+			msg.Metadata.Extra[agent.UsageMetadataKey] = *event.Usage
+		}
+		return msg, true
+	case EventError:
+		msg := pipeline.NewMessage(pipeline.MessageTypeError, nil).WithError(event.Err)
+		msg.Metadata.Extra = map[string]interface{}{"source": "sub_agent", "task_id": taskID}
+		return msg, true
+	default:
+		return pipeline.Message{}, false
 	}
 }
 
@@ -189,14 +206,14 @@ func cloneTask(t *Task) *Task {
 }
 
 // ToolSpecs returns the task operations available to a primary agent in one
-// session. start is responsible for constructing and starting the isolated
-// sub-agent after a task record has been created.
-func (r *Registry) ToolSpecs(sessionID string, start func(context.Context, *Task) error) []tools.Spec {
+// session. runner is responsible for starting the background execution after a
+// task record has been created; nil keeps tasks metadata-only (useful in tests).
+func (r *Registry) ToolSpecs(sessionID string, runner Runner) []tools.Spec {
 	return []tools.Spec{
 		{
 			Name: "CreateTask", Description: "Create a background task for a complex request.",
 			Parameters: objectSchema(map[string]any{"title": map[string]any{"type": "string", "description": "Task title and objective"}}, "title"),
-			Execute: func(ctx context.Context, arguments json.RawMessage) (tools.Result, error) {
+			Execute: func(_ context.Context, arguments json.RawMessage) (tools.Result, error) {
 				var req struct {
 					Title string `json:"title"`
 				}
@@ -210,8 +227,12 @@ func (r *Registry) ToolSpecs(sessionID string, start func(context.Context, *Task
 				if !r.Mount(task.ID, sessionID) {
 					return tools.Result{}, errors.New("mount created task")
 				}
-				if start != nil {
-					if err := start(ctx, task); err != nil {
+				if runner != nil {
+					run, err := runner.Start(RunRequest{TaskID: task.ID, Title: task.Title})
+					if err != nil {
+						return tools.Result{}, fmt.Errorf("start task: %w", err)
+					}
+					if err := r.Attach(task.ID, run); err != nil {
 						return tools.Result{}, err
 					}
 				}
