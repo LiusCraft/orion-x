@@ -12,17 +12,17 @@ import (
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/agent"
+	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
-// Registry owns task metadata and the background agents executing tasks.
+// Registry owns task metadata and the background executions dispatched for tasks.
 type Registry struct {
-	mu        sync.RWMutex
-	tasks     map[string]*Task
-	subAgents map[string]*agent.SubAgent
-	sessions  *session.Manager
+	mu       sync.RWMutex
+	tasks    map[string]*Task
+	sessions *session.Manager
 }
 
 func NewRegistry(sessions ...*session.Manager) *Registry {
@@ -30,7 +30,7 @@ func NewRegistry(sessions ...*session.Manager) *Registry {
 	if len(sessions) > 0 {
 		manager = sessions[0]
 	}
-	return &Registry{tasks: make(map[string]*Task), subAgents: make(map[string]*agent.SubAgent), sessions: manager}
+	return &Registry{tasks: make(map[string]*Task), sessions: manager}
 }
 
 func (r *Registry) Create(req CreateTaskRequest) (*Task, error) {
@@ -42,25 +42,22 @@ func (r *Registry) Create(req CreateTaskRequest) (*Task, error) {
 	if _, exists := r.tasks[req.ID]; exists {
 		return nil, errors.New("task already exists")
 	}
-	t := &Task{ID: req.ID, Title: req.Title, Status: StatusActive, SubAgentID: req.SubAgentID, CreatedAt: time.Now().UTC()}
+	t := &Task{
+		ID:              req.ID,
+		Title:           req.Title,
+		Status:          StatusActive,
+		OriginSessionID: req.OriginSessionID,
+		CreatedAt:       time.Now().UTC(),
+	}
 	r.tasks[t.ID] = t
 	return cloneTask(t), nil
 }
 
-func (r *Registry) RegisterSubAgent(sa *agent.SubAgent) {
-	if r == nil || sa == nil || sa.ID == "" {
-		return
-	}
-	r.mu.Lock()
-	r.subAgents[sa.ID] = sa
-	r.mu.Unlock()
-}
-
-// AttachSubAgent associates a running sub-agent with a task and fans its
-// output into every mounted session's final pipeline output.
-func (r *Registry) AttachSubAgent(taskID string, sa *agent.SubAgent) error {
-	if r == nil || sa == nil || sa.ID == "" {
-		return errors.New("task and sub-agent are required")
+// Attach binds a running execution to a task and fans its events into every
+// mounted session's pipeline.
+func (r *Registry) Attach(taskID string, run Run) error {
+	if r == nil || run == nil {
+		return errors.New("task and run are required")
 	}
 	r.mu.Lock()
 	t, ok := r.tasks[taskID]
@@ -68,17 +65,32 @@ func (r *Registry) AttachSubAgent(taskID string, sa *agent.SubAgent) error {
 		r.mu.Unlock()
 		return errors.New("task not found")
 	}
-	t.SubAgentID = sa.ID
-	r.subAgents[sa.ID] = sa
+	t.RunID = run.Ref()
 	r.mu.Unlock()
-	go r.forwardOutput(taskID, sa.OutputCh)
+	go r.forwardOutput(taskID, run)
 	return nil
 }
 
-func (r *Registry) forwardOutput(taskID string, output <-chan pipeline.Message) {
-	for msg := range output {
-		r.updateFromMessage(taskID, msg)
-		for _, sessionID := range r.mountedSessionIDs(taskID) {
+func (r *Registry) forwardOutput(taskID string, run Run) {
+	for event := range run.Events() {
+		r.updateFromEvent(taskID, event)
+		base, ok := eventMessage(taskID, event)
+		if !ok {
+			continue
+		}
+		// 计费是会话级的，而终态消息会扇出给每个挂载会话：用量只能跟着
+		// 其中一条消息走，否则同一笔 token 会被 N 个会话重复记账（挂载方
+		// 属于其它设备时还会记到别的账户）。
+		mounted, usageSession, origin := r.outputTargets(taskID)
+		if event.Usage != nil {
+			switch {
+			case usageSession == "":
+				logging.Warnf("task %s: no deliverable session, dropping usage", taskID)
+			case origin != "" && usageSession != origin:
+				logging.Warnf("task %s: origin session %q is gone; billing usage to session %q", taskID, origin, usageSession)
+			}
+		}
+		for _, sessionID := range mounted {
 			if r.sessions == nil {
 				continue
 			}
@@ -86,41 +98,118 @@ func (r *Registry) forwardOutput(taskID string, output <-chan pipeline.Message) 
 			if !ok || sess.Pipeline == nil {
 				continue
 			}
+			msg := base
+			if sessionID != usageSession {
+				msg = withoutUsage(base)
+			}
 			_ = sess.Pipeline.Emit(msg)
 		}
 	}
 }
 
-func (r *Registry) updateFromMessage(taskID string, msg pipeline.Message) {
+// outputTargets 返回本次扇出的挂载会话快照，以及唯一一个接收用量的会话。
+// 快照与用量接收者在同一次读锁内确定：分两次读的话，origin 可能在中间被
+// Dismount，导致用量被写到没收到终态消息的会话上、或者谁都没记。
+//
+// 用量优先给创建任务的会话；它已经不可投递（连接关闭、会话移除）时退回
+// 第一个仍可投递的挂载会话——宁可记到消费方账上，也不静默丢账，并用日志
+// 留下归属偏移的记录。没有任何可投递会话时返回空字符串，调用方会剥掉用量。
+func (r *Registry) outputTargets(taskID string) (mounted []string, usageSession, origin string) {
+	r.mu.RLock()
+	t, ok := r.tasks[taskID]
+	if !ok {
+		r.mu.RUnlock()
+		return nil, "", ""
+	}
+	mounted = append([]string(nil), t.MountedSessions...)
+	origin = t.OriginSessionID
+	r.mu.RUnlock()
+
+	deliverable := func(id string) bool {
+		if r.sessions == nil || id == "" {
+			return false
+		}
+		sess, ok := r.sessions.Get(id)
+		return ok && sess.Pipeline != nil
+	}
+	for _, id := range mounted {
+		if id == origin && deliverable(id) {
+			return mounted, id, origin
+		}
+	}
+	for _, id := range mounted {
+		if deliverable(id) {
+			return mounted, id, origin
+		}
+	}
+	return mounted, "", origin
+}
+
+// withoutUsage 返回不带 llm_usage 的消息副本；Extra 是共享 map，必须复制
+// 后再删，避免把接收方的用量也一起抹掉。
+func withoutUsage(msg pipeline.Message) pipeline.Message {
+	if _, ok := msg.Metadata.Extra[agent.UsageMetadataKey]; !ok {
+		return msg
+	}
+	extra := make(map[string]interface{}, len(msg.Metadata.Extra))
+	for k, v := range msg.Metadata.Extra {
+		if k == agent.UsageMetadataKey {
+			continue
+		}
+		extra[k] = v
+	}
+	msg.Metadata.Extra = extra
+	return msg
+}
+
+func (r *Registry) updateFromEvent(taskID string, event Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	t, ok := r.tasks[taskID]
 	if !ok {
 		return
 	}
-	switch msg.Type {
-	case pipeline.MessageTypeData:
-		if text, ok := msg.Payload.(string); ok && strings.TrimSpace(text) != "" {
-			t.Progress += text
+	switch event.Type {
+	case EventText:
+		if strings.TrimSpace(event.Text) != "" {
+			t.Progress += event.Text
 		}
-	case pipeline.MessageTypeFinished:
+	case EventDone:
 		t.Status = StatusCompleted
-	case pipeline.MessageTypeError:
+	case EventError:
 		t.Status = StatusCancelled
-		if msg.Metadata.Error != nil {
-			t.Progress = msg.Metadata.Error.Error()
+		if event.Err != nil {
+			t.Progress = event.Err.Error()
 		}
 	}
 }
 
-func (r *Registry) mountedSessionIDs(taskID string) []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	t, ok := r.tasks[taskID]
-	if !ok {
-		return nil
+// eventMessage 把执行事件转换成会话 pipeline 消息。source 保持
+// "sub_agent" 以免影响各渠道对已有输出流的路由。
+func eventMessage(taskID string, event Event) (pipeline.Message, bool) {
+	switch event.Type {
+	case EventText:
+		msg := pipeline.NewMessage(pipeline.MessageTypeData, event.Text)
+		msg.Metadata.Extra = map[string]interface{}{"source": "sub_agent", "task_id": taskID}
+		return msg, true
+	case EventDone:
+		msg := pipeline.NewMessage(pipeline.MessageTypeFinished, nil)
+		msg.Metadata.Extra = map[string]interface{}{"source": "sub_agent", "task_id": taskID}
+		if event.Usage != nil {
+			msg.Metadata.Extra[agent.UsageMetadataKey] = *event.Usage
+		}
+		return msg, true
+	case EventError:
+		msg := pipeline.NewMessage(pipeline.MessageTypeError, nil).WithError(event.Err)
+		msg.Metadata.Extra = map[string]interface{}{"source": "sub_agent", "task_id": taskID}
+		// 失败路径上已经发生的用量同样要计费，否则中断/出错的 turn 会漏账。
+		if event.Usage != nil {
+			msg.Metadata.Extra[agent.UsageMetadataKey] = *event.Usage
+		}
+		return msg, true
+	default:
+		return pipeline.Message{}, false
 	}
-	return append([]string(nil), t.MountedSessions...)
 }
 
 // Get returns a snapshot copy of a task. The clone must happen while the read
@@ -189,29 +278,37 @@ func cloneTask(t *Task) *Task {
 }
 
 // ToolSpecs returns the task operations available to a primary agent in one
-// session. start is responsible for constructing and starting the isolated
-// sub-agent after a task record has been created.
-func (r *Registry) ToolSpecs(sessionID string, start func(context.Context, *Task) error) []tools.Spec {
+// session. runner is responsible for starting the background execution after a
+// task record has been created; nil keeps tasks metadata-only (useful in tests).
+func (r *Registry) ToolSpecs(sessionID string, runner Runner) []tools.Spec {
 	return []tools.Spec{
 		{
 			Name: "CreateTask", Description: "Create a background task for a complex request.",
 			Parameters: objectSchema(map[string]any{"title": map[string]any{"type": "string", "description": "Task title and objective"}}, "title"),
-			Execute: func(ctx context.Context, arguments json.RawMessage) (tools.Result, error) {
+			Execute: func(_ context.Context, arguments json.RawMessage) (tools.Result, error) {
 				var req struct {
 					Title string `json:"title"`
 				}
 				if err := json.Unmarshal(arguments, &req); err != nil {
 					return tools.Result{}, err
 				}
-				task, err := r.Create(CreateTaskRequest{ID: newID(), Title: strings.TrimSpace(req.Title)})
+				task, err := r.Create(CreateTaskRequest{
+					ID:              newID(),
+					Title:           strings.TrimSpace(req.Title),
+					OriginSessionID: sessionID,
+				})
 				if err != nil {
 					return tools.Result{}, err
 				}
 				if !r.Mount(task.ID, sessionID) {
 					return tools.Result{}, errors.New("mount created task")
 				}
-				if start != nil {
-					if err := start(ctx, task); err != nil {
+				if runner != nil {
+					run, err := runner.Start(RunRequest{TaskID: task.ID, Title: task.Title})
+					if err != nil {
+						return tools.Result{}, fmt.Errorf("start task: %w", err)
+					}
+					if err := r.Attach(task.ID, run); err != nil {
 						return tools.Result{}, err
 					}
 				}

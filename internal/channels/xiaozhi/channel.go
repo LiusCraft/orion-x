@@ -683,24 +683,15 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 		cancel()
 		return nil, fmt.Errorf("get LLM client: %w", err)
 	}
-	taskMemory := memSvc
-	if taskMemory == nil {
-		taskMemory = s.memorySvc
-	}
-	for _, spec := range s.tasks.ToolSpecs(sessionID, func(_ context.Context, taskRecord *task.Task) error {
-		taskMgr := connMgr.Clone()
-		taskAgent, err := agent.NewWithClient(connAgentCfg, llmClient, taskMgr, taskMemory)
-		if err != nil {
-			return err
-		}
-		taskSession := session.New(session.SessionMeta{Model: connAgentCfg.Model})
-		taskSession.Add(session.Message{Role: session.RoleUser, Content: taskRecord.Title})
-		subAgent := agent.NewSubAgent("sub_"+taskRecord.ID, taskRecord.ID, taskAgent)
-		if err := subAgent.Start(s.rootCtx, taskSession); err != nil {
-			return err
-		}
-		return s.tasks.AttachSubAgent(taskRecord.ID, subAgent)
-	}) {
+	taskRunner := task.NewLocalRunner(s.rootCtx, task.LocalConfig{
+		Client:          llmClient,
+		Tools:           connMgr.CloneRegistry,
+		Model:           connAgentCfg.Model,
+		Thinking:        connAgentCfg.Thinking,
+		Options:         connAgentCfg.ProviderOptions,
+		MaxOutputTokens: connAgentCfg.MaxOutputTokens,
+	})
+	for _, spec := range s.tasks.ToolSpecs(sessionID, taskRunner) {
 		connMgr.Registry().Add(spec)
 	}
 	var connAgent *agent.Agent
