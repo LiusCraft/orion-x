@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/agent"
+	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
@@ -80,8 +81,16 @@ func (r *Registry) forwardOutput(taskID string, run Run) {
 		// 计费是会话级的，而终态消息会扇出给每个挂载会话：用量只能跟着
 		// 其中一条消息走，否则同一笔 token 会被 N 个会话重复记账（挂载方
 		// 属于其它设备时还会记到别的账户）。
-		usageSession := r.usageSessionID(taskID)
-		for _, sessionID := range r.mountedSessionIDs(taskID) {
+		mounted, usageSession, origin := r.outputTargets(taskID)
+		if event.Usage != nil {
+			switch {
+			case usageSession == "":
+				logging.Warnf("task %s: no deliverable session, dropping usage", taskID)
+			case origin != "" && usageSession != origin:
+				logging.Warnf("task %s: origin session %q is gone; billing usage to session %q", taskID, origin, usageSession)
+			}
+		}
+		for _, sessionID := range mounted {
 			if r.sessions == nil {
 				continue
 			}
@@ -98,23 +107,42 @@ func (r *Registry) forwardOutput(taskID string, run Run) {
 	}
 }
 
-// usageSessionID 返回唯一一个在终态消息上接收用量的会话：创建任务的会话；
-// 它已解挂时退回第一个挂载会话，保证用量始终只上报一次。
-func (r *Registry) usageSessionID(taskID string) string {
+// outputTargets 返回本次扇出的挂载会话快照，以及唯一一个接收用量的会话。
+// 快照与用量接收者在同一次读锁内确定：分两次读的话，origin 可能在中间被
+// Dismount，导致用量被写到没收到终态消息的会话上、或者谁都没记。
+//
+// 用量优先给创建任务的会话；它已经不可投递（连接关闭、会话移除）时退回
+// 第一个仍可投递的挂载会话——宁可记到消费方账上，也不静默丢账，并用日志
+// 留下归属偏移的记录。没有任何可投递会话时返回空字符串，调用方会剥掉用量。
+func (r *Registry) outputTargets(taskID string) (mounted []string, usageSession, origin string) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	t, ok := r.tasks[taskID]
-	if !ok || len(t.MountedSessions) == 0 {
-		return ""
+	if !ok {
+		r.mu.RUnlock()
+		return nil, "", ""
 	}
-	if t.OriginSessionID != "" {
-		for _, id := range t.MountedSessions {
-			if id == t.OriginSessionID {
-				return id
-			}
+	mounted = append([]string(nil), t.MountedSessions...)
+	origin = t.OriginSessionID
+	r.mu.RUnlock()
+
+	deliverable := func(id string) bool {
+		if r.sessions == nil || id == "" {
+			return false
+		}
+		sess, ok := r.sessions.Get(id)
+		return ok && sess.Pipeline != nil
+	}
+	for _, id := range mounted {
+		if id == origin && deliverable(id) {
+			return mounted, id, origin
 		}
 	}
-	return t.MountedSessions[0]
+	for _, id := range mounted {
+		if deliverable(id) {
+			return mounted, id, origin
+		}
+	}
+	return mounted, "", origin
 }
 
 // withoutUsage 返回不带 llm_usage 的消息副本；Extra 是共享 map，必须复制
@@ -182,16 +210,6 @@ func eventMessage(taskID string, event Event) (pipeline.Message, bool) {
 	default:
 		return pipeline.Message{}, false
 	}
-}
-
-func (r *Registry) mountedSessionIDs(taskID string) []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	t, ok := r.tasks[taskID]
-	if !ok {
-		return nil
-	}
-	return append([]string(nil), t.MountedSessions...)
 }
 
 // Get returns a snapshot copy of a task. The clone must happen while the read

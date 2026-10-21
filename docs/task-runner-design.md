@@ -129,7 +129,11 @@ type Event struct {
 `forwardOutput` 只给该会话的消息写 `llm_usage`，其它挂载会话仍收到
 `finished` / `error` 但不带用量。计费是会话级的，若把同一条带用量的消息扇出给
 N 个挂载会话，同一批 token 会被重复记账（挂载方属于其它设备时还会记到别的账户）。
-创建任务的会话已解挂时，用量退回到第一个挂载会话，确保只上报一次。
+挂载列表与用量接收者在同一次快照里确定。创建任务的会话已不可投递（连接关闭、
+会话被移除）或已解挂时，用量退回到第一个仍可投递的挂载会话，并打 warning 日志：
+宁可把用量记到消费方账上，也不静默丢账；没有任何可投递会话时丢弃用量并告警。
+若产品口径要求「只记创建者」，后续应把用量从扇出消息里拆出来，用独立的
+task 级计费句柄上报。
 
 `source` 保持 `"sub_agent"`，因为各渠道对输出流的路由依赖它
 （例如 xiaozhi 的 `WSOutputStage` 把非 `llm` 文本当作 STT 文本处理）。
@@ -208,6 +212,10 @@ for _, spec := range c.tasks.ToolSpecs(sess.ID, taskRunner) {
 ## 开放问题
 
 - 任务取消 / 列举的 UI 入口（`Registry` 目前只有 mount 语义，没有 Cancel/ListBySession）。
-- 远端 `idle` 与真正完成的裁决（含 `stop_reason`、`rescheduled` 等状态）。
+  取消路径当前既不发终态事件、也不上报已发生用量，任务会停在 `StatusActive`；
+  接入取消 UI 前要确定「取消是否计费」，并让 Registry 在事件流无终态关闭时收敛状态。
+- 远端 `idle` 与真正完成的判定（含 `stop_reason`、`rescheduled` 等状态）。
 - 失败与取消目前都落到 `StatusCancelled`，是否增加 `StatusFailed`。
+- 任务用量在 origin 会话不可投递时记到消费方账上，是否需要更严格的归属策略
+  （独立 task 级计费句柄）。
 - 工具权限确认（远端 permission/confirmation 事件）如何回传到渠道。

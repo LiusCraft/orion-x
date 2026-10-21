@@ -305,3 +305,40 @@ func TestRegistryBillsUsageOnceAcrossMountedSessions(t *testing.T) {
 		t.Errorf("non-origin session got usage = %+v, want none", usage)
 	}
 }
+
+// TestRegistryFallsBackWhenOriginSessionIsGone 验证创建任务的连接已关闭
+// （会话从 Manager 移除）时，用量会记到仍可投递的挂载会话上，而不是静默丢掉。
+func TestRegistryFallsBackWhenOriginSessionIsGone(t *testing.T) {
+	sessions := session.NewManager()
+	output := &capturePipeline{emitReady: make(chan struct{}, 1)}
+	sess := session.New(session.SessionMeta{})
+	sess.ID = "session-2"
+	sess.Pipeline = output
+	sessions.Add(sess) // session-1（origin）已随连接关闭被移除
+
+	r := NewRegistry(sessions)
+	created, err := r.Create(CreateTaskRequest{ID: "task-1", Title: "Plan trip", OriginSessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	// 连接关闭不会自动 Dismount，origin 仍留在挂载列表里。
+	if !r.Mount(created.ID, "session-1") || !r.Mount(created.ID, "session-2") {
+		t.Fatal("Mount() = false")
+	}
+	run := newStubRun("run:task-1", 1)
+	if err := r.Attach(created.ID, run); err != nil {
+		t.Fatalf("Attach() error = %v", err)
+	}
+	run.events <- Event{Type: EventDone, Usage: &agent.Usage{InputTokens: 10, Steps: 1}}
+	close(run.events)
+
+	select {
+	case <-output.emitReady:
+	case <-time.After(time.Second):
+		t.Fatal("surviving session did not receive the terminal message")
+	}
+	got := onlyMessage(t, output)
+	if usage, ok := agent.UsageFromMetadata(got.Metadata); !ok || usage.InputTokens != 10 {
+		t.Errorf("fallback usage = %+v, ok = %t", usage, ok)
+	}
+}
