@@ -78,7 +78,8 @@ func TestTaskToolSpecsCreateAndMount(t *testing.T) {
 	if err := json.Unmarshal([]byte(result.Output), &created); err != nil {
 		t.Fatalf("decode result = %v", err)
 	}
-	if created.RunID != "run:task-1" || len(created.MountedSessions) != 1 || created.MountedSessions[0] != "session-1" {
+	if created.RunID != "run:task-1" || created.OriginSessionID != "session-1" ||
+		len(created.MountedSessions) != 1 || created.MountedSessions[0] != "session-1" {
 		t.Fatalf("created task = %#v", created)
 	}
 	result, err = registry.Execute(context.Background(), "GetTaskProgress", json.RawMessage(`{"task_id":"`+created.ID+`"}`))
@@ -240,5 +241,67 @@ func TestRegistryForwardsRunErrorUsage(t *testing.T) {
 	usage, ok := agent.UsageFromMetadata(output.emitted[0].Metadata)
 	if !ok || usage.InputTokens != 7 || usage.Steps != 1 {
 		t.Fatalf("error usage = %+v, ok = %t", usage, ok)
+	}
+}
+
+// onlyMessage 返回管道收到的唯一一条消息，用来断言扇出内容。
+func onlyMessage(t *testing.T, p *capturePipeline) pipeline.Message {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.emitted) != 1 {
+		t.Fatalf("emitted %d messages, want 1", len(p.emitted))
+	}
+	return p.emitted[0]
+}
+
+// TestRegistryBillsUsageOnceAcrossMountedSessions 验证同一任务被多个会话挂载时，
+// 用量只随一条终态消息记账：计费是会话级的，把同一条带 llm_usage 的消息扇出给
+// 每个挂载会话，会把同一批 token 重复计入（甚至记到别的账户）。
+func TestRegistryBillsUsageOnceAcrossMountedSessions(t *testing.T) {
+	sessions := session.NewManager()
+	pipelines := map[string]*capturePipeline{}
+	for _, id := range []string{"session-1", "session-2"} {
+		output := &capturePipeline{emitReady: make(chan struct{}, 1)}
+		pipelines[id] = output
+		sess := session.New(session.SessionMeta{})
+		sess.ID = id
+		sess.Pipeline = output
+		sessions.Add(sess)
+	}
+
+	r := NewRegistry(sessions)
+	created, err := r.Create(CreateTaskRequest{ID: "task-1", Title: "Plan trip", OriginSessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if !r.Mount(created.ID, "session-1") || !r.Mount(created.ID, "session-2") {
+		t.Fatal("Mount() = false")
+	}
+	run := newStubRun("run:task-1", 1)
+	if err := r.Attach(created.ID, run); err != nil {
+		t.Fatalf("Attach() error = %v", err)
+	}
+	run.events <- Event{Type: EventDone, Usage: &agent.Usage{InputTokens: 10, OutputTokens: 5, Steps: 1}}
+	close(run.events)
+
+	for id, output := range pipelines {
+		select {
+		case <-output.emitReady:
+		case <-time.After(time.Second):
+			t.Fatalf("%s did not receive the terminal message", id)
+		}
+	}
+
+	origin := onlyMessage(t, pipelines["session-1"])
+	if usage, ok := agent.UsageFromMetadata(origin.Metadata); !ok || usage.InputTokens != 10 {
+		t.Errorf("origin usage = %+v, ok = %t", usage, ok)
+	}
+	other := onlyMessage(t, pipelines["session-2"])
+	if other.Type != pipeline.MessageTypeFinished {
+		t.Errorf("non-origin message type = %v, want finished", other.Type)
+	}
+	if usage, ok := agent.UsageFromMetadata(other.Metadata); ok {
+		t.Errorf("non-origin session got usage = %+v, want none", usage)
 	}
 }

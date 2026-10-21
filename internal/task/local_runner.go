@@ -127,7 +127,8 @@ func (r *LocalRunner) execute(ctx context.Context, req RunRequest, run *localRun
 	emit := func(event Event) bool {
 		// 取消优先：执行已停止时不再上报终态，否则被取消的任务会被误判成
 		// 正常完成。缓冲区有空间时，发送在锁内完成，与 stop 互斥——stop
-		// 返回之后不可能再送出终态事件。
+		// 返回之后不会再送出终态事件。缓冲区满时下面的 select 是 best-effort：
+		// 发送与 ctx.Done() 同时就绪时由运行时随机选择。
 		run.mu.Lock()
 		if run.stopped || ctx.Err() != nil {
 			run.mu.Unlock()
@@ -204,13 +205,15 @@ func (r *LocalRunner) execute(ctx context.Context, req RunRequest, run *localRun
 			msg, err := executeToolCall(ctx, registry, call)
 			if err != nil {
 				logging.Errorf("task %s: tool %s: %v", req.TaskID, call.Name, err)
-				emit(Event{Type: EventError, Err: err})
+				// 工具致命错误同样终止执行，已经发生的 token 要随失败上报。
+				emit(Event{Type: EventError, Err: err, Usage: usageOrNil(total)})
 				return
 			}
 			messages = append(messages, msg)
 		}
 	}
-	emit(Event{Type: EventError, Err: fmt.Errorf("reached max steps (%d)", maxSteps)})
+	// 达到步数上限也是失败终态：此前每一步的调用都已经计费，不能丢。
+	emit(Event{Type: EventError, Err: fmt.Errorf("reached max steps (%d)", maxSteps), Usage: usageOrNil(total)})
 }
 
 // localStepResult 是单轮 LLM 调用的结果，与 agent.stepResult 同形但

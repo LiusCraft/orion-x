@@ -50,20 +50,6 @@ func toolCallStream(calls ...llm.ToolCall) func() *llm.StreamReader {
 	}
 }
 
-// alwaysToolCallLLM 每轮都要求调用 loopTool，用于触发步数上限。
-type alwaysToolCallLLM struct{}
-
-func (alwaysToolCallLLM) Chat(context.Context, llm.Request) (*llm.StreamReader, error) {
-	sr := llm.NewStreamReader(func() {})
-	sr.Send(llm.Message{ToolCalls: []llm.ToolCall{{ID: "1", Name: "loopTool", Arguments: "{}"}}})
-	sr.Close()
-	return sr, nil
-}
-
-func (alwaysToolCallLLM) ChatSync(context.Context, llm.Request) (llm.Message, error) {
-	return llm.Message{}, nil
-}
-
 // stallingLLM 发出一个文本增量后挂起，直到 ctx 取消才关闭流。
 type stallingLLM struct{}
 
@@ -183,8 +169,15 @@ func TestLocalRunnerReachesMaxSteps(t *testing.T) {
 			return tools.Result{Output: "again"}, nil
 		},
 	})
+	loopStream := func() *usageGenStream {
+		return &usageGenStream{events: []llm.Event{responseDoneEvent(&llm.Response{
+			Message: llm.Message{ToolCalls: []llm.ToolCall{{ID: "1", Name: "loopTool", Arguments: "{}"}}},
+			Usage:   llm.Usage{InputTokens: 10, OutputTokens: 1},
+		})}}
+	}
+	client := &usageGenClient{streams: []*usageGenStream{loopStream(), loopStream()}}
 	runner := NewLocalRunner(context.Background(), LocalConfig{
-		Client:   alwaysToolCallLLM{},
+		Client:   client,
 		Tools:    func() *tools.Registry { return registry },
 		MaxSteps: 2,
 	})
@@ -200,6 +193,10 @@ func TestLocalRunnerReachesMaxSteps(t *testing.T) {
 	}
 	if want := "reached max steps (2)"; terminal.Err.Error() != want {
 		t.Errorf("error = %q, want %q", terminal.Err.Error(), want)
+	}
+	// 步数上限是失败终态，但前两步的 token 已经付掉了，必须随错误上报。
+	if got, want := terminal.Usage, (agent.Usage{InputTokens: 20, OutputTokens: 2, Steps: 2}); got == nil || *got != want {
+		t.Errorf("EventError.Usage = %+v, want %+v", got, want)
 	}
 }
 
@@ -371,5 +368,44 @@ func TestLocalRunnerKeepsUsageOnStreamError(t *testing.T) {
 	}
 	if terminal.Usage.InputTokens != 50 || terminal.Usage.OutputTokens != 5 {
 		t.Errorf("EventError.Usage = %+v, want input=50 output=5", *terminal.Usage)
+	}
+}
+
+// TestLocalRunnerKeepsUsageOnFatalToolError 验证工具返回框架级错误时，本轮
+// 已经发生的 LLM 用量同样随 EventError 上报。
+func TestLocalRunnerKeepsUsageOnFatalToolError(t *testing.T) {
+	wantErr := errors.New("tool exploded")
+	registry := tools.NewRegistry(tools.Spec{
+		Name: "explode",
+		Execute: func(context.Context, json.RawMessage) (tools.Result, error) {
+			return tools.Result{}, wantErr
+		},
+	})
+	client := &usageGenClient{streams: []*usageGenStream{{
+		events: []llm.Event{responseDoneEvent(&llm.Response{
+			Message: llm.Message{ToolCalls: []llm.ToolCall{{ID: "1", Name: "explode", Arguments: "{}"}}},
+			Usage:   llm.Usage{InputTokens: 42, OutputTokens: 3},
+		})},
+	}}}
+	runner := NewLocalRunner(context.Background(), LocalConfig{
+		Client: client,
+		Tools:  func() *tools.Registry { return registry },
+	})
+
+	run, err := runner.Start(RunRequest{TaskID: "task-1", Title: "炸一下"})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	events := collectRunEvents(t, run)
+	terminal := events[len(events)-1]
+	if terminal.Type != EventError {
+		t.Fatalf("terminal event = %+v", terminal)
+	}
+	if terminal.Err == nil || !errors.Is(terminal.Err, wantErr) {
+		t.Errorf("terminal.Err = %v, want %v", terminal.Err, wantErr)
+	}
+	want := agent.Usage{InputTokens: 42, OutputTokens: 3, Steps: 1}
+	if terminal.Usage == nil || *terminal.Usage != want {
+		t.Errorf("EventError.Usage = %+v, want %+v", terminal.Usage, want)
 	}
 }

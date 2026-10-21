@@ -41,7 +41,13 @@ func (r *Registry) Create(req CreateTaskRequest) (*Task, error) {
 	if _, exists := r.tasks[req.ID]; exists {
 		return nil, errors.New("task already exists")
 	}
-	t := &Task{ID: req.ID, Title: req.Title, Status: StatusActive, CreatedAt: time.Now().UTC()}
+	t := &Task{
+		ID:              req.ID,
+		Title:           req.Title,
+		Status:          StatusActive,
+		OriginSessionID: req.OriginSessionID,
+		CreatedAt:       time.Now().UTC(),
+	}
 	r.tasks[t.ID] = t
 	return cloneTask(t), nil
 }
@@ -67,10 +73,14 @@ func (r *Registry) Attach(taskID string, run Run) error {
 func (r *Registry) forwardOutput(taskID string, run Run) {
 	for event := range run.Events() {
 		r.updateFromEvent(taskID, event)
-		msg, ok := eventMessage(taskID, event)
+		base, ok := eventMessage(taskID, event)
 		if !ok {
 			continue
 		}
+		// 计费是会话级的，而终态消息会扇出给每个挂载会话：用量只能跟着
+		// 其中一条消息走，否则同一笔 token 会被 N 个会话重复记账（挂载方
+		// 属于其它设备时还会记到别的账户）。
+		usageSession := r.usageSessionID(taskID)
 		for _, sessionID := range r.mountedSessionIDs(taskID) {
 			if r.sessions == nil {
 				continue
@@ -79,9 +89,49 @@ func (r *Registry) forwardOutput(taskID string, run Run) {
 			if !ok || sess.Pipeline == nil {
 				continue
 			}
+			msg := base
+			if sessionID != usageSession {
+				msg = withoutUsage(base)
+			}
 			_ = sess.Pipeline.Emit(msg)
 		}
 	}
+}
+
+// usageSessionID 返回唯一一个在终态消息上接收用量的会话：创建任务的会话；
+// 它已解挂时退回第一个挂载会话，保证用量始终只上报一次。
+func (r *Registry) usageSessionID(taskID string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t, ok := r.tasks[taskID]
+	if !ok || len(t.MountedSessions) == 0 {
+		return ""
+	}
+	if t.OriginSessionID != "" {
+		for _, id := range t.MountedSessions {
+			if id == t.OriginSessionID {
+				return id
+			}
+		}
+	}
+	return t.MountedSessions[0]
+}
+
+// withoutUsage 返回不带 llm_usage 的消息副本；Extra 是共享 map，必须复制
+// 后再删，避免把接收方的用量也一起抹掉。
+func withoutUsage(msg pipeline.Message) pipeline.Message {
+	if _, ok := msg.Metadata.Extra[agent.UsageMetadataKey]; !ok {
+		return msg
+	}
+	extra := make(map[string]interface{}, len(msg.Metadata.Extra))
+	for k, v := range msg.Metadata.Extra {
+		if k == agent.UsageMetadataKey {
+			continue
+		}
+		extra[k] = v
+	}
+	msg.Metadata.Extra = extra
+	return msg
 }
 
 func (r *Registry) updateFromEvent(taskID string, event Event) {
@@ -224,7 +274,11 @@ func (r *Registry) ToolSpecs(sessionID string, runner Runner) []tools.Spec {
 				if err := json.Unmarshal(arguments, &req); err != nil {
 					return tools.Result{}, err
 				}
-				task, err := r.Create(CreateTaskRequest{ID: newID(), Title: strings.TrimSpace(req.Title)})
+				task, err := r.Create(CreateTaskRequest{
+					ID:              newID(),
+					Title:           strings.TrimSpace(req.Title),
+					OriginSessionID: sessionID,
+				})
 				if err != nil {
 					return tools.Result{}, err
 				}

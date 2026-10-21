@@ -62,8 +62,9 @@ type Event struct {
 	Text string
 	// Tool 仅在 EventToolUse 时有值。
 	Tool *ToolUse
-	// Usage 仅在 EventDone 时有值，计费未启用或后端不上报用量时为 nil。
-	// 口径与 agent.Usage 一致，Registry 会把它放进 pipeline 元数据。
+	// Usage 是本次执行累计的用量，在终态事件（EventDone / EventError）上
+	// 携带；计费未启用或后端不上报用量时为 nil。口径与 agent.Usage 一致，
+	// Registry 会把它放进 pipeline 元数据。
 	Usage *agent.Usage
 	// Err 仅在 EventError 时有值。
 	Err error

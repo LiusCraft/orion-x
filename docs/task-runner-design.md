@@ -122,7 +122,14 @@ type Event struct {
 | `task:error` | `error` | `Task.Status=cancelled`、`Progress=错误文本`（沿用旧行为）；`Usage` 非空时同样写入 `agent.UsageMetadataKey` |
 
 失败路径也要带上用量：厂商已经收过钱的 token 不能因为出错或被取消而消失。
-`LocalRunner` 在流中途报错时保留本步已收到的用量，随 `EventError` 上报。
+`LocalRunner` 在流中途报错、工具致命错误、达到步数上限时都会保留已发生的用量，
+随 `EventError` 上报。
+
+用量只随**一条**终态消息进入计费：`Task` 记录 `OriginSessionID`（创建任务的会话），
+`forwardOutput` 只给该会话的消息写 `llm_usage`，其它挂载会话仍收到
+`finished` / `error` 但不带用量。计费是会话级的，若把同一条带用量的消息扇出给
+N 个挂载会话，同一批 token 会被重复记账（挂载方属于其它设备时还会记到别的账户）。
+创建任务的会话已解挂时，用量退回到第一个挂载会话，确保只上报一次。
 
 `source` 保持 `"sub_agent"`，因为各渠道对输出流的路由依赖它
 （例如 xiaozhi 的 `WSOutputStage` 把非 `llm` 文本当作 STT 文本处理）。
@@ -147,13 +154,18 @@ type Event struct {
 
 - `ProviderContext` 随 assistant 消息回传（部分 provider 依赖它重放思考块）；
 - 每步 LLM 响应累加用量（`Steps` 计调用次数），终态随 `EventDone` 上报；失败
-  路径（流中途报错、达到步数上限）随 `EventError` 上报已发生的用量；
+  路径（流中途报错、工具致命错误、达到步数上限）随 `EventError` 上报已发生的用量；
 - 工具集在每次 `Start` 时快照（渠道传 `connMgr.CloneRegistry`），任务代理能看到
   当时已注册的工具（含任务工具、记忆工具），与旧行为一致；
 - 渠道配置（thinking/options/max output tokens）透传到每次请求。
 
-取消语义：`Interrupt` / `Close` 会置上 `stopped` 标志，`emit` 与它互斥，
-因此 stop 返回之后不会再送出终态事件——被取消的任务不会被误判成正常完成。
+取消语义：`Interrupt` / `Close` 会置上 `stopped` 标志并取消 ctx，`emit` 在
+发送前检查该标志。事件缓冲区有空间时，发送与 stop 互斥，stop 返回后不会再送出
+终态事件；缓冲区满时走第二个 `select`，发送与 `ctx.Done()` 同时就绪的情况下由
+Go 随机选择，属于 best-effort——极少数情况下已取消的任务仍可能收到终态事件。
+当前 `Interrupt` / `Close` 尚无生产调用方（取消只随渠道 root ctx 关闭发生）；
+接入任务取消 UI 时应把终态判定移到消费端（如 `Run` 暴露 stopped 状态），或
+按上述语义接受该竞态。
 
 顺带修正的一处口径偏差：旧实现把子代理跑在渠道 root ctx 上，turn 级的
 usage collector 挂不到它，`FinishedEvent.Usage` 实际恒为 nil——任务用量从未进入
