@@ -1,5 +1,11 @@
 # Orion-X 重构方案: DAG Pipeline 编排 + 薄 Channel Gateway
 
+> ⚠️ **历史设计稿**：本文描述的是重构当时的方案，其中「子代理」部分已被
+> `docs/task-runner-design.md` 取代——`internal/agent.SubAgent` 已删除，任务执行
+> 改为 `internal/task` 的 `Runner` / `Run` / `Event` 抽象（进程内实现 `LocalRunner`，
+> 后续可接远程托管 agent）。文中出现 `SubAgent`、`Task.SubAgentID`、
+> `Registry.subAgents` 的地方请以 `docs/task-runner-design.md` 为准。
+
 ## Context
 
 `cmd/wsserver` 当前每个 xiaozhi WS 连接都独立创建 ASR Processor/Agent/TTS Processor 并构建完整的 DAG pipeline。`internal/channels/` 目前只是生命周期管理器，不是真正的薄网关层。`cmd/voicebot` 只是 CLI 测试版，忽略。

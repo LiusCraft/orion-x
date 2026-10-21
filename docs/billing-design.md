@@ -370,7 +370,7 @@ graph TD
 
 子代理的用量也得算进来。`runStep` 是主 agent 和子代理共用的，所以累加器不能挂在某个 Agent 实例上——放在**会话级的 collector 里，用 ctx 递下去**：`runStep` 拿到 `finalResponse.Usage` 就往里加（带锁，并行子代理安全），主 agent 在 turn 边界 `Take()` 一次取走并清零，塞进 `FinishedEvent`。这样子代理不需要认识计费也能被算上。已知的小偏差：task 可以异步挂载、活得比 turn 长，那部分用量会落到下一个 turn 的 `turn_index` 上——金额不丢，维度会偏，可以接受。
 
-（2026-10 更新：task 子代理已改为 `internal/task` 自有的简单 loop，不再共用 `runStep`；任务用量在结束时随 `EventDone` 写入 `finished` 消息元数据，接线层照常识别，路径见 `docs/task-runner-design.md`。旧实现跑在渠道 root ctx 上，collector 挂不到，任务用量实际未上报——本次一并修正。）
+（2026-10 更新：task 子代理已改为 `internal/task` 自有的简单 loop，不再共用 `runStep`；任务用量在结束时随 `EventDone`（失败时随 `EventError`）写入消息元数据，接线层照常识别，路径见 `docs/task-runner-design.md`。旧实现跑在渠道 root ctx 上，collector 挂不到，任务用量实际未上报——本次一并修正。）
 
 计费的 port 就长这样，实现它的是数据面的接线层（不是 audio / agent 本身）：
 

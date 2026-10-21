@@ -199,3 +199,46 @@ func waitForStatus(t *testing.T, r *Registry, taskID string, want Status) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// TestRegistryForwardsRunErrorUsage 验证执行失败时，已发生的用量也会写进
+// pipeline 消息的元数据：错误路径同样要计费。
+func TestRegistryForwardsRunErrorUsage(t *testing.T) {
+	sessions := session.NewManager()
+	output := &capturePipeline{emitReady: make(chan struct{}, 1)}
+	sess := session.New(session.SessionMeta{})
+	sess.ID = "session-1"
+	sess.Pipeline = output
+	sessions.Add(sess)
+
+	r := NewRegistry(sessions)
+	created, err := r.Create(CreateTaskRequest{ID: "task-1", Title: "doomed"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if !r.Mount(created.ID, sess.ID) {
+		t.Fatal("Mount() = false")
+	}
+	run := newStubRun("run:task-1", 1)
+	if err := r.Attach(created.ID, run); err != nil {
+		t.Fatalf("Attach() error = %v", err)
+	}
+	run.events <- Event{Type: EventError, Err: errors.New("boom"), Usage: &agent.Usage{InputTokens: 7, Steps: 1}}
+	close(run.events)
+
+	select {
+	case <-output.emitReady:
+	case <-time.After(time.Second):
+		t.Fatal("task error was not forwarded")
+	}
+	waitForStatus(t, r, created.ID, StatusCancelled)
+
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	if len(output.emitted) != 1 {
+		t.Fatalf("emitted = %#v", output.emitted)
+	}
+	usage, ok := agent.UsageFromMetadata(output.emitted[0].Metadata)
+	if !ok || usage.InputTokens != 7 || usage.Steps != 1 {
+		t.Fatalf("error usage = %+v, ok = %t", usage, ok)
+	}
+}

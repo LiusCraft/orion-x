@@ -124,6 +124,10 @@ func eventMessage(taskID string, event Event) (pipeline.Message, bool) {
 	case EventError:
 		msg := pipeline.NewMessage(pipeline.MessageTypeError, nil).WithError(event.Err)
 		msg.Metadata.Extra = map[string]interface{}{"source": "sub_agent", "task_id": taskID}
+		// 失败路径上已经发生的用量同样要计费，否则中断/出错的 turn 会漏账。
+		if event.Usage != nil {
+			msg.Metadata.Extra[agent.UsageMetadataKey] = *event.Usage
+		}
 		return msg, true
 	default:
 		return pipeline.Message{}, false

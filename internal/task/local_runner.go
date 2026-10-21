@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/llm"
@@ -88,19 +89,32 @@ type localRun struct {
 	events chan Event
 	cancel context.CancelFunc
 	done   chan struct{}
+
+	// mu 保护 stopped：stop 设置它，emit 检查它。二者互斥，于是「已取消的
+	// 执行不会再上报终态」在事件缓冲区还有空间时是确定的（见 emit）。
+	mu      sync.Mutex
+	stopped bool
 }
 
 func (r *localRun) Events() <-chan Event { return r.events }
 func (r *localRun) Ref() string          { return r.ref }
 
+// stop 标记执行已停止并取消其 ctx。幂等。
+func (r *localRun) stop() {
+	r.mu.Lock()
+	r.stopped = true
+	r.mu.Unlock()
+	r.cancel()
+}
+
 // Interrupt 在进程内 loop 中退化为取消整个执行：单轮任务没有 steer 语义。
 func (r *localRun) Interrupt(context.Context) error {
-	r.cancel()
+	r.stop()
 	return nil
 }
 
 func (r *localRun) Close() error {
-	r.cancel()
+	r.stop()
 	<-r.done
 	return nil
 }
@@ -108,16 +122,25 @@ func (r *localRun) Close() error {
 func (r *LocalRunner) execute(ctx context.Context, req RunRequest, run *localRun) {
 	defer close(run.events)
 	defer close(run.done)
-	defer run.cancel()
+	defer run.stop()
 
 	emit := func(event Event) bool {
-		// 取消优先：ctx 已取消时绝不能再上报 done，否则被取消的任务会
-		// 被误判成正常完成。
-		select {
-		case <-ctx.Done():
+		// 取消优先：执行已停止时不再上报终态，否则被取消的任务会被误判成
+		// 正常完成。缓冲区有空间时，发送在锁内完成，与 stop 互斥——stop
+		// 返回之后不可能再送出终态事件。
+		run.mu.Lock()
+		if run.stopped || ctx.Err() != nil {
+			run.mu.Unlock()
 			return false
+		}
+		select {
+		case run.events <- event:
+			run.mu.Unlock()
+			return true
 		default:
 		}
+		run.mu.Unlock()
+		// 缓冲区满：等消费方腾位置，期间取消会通过 ctx.Done() 生效。
 		select {
 		case run.events <- event:
 			return true
@@ -145,14 +168,6 @@ func (r *LocalRunner) execute(ctx context.Context, req RunRequest, run *localRun
 			return
 		}
 		result, err := r.step(ctx, client, registry, messages, emit)
-		if err != nil {
-			if isContextErr(err) {
-				return
-			}
-			logging.Errorf("task %s: llm step: %v", req.TaskID, err)
-			emit(Event{Type: EventError, Err: err})
-			return
-		}
 		if result.usage != nil {
 			total.Steps++
 			total.InputTokens += result.usage.InputTokens
@@ -160,6 +175,16 @@ func (r *LocalRunner) execute(ctx context.Context, req RunRequest, run *localRun
 			total.ReasoningTokens += result.usage.ReasoningTokens
 			total.CacheReadTokens += result.usage.CacheReadTokens
 			total.CacheWriteTokens += result.usage.CacheWriteTokens
+		}
+		if err != nil {
+			if isContextErr(err) {
+				return
+			}
+			logging.Errorf("task %s: llm step: %v", req.TaskID, err)
+			// 失败路径也要带上已发生的用量：这一步的 token 已经付掉了，
+			// 丢掉就是少计费（与 agent.runLoop 的 error 路径同一口径）。
+			emit(Event{Type: EventError, Err: err, Usage: usageOrNil(total)})
+			return
 		}
 
 		messages = append(messages, llm.Message{
@@ -231,7 +256,9 @@ func (r *LocalRunner) step(
 			break
 		}
 		if err != nil {
-			return localStepResult{}, err
+			// 流中途报错：响应可能已经带回了用量，保留它，别让已发生的
+			// token 在错误路径上消失。
+			return localStepResult{text: fullText, usage: responseUsage(finalResponse)}, err
 		}
 		switch event.Type {
 		case llm.EventTextDelta:
@@ -304,6 +331,15 @@ func usageOrNil(usage agent.Usage) *agent.Usage {
 	if usage.IsZero() {
 		return nil
 	}
+	return &usage
+}
+
+// responseUsage 取出响应里的用量；响应为空时返回 nil。
+func responseUsage(resp *llm.Response) *llm.Usage {
+	if resp == nil {
+		return nil
+	}
+	usage := resp.Usage
 	return &usage
 }
 

@@ -119,7 +119,10 @@ type Event struct {
 | `task:text` | `data`（string） | `Extra.source=sub_agent`、`task_id`，同时追加 `Task.Progress` |
 | `task:tool:use` | 不进入 pipeline | 仅供日志/后续 UI；避免被 TTS 当正文朗读 |
 | `task:done` | `finished` | `Usage` 非空时写入 `agent.UsageMetadataKey`，计费口径不变 |
-| `task:error` | `error` | `Task.Status=cancelled`、`Progress=错误文本`（沿用旧行为） |
+| `task:error` | `error` | `Task.Status=cancelled`、`Progress=错误文本`（沿用旧行为）；`Usage` 非空时同样写入 `agent.UsageMetadataKey` |
+
+失败路径也要带上用量：厂商已经收过钱的 token 不能因为出错或被取消而消失。
+`LocalRunner` 在流中途报错时保留本步已收到的用量，随 `EventError` 上报。
 
 `source` 保持 `"sub_agent"`，因为各渠道对输出流的路由依赖它
 （例如 xiaozhi 的 `WSOutputStage` 把非 `llm` 文本当作 STT 文本处理）。
@@ -143,14 +146,18 @@ type Event struct {
 保留的关键行为：
 
 - `ProviderContext` 随 assistant 消息回传（部分 provider 依赖它重放思考块）；
-- 每步 LLM 响应累加用量（`Steps` 计调用次数），终态随 `EventDone` 上报；
+- 每步 LLM 响应累加用量（`Steps` 计调用次数），终态随 `EventDone` 上报；失败
+  路径（流中途报错、达到步数上限）随 `EventError` 上报已发生的用量；
 - 工具集在每次 `Start` 时快照（渠道传 `connMgr.CloneRegistry`），任务代理能看到
   当时已注册的工具（含任务工具、记忆工具），与旧行为一致；
 - 渠道配置（thinking/options/max output tokens）透传到每次请求。
 
+取消语义：`Interrupt` / `Close` 会置上 `stopped` 标志，`emit` 与它互斥，
+因此 stop 返回之后不会再送出终态事件——被取消的任务不会被误判成正常完成。
+
 顺带修正的一处口径偏差：旧实现把子代理跑在渠道 root ctx 上，turn 级的
 usage collector 挂不到它，`FinishedEvent.Usage` 实际恒为 nil——任务用量从未进入
-计费。新实现把每步用量累加进 `EventDone`，由 `Registry` 写进 `finished` 元数据，
+计费。新实现把每步用量累加进终态事件，由 `Registry` 写进消息元数据，
 与 `docs/billing-design.md` §13「子代理用量金额不丢」的意图一致（维度落在一个
 后续 turn 上，属已知可接受偏差）。
 

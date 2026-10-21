@@ -3,9 +3,12 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"testing"
 	"time"
 
+	"github.com/liuscraft/orion-x/internal/agent"
 	"github.com/liuscraft/orion-x/internal/llm"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
@@ -228,5 +231,145 @@ func TestLocalRunnerCloseStopsRun(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("events channel was not closed after Close()")
+	}
+}
+
+// usageGenStream 是 llm.Stream 的最小实现：按序吐出事件，事件用尽后返回 err
+// （只返回一次），否则 io.EOF。
+type usageGenStream struct {
+	events []llm.Event
+	err    error
+	idx    int
+}
+
+func (s *usageGenStream) Recv() (llm.Event, error) {
+	if s.idx < len(s.events) {
+		event := s.events[s.idx]
+		s.idx++
+		return event, nil
+	}
+	if s.err != nil {
+		err := s.err
+		s.err = nil
+		return llm.Event{}, err
+	}
+	return llm.Event{}, io.EOF
+}
+
+func (s *usageGenStream) Close() error { return nil }
+
+// usageGenClient 实现 llm.GenerationClient，因此 local runner 走 Stream 路径，
+// 能带上真实用量——生产用的 provider.Client 也是这样被识别的。
+type usageGenClient struct {
+	streams []*usageGenStream
+	calls   int
+}
+
+func (c *usageGenClient) Chat(context.Context, llm.Request) (*llm.StreamReader, error) {
+	return nil, errors.New("Chat should not be called")
+}
+
+func (c *usageGenClient) ChatSync(context.Context, llm.Request) (llm.Message, error) {
+	return llm.Message{}, errors.New("ChatSync should not be called")
+}
+
+func (c *usageGenClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("Generate should not be called")
+}
+
+func (c *usageGenClient) Stream(context.Context, llm.Request) (llm.Stream, error) {
+	idx := c.calls
+	if idx >= len(c.streams) {
+		idx = len(c.streams) - 1
+	}
+	c.calls++
+	return c.streams[idx], nil
+}
+
+func responseDoneEvent(resp *llm.Response) llm.Event {
+	return llm.Event{Type: llm.EventResponseDone, Response: resp}
+}
+
+// TestLocalRunnerAggregatesUsageAcrossSteps 验证多步执行的用量会累加进终态事件。
+// 这是本 PR 修复的核心缺口（任务用量此前从未上报计费），必须有回归兜底。
+func TestLocalRunnerAggregatesUsageAcrossSteps(t *testing.T) {
+	registry := tools.NewRegistry(tools.Spec{
+		Name: "noop",
+		Execute: func(context.Context, json.RawMessage) (tools.Result, error) {
+			return tools.Result{Output: "ok"}, nil
+		},
+	})
+	client := &usageGenClient{streams: []*usageGenStream{
+		{events: []llm.Event{responseDoneEvent(&llm.Response{
+			Message: llm.Message{ToolCalls: []llm.ToolCall{{ID: "1", Name: "noop", Arguments: "{}"}}},
+			Usage:   llm.Usage{InputTokens: 100, OutputTokens: 10, CacheReadTokens: 60},
+		})}},
+		{events: []llm.Event{responseDoneEvent(&llm.Response{
+			Message: llm.Message{Content: "done"},
+			Usage:   llm.Usage{InputTokens: 200, OutputTokens: 30, ReasoningTokens: 5},
+		})}},
+	}}
+	runner := NewLocalRunner(context.Background(), LocalConfig{
+		Client: client,
+		Tools:  func() *tools.Registry { return registry },
+	})
+
+	run, err := runner.Start(RunRequest{TaskID: "task-1", Title: "算一下"})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	events := collectRunEvents(t, run)
+	terminal := events[len(events)-1]
+	if terminal.Type != EventDone {
+		t.Fatalf("terminal event = %+v", terminal)
+	}
+	if terminal.Usage == nil {
+		t.Fatal("EventDone.Usage = nil, want accumulated usage")
+	}
+	want := agent.Usage{
+		InputTokens:     300,
+		OutputTokens:    40,
+		ReasoningTokens: 5,
+		CacheReadTokens: 60,
+		Steps:           2,
+	}
+	if *terminal.Usage != want {
+		t.Errorf("EventDone.Usage = %+v, want %+v", *terminal.Usage, want)
+	}
+}
+
+// TestLocalRunnerKeepsUsageOnStreamError 验证流中途报错时，已经发生的用量不会
+// 随错误一起丢掉：厂商已经收过钱，这部分 token 仍要计费。
+func TestLocalRunnerKeepsUsageOnStreamError(t *testing.T) {
+	wantErr := errors.New("stream broke after response")
+	client := &usageGenClient{streams: []*usageGenStream{{
+		events: []llm.Event{responseDoneEvent(&llm.Response{
+			Message: llm.Message{Content: "half"},
+			Usage:   llm.Usage{InputTokens: 50, OutputTokens: 5},
+		})},
+		err: wantErr,
+	}}}
+	runner := NewLocalRunner(context.Background(), LocalConfig{
+		Client: client,
+		Tools:  func() *tools.Registry { return tools.NewRegistry() },
+	})
+
+	run, err := runner.Start(RunRequest{TaskID: "task-1", Title: "算一半"})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	events := collectRunEvents(t, run)
+	terminal := events[len(events)-1]
+	if terminal.Type != EventError {
+		t.Fatalf("terminal event = %+v", terminal)
+	}
+	if terminal.Err == nil || !errors.Is(terminal.Err, wantErr) {
+		t.Errorf("terminal.Err = %v, want %v", terminal.Err, wantErr)
+	}
+	if terminal.Usage == nil {
+		t.Fatal("EventError.Usage = nil, want the usage already spent")
+	}
+	if terminal.Usage.InputTokens != 50 || terminal.Usage.OutputTokens != 5 {
+		t.Errorf("EventError.Usage = %+v, want input=50 output=5", *terminal.Usage)
 	}
 }
