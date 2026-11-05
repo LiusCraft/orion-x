@@ -13,7 +13,7 @@ import (
 	asrprovider "github.com/liuscraft/orion-x/internal/provider/asr"
 	ttsprovider "github.com/liuscraft/orion-x/internal/provider/tts"
 
-	llmprovider "github.com/liuscraft/orion-x/internal/llm/provider"
+	llmprovider "github.com/liuscraft/orion-x/internal/provider/llm/provider"
 )
 
 // SyncSystemProviders 对比代码中注册的 ProviderMeta 与数据库中 source=code 的记录，

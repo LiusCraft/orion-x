@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/liuscraft/orion-x/internal/agent"
-	"github.com/liuscraft/orion-x/internal/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
 

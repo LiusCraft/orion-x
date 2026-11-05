@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/liuscraft/orion-x/internal/llm"
-	"github.com/liuscraft/orion-x/internal/llm/provider"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm/provider"
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	openairesponses "github.com/openai/openai-go/v3/responses"

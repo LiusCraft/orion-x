@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/liuscraft/orion-x/internal/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
 )
 
 var (

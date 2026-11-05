@@ -8,8 +8,8 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/liuscraft/orion-x/internal/llm"
-	"github.com/liuscraft/orion-x/internal/llm/provider"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm/provider"
 )
 
 type Config struct {

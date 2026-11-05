@@ -2,7 +2,7 @@ package handler
 
 import (
 	"github.com/liuscraft/orion-x/internal/config"
-	"github.com/liuscraft/orion-x/internal/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
 )
 
 // AgentConfig is the minimal agent config stored in config_json.

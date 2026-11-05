@@ -1,6 +1,6 @@
 package provider
 
-import "github.com/liuscraft/orion-x/internal/llm"
+import "github.com/liuscraft/orion-x/internal/provider/llm"
 
 // UsageParts 是厂商在响应里报的原始 token 明细（可能带包含关系）。
 type UsageParts struct {

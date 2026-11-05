@@ -22,9 +22,9 @@ LLM 层不应该继续以 OpenAI Chat Completions 的 `message + tool_calls` 作
 
 当前实现位于：
 
-- `internal/llm/types.go`
-- `internal/llm/provider/provider.go`
-- `internal/llm/provider/openai/chat.go`
+- `internal/provider/llm/types.go`
+- `internal/provider/llm/provider/provider.go`
+- `internal/provider/llm/provider/openai/chat.go`
 - `internal/agent/step.go`
 - `internal/session/session.go`
 
@@ -332,7 +332,7 @@ type Config struct {
 建议包布局：
 
 ```text
-internal/llm/
+internal/provider/llm/
   client.go
   types.go
   stream.go

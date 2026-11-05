@@ -8,8 +8,8 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/audio"
 	"github.com/liuscraft/orion-x/internal/config"
-	"github.com/liuscraft/orion-x/internal/llm"
-	llmprovider "github.com/liuscraft/orion-x/internal/llm/provider"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
+	llmprovider "github.com/liuscraft/orion-x/internal/provider/llm/provider"
 	"github.com/liuscraft/orion-x/internal/provider/asr"
 	"github.com/liuscraft/orion-x/internal/provider/tts"
 )

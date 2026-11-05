@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/liuscraft/orion-x/internal/llm"
-	llmprovider "github.com/liuscraft/orion-x/internal/llm/provider"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
+	llmprovider "github.com/liuscraft/orion-x/internal/provider/llm/provider"
 	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/tools"
 )
