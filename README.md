@@ -8,6 +8,8 @@ Orion-X 将语音识别（ASR）、大语言模型（LLM）、语音合成（TTS
 
 > 项目仍在快速迭代中。面向生产部署时，请先阅读本文的安全说明和 [WebSocket 协议](docs/wsserver-protocol-design.md)。
 
+新成员请先阅读 [项目架构与新人入职指南](docs/project-guide.md)，了解各服务、模块职责、数据关系、核心调用链和本地开发流程。
+
 ## 功能概览
 
 - **设备化智能体配置**：为每个智能体配置 ASR、TTS、LLM、系统提示词、VAD、记忆和工具；一个智能体可绑定多个设备。
