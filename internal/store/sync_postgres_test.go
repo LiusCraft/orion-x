@@ -11,7 +11,7 @@ import (
 
 	// 让代码注册表里有内置 provider（llm:openai-completions），才能验证
 	// 「管理员上架的官方记录与内置记录同 slug」的匹配行为。
-	_ "github.com/liuscraft/orion-x/internal/llm/provider/openai"
+	_ "github.com/liuscraft/orion-x/internal/provider/llm/provider/openai"
 )
 
 // TestSyncSystemProvidersPostgres 是 store 包里唯一需要真实 Postgres 的测试：sync 的

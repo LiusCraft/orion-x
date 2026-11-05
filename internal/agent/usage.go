@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/liuscraft/orion-x/internal/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
 )
 
 // Usage 是一个 turn 内累计的 LLM 用量（归一口径：input 已剔除缓存读写，

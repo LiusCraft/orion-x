@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/liuscraft/orion-x/internal/language"
-	"github.com/liuscraft/orion-x/internal/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
 )
 
 type Adapter interface {

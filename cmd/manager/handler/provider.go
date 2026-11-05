@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/liuscraft/orion-x/cmd/manager/middleware"
-	llmprovider "github.com/liuscraft/orion-x/internal/llm/provider"
+	llmprovider "github.com/liuscraft/orion-x/internal/provider/llm/provider"
 	asrprovider "github.com/liuscraft/orion-x/internal/provider/asr"
 	ttsprovider "github.com/liuscraft/orion-x/internal/provider/tts"
 	"github.com/liuscraft/orion-x/internal/store"

@@ -11,7 +11,7 @@ import (
 
 	"github.com/liuscraft/orion-x/internal/channels/platform"
 	"github.com/liuscraft/orion-x/internal/config"
-	"github.com/liuscraft/orion-x/internal/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
 	"github.com/liuscraft/orion-x/internal/store"
 )
 

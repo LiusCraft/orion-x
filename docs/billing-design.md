@@ -27,7 +27,7 @@
 | 事实 | 位置 | 对计费的意义 |
 | --- | --- | --- |
 | 设备 → voicebot → `OwnerID`(user) | `internal/store/models.go` | 计费主体可由 device 反查出来，无需数据面传 user_id |
-| LLM 用量已有结构化字段 | `internal/llm/types.go` `Usage{InputTokens, OutputTokens, ReasoningTokens, CacheReadTokens, CacheWriteTokens, TotalTokens}` | LLM 计费只差埋点，不缺数据 |
+| LLM 用量已有结构化字段 | `internal/provider/llm/types.go` `Usage{InputTokens, OutputTokens, ReasoningTokens, CacheReadTokens, CacheWriteTokens, TotalTokens}` | LLM 计费只差埋点，不缺数据 |
 | ASR 有厂商返回的音频时长 | `internal/provider/asr/factory.go` `Result.UsageDuration *int`（秒） | 按厂商口径计费，避免自有计时与厂商账单打架 |
 | TTS 在 `internal/audio/tts.go` 按住进程分句合成，句子文本与音频字节都在手 | `TTSChunk{Text, Audio}`、`SynthesizeRequest.Input.Text` | 字符数与音频时长两种口径都可得 |
 | provider/model 有 `IsSystem` 区分平台代付与用户自带 | `internal/store/models.go` `Provider.IsSystem`、`AIModel.IsSystem` | BYOK 必须免费，否则是错账 |

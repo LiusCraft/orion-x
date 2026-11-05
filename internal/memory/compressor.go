@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/liuscraft/orion-x/internal/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
 )
 
 const summaryPrefix = `[上下文压缩 — 仅作参考] 前面的对话轮次已被压缩为以下摘要。

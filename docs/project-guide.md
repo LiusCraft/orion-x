@@ -289,7 +289,7 @@ flowchart LR
 | [config](../internal/config) | 运行时 `AppConfig`、默认值、CLI JSON 配置与校验；不同于 Manager 的 YAML 配置类型 |
 | [knowledge](../internal/knowledge) | 摄取服务、`parser`、`chunker`、`embedder`、`retriever`、运行时搜索 HTTP 客户端 |
 | [language](../internal/language) | 语言字典和语言代码转换 |
-| [llm](../internal/llm) | 统一模型接口和消息类型；`provider` 下实现 OpenAI Chat、Responses、Anthropic Messages，以及模型方言和用量归一化 |
+| [provider/llm](../internal/provider/llm) | 统一模型接口和消息类型；`provider/llm/provider` 下实现 OpenAI Chat、Responses、Anthropic Messages，以及模型方言和用量归一化 |
 | [logging](../internal/logging) | Zap 日志初始化、级别、输出格式和 Trace ID 辅助 |
 | [mailer](../internal/mailer) | SMTP 邮件发送 |
 | [memory](../internal/memory) | 精选记忆、用户资料快照、上下文压缩、后台回顾、轮次记录 |
@@ -303,7 +303,7 @@ flowchart LR
 | [tools](../internal/tools) | 工具注册表、MCP 客户端、内置时间 / 记忆 / 历史搜索 / 知识搜索工具 |
 | [pkg/pipeline](../pkg/pipeline) | 线性与 DAG Builder、Stage、消息、路由、Observer 等流式执行基础设施 |
 
-Provider 的两层要区分：`internal/llm/provider` 适配模型协议；`internal/provider` 负责语音 Provider 及运行时实例复用。池中复用 LLM/TTS 实例，ASR 工厂当前创建新的 Recognizer，不能假设所有会话共享同一个识别状态。
+Provider 的两层要区分：`internal/provider/llm/provider` 适配模型协议；`internal/provider` 负责 LLM/TTS 实例复用，以及 ASR/TTS 工厂和注册。池中复用 LLM/TTS 实例，ASR 工厂当前创建新的 Recognizer，不能假设所有会话共享同一个识别状态。
 
 
 ## 8. 数据模型与状态归属
@@ -562,7 +562,7 @@ npm run dev
 | 新增管理 API | `server.go` 路由 → handler → service / store → scope 映射 → Swagger → 前端 API 和页面 |
 | 增加智能体配置项 | `handler/agentcfg.go` → `assembleConfig` → `internal/config` → 通道装配 → 管理台详情页 |
 | 接入新通道 | Channel 接口 → 平台 Descriptor → 通道实现 → `cmd/wsserver/main.go` 注册 → 管理面配置与凭据接口 |
-| 增加 LLM 适配 | `internal/llm` 接口 → `llm/provider` 实现和注册 → 元数据 / 用量 → 入口导入及运行验证 |
+| 增加 LLM 适配 | `internal/provider/llm` 接口 → `internal/provider/llm/provider` 实现和注册 → 元数据 / 用量 → 入口导入及运行验证 |
 | 增加 ASR / TTS | `internal/provider/asr` 或 `tts` 接口、工厂和注册 → 元数据 → 会话装配与音频验证 |
 | 增加工具 | `internal/tools` 的 Spec / Registry → 对应通道注册 → 工具结果与错误行为验证 |
 | 修改记忆或知识库 | 运行时工具调用 → Manager 内部路由 → memory / knowledge → Store |

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/liuscraft/orion-x/internal/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
 )
 
 func TestQwenDisabledThinkingUsesNoneEffort(t *testing.T) {

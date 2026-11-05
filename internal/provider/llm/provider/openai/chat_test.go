@@ -6,7 +6,7 @@ import (
 
 	openaisdk "github.com/openai/openai-go/v3"
 
-	"github.com/liuscraft/orion-x/internal/llm"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
 )
 
 func TestApplyDialectThinking(t *testing.T) {
