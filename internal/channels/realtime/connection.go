@@ -39,6 +39,7 @@ const (
 )
 
 var errResponseCancelling = errors.New("response cancellation in progress")
+var errConnectionClosed = errors.New("connection is closed")
 
 func (c *Channel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	deviceID := firstNonEmpty(r.Header.Get("X-Device-ID"), r.URL.Query().Get("device_id"))
@@ -303,6 +304,7 @@ type connection struct {
 	deviceID string
 
 	writeMu            sync.Mutex
+	pipeMu             sync.RWMutex
 	stateMu            sync.Mutex
 	config             realtime.SessionConfig
 	pendingText        string
@@ -319,6 +321,7 @@ type connection struct {
 	createResponse     bool
 	interruptResponse  bool
 	closed             atomic.Bool
+	pipelineClosed     bool
 }
 
 func (c *connection) setupPipeline(connAgent *agent.Agent) error {
@@ -363,6 +366,11 @@ func (c *connection) handleSpeechStart() {
 
 func (c *connection) consumePipeline() {
 	for msg := range c.pipeline.Output() {
+		if msg.IsError() {
+			c.writeError("pipeline_error", msg.Metadata.Error.Error())
+			c.finishResponse("failed")
+			continue
+		}
 		switch payload := msg.Payload.(type) {
 		case string:
 			if source, ok := msg.Metadata.Extra["source"].(string); ok && source == "llm" {
@@ -379,10 +387,6 @@ func (c *connection) consumePipeline() {
 			if shouldCreate {
 				_ = c.startPendingResponse()
 			}
-		}
-		if msg.Type == pipeline.MessageTypeError && msg.Metadata.Error != nil {
-			c.writeError("pipeline_error", msg.Metadata.Error.Error())
-			c.finishResponse("failed")
 		}
 	}
 }
@@ -435,6 +439,9 @@ func (c *connection) pingLoop(done <-chan struct{}) {
 }
 
 func (c *connection) handleEvent(event realtime.ClientEvent) error {
+	if c.closed.Load() {
+		return errConnectionClosed
+	}
 	switch event.Type {
 	case realtime.ClientSessionUpdate:
 		return c.handleSessionUpdate(event.Session)
@@ -609,15 +616,24 @@ func (c *connection) handleAudioCommit() error {
 	if c.serverVADEnabled() {
 		return nil
 	}
-	if err := c.asr.EndTurn(c.ctx); err != nil {
-		return fmt.Errorf("commit audio: %w", err)
-	}
 	c.stateMu.Lock()
 	wasOpen := c.turnOpen
 	itemID := c.audioItemID
 	c.turnOpen = false
-	c.audioCommitPending = wasOpen
+	if wasOpen {
+		c.audioCommitPending = true
+	}
 	c.stateMu.Unlock()
+	if !wasOpen {
+		return nil
+	}
+	if err := c.asr.EndTurn(c.ctx); err != nil {
+		c.stateMu.Lock()
+		c.audioCommitPending = false
+		c.turnOpen = true
+		c.stateMu.Unlock()
+		return fmt.Errorf("commit audio: %w", err)
+	}
 	return c.writeEvent(realtime.ServerEvent{
 		Type:    realtime.ServerInputAudioBufferCommitted,
 		EventID: eventID(),
@@ -686,13 +702,11 @@ func (c *connection) startPendingResponse() error {
 		c.stateMu.Unlock()
 		return err
 	}
-	select {
-	case c.pipeline.Input() <- pipeline.Message{Type: pipeline.MessageTypeData, Payload: text}:
-		return nil
-	case <-c.ctx.Done():
+	if err := c.sendPipeline(pipeline.Message{Type: pipeline.MessageTypeData, Payload: text}); err != nil {
 		c.finishResponse("failed")
-		return c.ctx.Err()
+		return err
 	}
+	return nil
 }
 
 func (c *connection) handleASRResult(result audio.ASRResult) {
@@ -781,10 +795,8 @@ func (c *connection) cancelResponse() error {
 	}
 	c.responseCancelling = true
 	c.stateMu.Unlock()
-	select {
-	case c.pipeline.Input() <- pipeline.Message{Type: pipeline.MessageTypeInterrupt}:
-	case <-c.ctx.Done():
-		return c.ctx.Err()
+	if err := c.sendPipeline(pipeline.Message{Type: pipeline.MessageTypeInterrupt}); err != nil {
+		return err
 	}
 	c.finishResponse("cancelled")
 	return nil
@@ -855,6 +867,20 @@ func (c *connection) writeError(code, message string) {
 	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerError, EventID: eventID(), Error: &realtime.Error{Type: "invalid_request_error", Code: code, Message: message}})
 }
 
+func (c *connection) sendPipeline(msg pipeline.Message) error {
+	c.pipeMu.RLock()
+	defer c.pipeMu.RUnlock()
+	if c.pipelineClosed || c.pipeline == nil {
+		return errConnectionClosed
+	}
+	select {
+	case c.pipeline.Input() <- msg:
+		return nil
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	}
+}
+
 func (c *connection) writeEvent(event realtime.ServerEvent) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
@@ -878,14 +904,15 @@ func (c *connection) close() {
 		return
 	}
 	c.cancel()
-	if c.pipeline != nil {
-		_ = c.pipeline.Stop()
+	c.pipeMu.Lock()
+	c.pipelineClosed = true
+	pl := c.pipeline
+	c.pipeMu.Unlock()
+	if pl != nil {
+		_ = pl.Stop()
 	}
 	if c.tts != nil {
 		_ = c.tts.Stop()
-	}
-	if c.asr != nil {
-		_ = c.asr.Stop()
 	}
 	if c.tools != nil {
 		_ = c.tools.Close()
