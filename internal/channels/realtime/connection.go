@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -36,6 +37,8 @@ const (
 	realtimeReadTimeout    = 90 * time.Second
 	realtimePingInterval   = 30 * time.Second
 )
+
+var errResponseCancelling = errors.New("response cancellation in progress")
 
 func (c *Channel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	deviceID := firstNonEmpty(r.Header.Get("X-Device-ID"), r.URL.Query().Get("device_id"))
@@ -173,7 +176,7 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 	}
 	inputCfg := connCfg.Audio.InPipe
 	asrProc, err := audio.NewASRProcessor(&audio.ASRConfig{
-		EnableVAD:       true,
+		EnableVAD:       inputCfg.EnableVAD,
 		VADThreshold:    inputCfg.VADThreshold,
 		VADType:         inputCfg.VADType,
 		VADModelPath:    inputCfg.VADModelPath,
@@ -187,6 +190,15 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 		}
 		owner.sessions.CloseSession(sess.ID)
 		return nil, fmt.Errorf("create ASR processor: %w", err)
+	}
+	if inputCfg.EnableVAD {
+		if err := asrProc.SetVADEnabled(true); err != nil {
+			if memSvc != nil {
+				_ = memSvc.Close()
+			}
+			owner.sessions.CloseSession(sess.ID)
+			return nil, fmt.Errorf("enable ASR VAD: %w", err)
+		}
 	}
 
 	ttsProvider, err := owner.providers.GetOrCreateTTS(connCfg.Provider.TTS.Type, connCfg.Provider.TTS.Aliyun, realtimeOutputRate)
@@ -219,17 +231,20 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 	}
 
 	state := &connection{
-		ctx:         ctx,
-		cancel:      cancel,
-		ws:          ws,
-		owner:       owner,
-		session:     sess,
-		asr:         asrProc,
-		tts:         ttsProc,
-		memory:      memSvc,
-		deviceID:    deviceID,
-		config:      defaultSessionConfig(),
-		pendingText: "",
+		ctx:               ctx,
+		cancel:            cancel,
+		ws:                ws,
+		owner:             owner,
+		session:           sess,
+		asr:               asrProc,
+		tts:               ttsProc,
+		memory:            memSvc,
+		deviceID:          deviceID,
+		config:            sessionConfigForVAD(inputCfg.EnableVAD),
+		pendingText:       "",
+		turnDetectionType: turnDetectionType(inputCfg.EnableVAD),
+		createResponse:    true,
+		interruptResponse: true,
 	}
 	state.config.Model = connCfg.Provider.LLM.OpenAI.Model
 	if err := state.setupPipeline(connAgent); err != nil {
@@ -279,16 +294,21 @@ type connection struct {
 	pipeline pipeline.Pipeline
 	deviceID string
 
-	writeMu        sync.Mutex
-	stateMu        sync.Mutex
-	config         realtime.SessionConfig
-	pendingText    string
-	responseID     string
-	outputItemID   string
-	outputText     string
-	responseActive bool
-	turnOpen       bool
-	closed         atomic.Bool
+	writeMu            sync.Mutex
+	stateMu            sync.Mutex
+	config             realtime.SessionConfig
+	pendingText        string
+	responseID         string
+	outputItemID       string
+	outputText         string
+	responseActive     bool
+	responseCancelling bool
+	turnOpen           bool
+	audioCommitPending bool
+	turnDetectionType  string
+	createResponse     bool
+	interruptResponse  bool
+	closed             atomic.Bool
 }
 
 func (c *connection) setupPipeline(connAgent *agent.Agent) error {
@@ -318,7 +338,9 @@ func (c *connection) setupPipeline(connAgent *agent.Agent) error {
 
 func (c *connection) handleSpeechStart() {
 	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioSpeechStarted, EventID: eventID()})
-	c.finishResponse("cancelled")
+	if c.shouldInterruptResponse() {
+		_ = c.cancelResponse()
+	}
 }
 
 func (c *connection) consumePipeline() {
@@ -332,7 +354,13 @@ func (c *connection) consumePipeline() {
 			c.writeAudioChunk(payload)
 		}
 		if msg.Type == pipeline.MessageTypeInterrupt {
-			c.finishResponse("cancelled")
+			c.stateMu.Lock()
+			c.responseCancelling = false
+			shouldCreate := c.createResponse && c.pendingText != ""
+			c.stateMu.Unlock()
+			if shouldCreate {
+				_ = c.startPendingResponse()
+			}
 		}
 		if msg.Type == pipeline.MessageTypeError && msg.Metadata.Error != nil {
 			c.writeError("pipeline_error", msg.Metadata.Error.Error())
@@ -397,7 +425,7 @@ func (c *connection) handleEvent(event realtime.ClientEvent) error {
 	case realtime.ClientInputAudioCommit:
 		return c.handleAudioCommit()
 	case realtime.ClientInputAudioClear:
-		return c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioBufferCleared, EventID: eventID()})
+		return c.handleAudioClear()
 	case realtime.ClientConversationItemCreate:
 		return c.handleItemCreate(event.Item)
 	case realtime.ClientResponseCreate:
@@ -430,22 +458,65 @@ func (c *connection) handleSessionUpdate(update *realtime.SessionConfig) error {
 			return err
 		}
 	}
+	if update.Audio != nil && update.Audio.Input != nil {
+		if err := c.applyTurnDetection(update.Audio.Input); err != nil {
+			return err
+		}
+	}
 	c.stateMu.Lock()
 	mergeSessionConfig(&c.config, update)
 	configCopy := c.config
 	c.stateMu.Unlock()
-	if update.Audio != nil && update.Audio.Input != nil && update.Audio.Input.TurnDetection != nil {
-		enabled := strings.EqualFold(update.Audio.Input.TurnDetection.Type, "server_vad")
-		if err := c.asr.SetVADEnabled(enabled); err != nil {
-			return fmt.Errorf("update turn detection: %w", err)
+	return c.writeEvent(realtime.ServerEvent{Type: realtime.ServerSessionUpdated, EventID: eventID(), Session: &configCopy})
+}
+
+func (c *connection) handleAudioClear() error {
+	c.stateMu.Lock()
+	turnOpen := c.turnOpen
+	commitPending := c.audioCommitPending
+	c.stateMu.Unlock()
+	if turnOpen || commitPending {
+		return fmt.Errorf("input_audio_buffer.clear is unsupported while audio is active")
+	}
+	c.stateMu.Lock()
+	c.audioCommitPending = false
+	c.stateMu.Unlock()
+	return c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioBufferCleared, EventID: eventID()})
+}
+
+func (c *connection) applyTurnDetection(input *realtime.AudioInputConfig) error {
+	if !input.TurnDetectionSpecified() {
+		return nil
+	}
+	detection := input.TurnDetection
+	if detection != nil && detection.Type != "server_vad" {
+		return fmt.Errorf("turn detection type %q is unsupported", detection.Type)
+	}
+	enabled := detection != nil
+	if err := c.asr.SetVADEnabled(enabled); err != nil {
+		return fmt.Errorf("update turn detection: %w", err)
+	}
+	createResponse := true
+	interruptResponse := true
+	if detection != nil {
+		if detection.CreateResponse != nil {
+			createResponse = *detection.CreateResponse
 		}
-		if !enabled {
-			c.stateMu.Lock()
-			c.turnOpen = false
-			c.stateMu.Unlock()
+		if detection.InterruptResponse != nil {
+			interruptResponse = *detection.InterruptResponse
 		}
 	}
-	return c.writeEvent(realtime.ServerEvent{Type: realtime.ServerSessionUpdated, EventID: eventID(), Session: &configCopy})
+	c.stateMu.Lock()
+	if enabled {
+		c.turnDetectionType = detection.Type
+	} else {
+		c.turnDetectionType = ""
+		c.turnOpen = false
+	}
+	c.createResponse = createResponse
+	c.interruptResponse = interruptResponse
+	c.stateMu.Unlock()
+	return nil
 }
 
 func (c *connection) handleAudioAppend(encoded string) error {
@@ -471,6 +542,7 @@ func (c *connection) handleAudioAppend(encoded string) error {
 	beginTurn := !c.turnOpen
 	if beginTurn {
 		c.turnOpen = true
+		c.audioCommitPending = false
 	}
 	c.stateMu.Unlock()
 	if beginTurn {
@@ -510,13 +582,30 @@ func (c *connection) inputAudioRate() (int, error) {
 }
 
 func (c *connection) handleAudioCommit() error {
+	if c.serverVADEnabled() {
+		return nil
+	}
 	if err := c.asr.EndTurn(c.ctx); err != nil {
 		return fmt.Errorf("commit audio: %w", err)
 	}
 	c.stateMu.Lock()
+	wasOpen := c.turnOpen
 	c.turnOpen = false
+	c.audioCommitPending = wasOpen
 	c.stateMu.Unlock()
 	return c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioBufferCommitted, EventID: eventID()})
+}
+
+func (c *connection) serverVADEnabled() bool {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	return c.turnDetectionType == "server_vad"
+}
+
+func (c *connection) shouldInterruptResponse() bool {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	return c.responseActive && c.interruptResponse
 }
 
 func (c *connection) handleItemCreate(item *realtime.ConversationItem) error {
@@ -543,7 +632,19 @@ func (c *connection) handleItemCreate(item *realtime.ConversationItem) error {
 }
 
 func (c *connection) handleResponseCreate(_ *realtime.ResponseCreate) error {
+	return c.startPendingResponse()
+}
+
+func (c *connection) startPendingResponse() error {
 	c.stateMu.Lock()
+	if c.responseCancelling {
+		c.stateMu.Unlock()
+		return errResponseCancelling
+	}
+	if c.responseActive {
+		c.stateMu.Unlock()
+		return fmt.Errorf("a response is already in progress")
+	}
 	text := c.pendingText
 	c.pendingText = ""
 	c.stateMu.Unlock()
@@ -551,12 +652,16 @@ func (c *connection) handleResponseCreate(_ *realtime.ResponseCreate) error {
 		return fmt.Errorf("no pending conversation item")
 	}
 	if err := c.startResponse(); err != nil {
+		c.stateMu.Lock()
+		c.pendingText = text
+		c.stateMu.Unlock()
 		return err
 	}
 	select {
 	case c.pipeline.Input() <- pipeline.Message{Type: pipeline.MessageTypeData, Payload: text}:
 		return nil
 	case <-c.ctx.Done():
+		c.finishResponse("failed")
 		return c.ctx.Err()
 	}
 }
@@ -571,16 +676,26 @@ func (c *connection) handleASRResult(result audio.ASRResult) {
 		Role:    "user",
 		Content: []realtime.ContentPart{{Type: "input_audio", Transcript: result.Text}},
 	}
+	c.stateMu.Lock()
+	commitPending := c.audioCommitPending
+	c.audioCommitPending = false
+	c.stateMu.Unlock()
 	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioSpeechStopped, EventID: eventID()})
-	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioBufferCommitted, EventID: eventID(), ItemID: item.ID})
+	if !commitPending {
+		_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioBufferCommitted, EventID: eventID(), ItemID: item.ID})
+	}
 	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerConversationItemCreated, EventID: eventID(), Item: item})
 	c.stateMu.Lock()
-	c.pendingText = ""
 	c.turnOpen = false
+	c.pendingText = result.Text
+	createResponse := c.createResponse
+	responseCancelling := c.responseCancelling
 	c.stateMu.Unlock()
-	if err := c.startResponse(); err != nil {
-		c.writeError("response_error", err.Error())
+	if !createResponse || responseCancelling {
 		return
+	}
+	if err := c.startPendingResponse(); err != nil {
+		c.writeError("response_error", err.Error())
 	}
 }
 
@@ -589,6 +704,10 @@ func (c *connection) startResponse() error {
 	if c.responseActive {
 		c.stateMu.Unlock()
 		return fmt.Errorf("a response is already in progress")
+	}
+	if c.responseCancelling {
+		c.stateMu.Unlock()
+		return errResponseCancelling
 	}
 	c.responseID = "resp_" + uuid.NewString()
 	c.outputItemID = "item_" + uuid.NewString()
@@ -613,6 +732,13 @@ func (c *connection) startResponse() error {
 }
 
 func (c *connection) cancelResponse() error {
+	c.stateMu.Lock()
+	if !c.responseActive {
+		c.stateMu.Unlock()
+		return nil
+	}
+	c.responseCancelling = true
+	c.stateMu.Unlock()
 	select {
 	case c.pipeline.Input() <- pipeline.Message{Type: pipeline.MessageTypeInterrupt}:
 	case <-c.ctx.Done():
@@ -665,6 +791,9 @@ func (c *connection) finishResponse(status string) {
 	itemID := c.outputItemID
 	outputText := c.outputText
 	c.responseActive = false
+	if status != "cancelled" {
+		c.responseCancelling = false
+	}
 	c.stateMu.Unlock()
 	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerResponseOutputTextDone, EventID: eventID(), ResponseID: responseID, ItemID: itemID, Text: outputText})
 	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerResponseAudioTranscriptDone, EventID: eventID(), ResponseID: responseID, ItemID: itemID, Transcript: outputText})
@@ -718,15 +847,18 @@ func (c *connection) close() {
 }
 
 func defaultSessionConfig() realtime.SessionConfig {
+	return sessionConfigForVAD(true)
+}
+
+func sessionConfigForVAD(enabled bool) realtime.SessionConfig {
 	createResponse := true
-	return realtime.SessionConfig{
+	config := realtime.SessionConfig{
 		ID:     "sess_" + uuid.NewString(),
 		Object: "realtime.session",
 		Type:   "realtime",
 		Audio: &realtime.AudioConfig{
 			Input: &realtime.AudioInputConfig{
-				Format:        &realtime.AudioFormat{Type: "audio/pcm", Rate: realtimeInputRate},
-				TurnDetection: &realtime.TurnDetection{Type: "server_vad", CreateResponse: &createResponse},
+				Format: &realtime.AudioFormat{Type: "audio/pcm", Rate: realtimeInputRate},
 			},
 			Output: &realtime.AudioOutputConfig{
 				Format: &realtime.AudioFormat{Type: "audio/pcm", Rate: realtimeOutputRate},
@@ -734,6 +866,20 @@ func defaultSessionConfig() realtime.SessionConfig {
 		},
 		OutputModalities: []string{"text", "audio"},
 	}
+	if enabled {
+		config.Audio.Input.TurnDetection = &realtime.TurnDetection{
+			Type:           "server_vad",
+			CreateResponse: &createResponse,
+		}
+	}
+	return config
+}
+
+func turnDetectionType(enabled bool) string {
+	if enabled {
+		return "server_vad"
+	}
+	return ""
 }
 
 func mergeSessionConfig(dst, src *realtime.SessionConfig) {
@@ -751,7 +897,7 @@ func mergeSessionConfig(dst, src *realtime.SessionConfig) {
 			if src.Audio.Input.Format != nil {
 				dst.Audio.Input.Format = src.Audio.Input.Format
 			}
-			if src.Audio.Input.TurnDetection != nil {
+			if src.Audio.Input.TurnDetectionSpecified() {
 				dst.Audio.Input.TurnDetection = src.Audio.Input.TurnDetection
 			}
 		}

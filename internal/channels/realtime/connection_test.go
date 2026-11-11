@@ -1,11 +1,36 @@
 package realtime
 
 import (
+	"context"
 	"encoding/binary"
 	"testing"
 
+	"github.com/liuscraft/orion-x/internal/audio"
 	wire "github.com/liuscraft/orion-x/internal/realtime"
 )
+
+type testASR struct {
+	vadEnabled []bool
+}
+
+func (a *testASR) Write([]byte) error { return nil }
+
+func (a *testASR) OnResult(func(audio.ASRResult)) {}
+
+func (a *testASR) OnSpeechStart(func()) {}
+
+func (a *testASR) Start(context.Context) error { return nil }
+
+func (a *testASR) Stop() error { return nil }
+
+func (a *testASR) BeginTurn(context.Context) error { return nil }
+
+func (a *testASR) EndTurn(context.Context) error { return nil }
+
+func (a *testASR) SetVADEnabled(enabled bool) error {
+	a.vadEnabled = append(a.vadEnabled, enabled)
+	return nil
+}
 
 func TestPCM16Resample(t *testing.T) {
 	input := make([]byte, 4)
@@ -57,5 +82,57 @@ func TestDefaultSessionConfig(t *testing.T) {
 	}
 	if cfg.Audio.Input.TurnDetection == nil || cfg.Audio.Input.TurnDetection.Type != "server_vad" {
 		t.Fatalf("turn detection = %#v, want server_vad", cfg.Audio.Input.TurnDetection)
+	}
+}
+
+func TestSessionConfigForVADDisabled(t *testing.T) {
+	cfg := sessionConfigForVAD(false)
+	if cfg.Audio == nil || cfg.Audio.Input == nil {
+		t.Fatal("session config has no input audio configuration")
+	}
+	if cfg.Audio.Input.TurnDetection != nil {
+		t.Fatalf("turn detection = %#v, want nil", cfg.Audio.Input.TurnDetection)
+	}
+}
+
+func TestHandleAudioClearRejectsActiveTurn(t *testing.T) {
+	conn := &connection{turnOpen: true}
+	if err := conn.handleAudioClear(); err == nil {
+		t.Fatal("handleAudioClear() error = nil, want active-turn error")
+	}
+}
+
+func TestApplyTurnDetectionNullDisablesVAD(t *testing.T) {
+	parsed, err := wire.ParseClientEvent([]byte(`{"type":"session.update","session":{"audio":{"input":{"turn_detection":null}}}}`))
+	if err != nil {
+		t.Fatalf("ParseClientEvent() error = %v", err)
+	}
+	asr := &testASR{}
+	conn := &connection{
+		asr:               asr,
+		turnDetectionType: "server_vad",
+		createResponse:    true,
+		interruptResponse: true,
+	}
+	if err := conn.applyTurnDetection(parsed.Session.Audio.Input); err != nil {
+		t.Fatalf("applyTurnDetection() error = %v", err)
+	}
+	if len(asr.vadEnabled) != 1 || asr.vadEnabled[0] {
+		t.Fatalf("SetVADEnabled calls = %v, want [false]", asr.vadEnabled)
+	}
+	if conn.turnDetectionType != "" {
+		t.Errorf("turnDetectionType = %q, want empty", conn.turnDetectionType)
+	}
+}
+
+func TestApplyTurnDetectionRejectsUnsupportedType(t *testing.T) {
+	asr := &testASR{}
+	conn := &connection{asr: asr}
+	input := &wire.AudioInputConfig{TurnDetection: &wire.TurnDetection{Type: "semantic_vad"}}
+	if err := conn.applyTurnDetection(input); err == nil {
+		t.Fatal("applyTurnDetection() error = nil, want unsupported type error")
+	}
+	if len(asr.vadEnabled) != 0 {
+		t.Fatalf("SetVADEnabled calls = %v, want none", asr.vadEnabled)
 	}
 }

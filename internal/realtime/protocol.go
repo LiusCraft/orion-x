@@ -5,6 +5,7 @@
 package realtime
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -98,8 +99,33 @@ type AudioConfig struct {
 
 // AudioInputConfig describes input audio format and turn detection.
 type AudioInputConfig struct {
-	Format        *AudioFormat   `json:"format,omitempty"`
-	TurnDetection *TurnDetection `json:"turn_detection,omitempty"`
+	Format           *AudioFormat   `json:"format,omitempty"`
+	TurnDetection    *TurnDetection `json:"turn_detection,omitempty"`
+	turnDetectionSet bool
+}
+
+// TurnDetectionSpecified reports whether the input configuration explicitly
+// included a turn_detection field, including an explicit null value.
+func (c *AudioInputConfig) TurnDetectionSpecified() bool {
+	return c != nil && (c.turnDetectionSet || c.TurnDetection != nil)
+}
+
+// UnmarshalJSON preserves whether turn_detection was omitted or set to null.
+func (c *AudioInputConfig) UnmarshalJSON(data []byte) error {
+	var payload struct {
+		Format        *AudioFormat    `json:"format"`
+		TurnDetection json.RawMessage `json:"turn_detection"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	c.Format = payload.Format
+	c.TurnDetection = nil
+	c.turnDetectionSet = payload.TurnDetection != nil
+	if !c.turnDetectionSet || bytes.Equal(bytes.TrimSpace(payload.TurnDetection), []byte("null")) {
+		return nil
+	}
+	return json.Unmarshal(payload.TurnDetection, &c.TurnDetection)
 }
 
 // AudioOutputConfig describes output audio format and voice.

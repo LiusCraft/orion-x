@@ -68,7 +68,6 @@ func (s *realtimeASRStage) Process(ctx context.Context, input <-chan pipeline.Me
 		if s.onSpeech != nil {
 			s.onSpeech()
 		}
-		send(pipeline.Message{Type: pipeline.MessageTypeInterrupt, Metadata: pipeline.Metadata{Timestamp: time.Now()}})
 	})
 
 	go func() {

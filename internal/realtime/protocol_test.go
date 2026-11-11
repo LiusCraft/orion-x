@@ -20,3 +20,27 @@ func TestParseClientEventRequiresType(t *testing.T) {
 		t.Fatal("ParseClientEvent() error = nil, want required type error")
 	}
 }
+
+func TestParseClientEventPreservesTurnDetectionNull(t *testing.T) {
+	event, err := ParseClientEvent([]byte(`{"type":"session.update","session":{"audio":{"input":{"turn_detection":null}}}}`))
+	if err != nil {
+		t.Fatalf("ParseClientEvent() error = %v", err)
+	}
+	input := event.Session.Audio.Input
+	if !input.TurnDetectionSpecified() {
+		t.Fatal("TurnDetectionSpecified() = false, want explicit null to be preserved")
+	}
+	if input.TurnDetection != nil {
+		t.Fatalf("TurnDetection = %#v, want nil", input.TurnDetection)
+	}
+}
+
+func TestParseClientEventDistinguishesOmittedTurnDetection(t *testing.T) {
+	event, err := ParseClientEvent([]byte(`{"type":"session.update","session":{"audio":{"input":{}}}}`))
+	if err != nil {
+		t.Fatalf("ParseClientEvent() error = %v", err)
+	}
+	if event.Session.Audio.Input.TurnDetectionSpecified() {
+		t.Fatal("TurnDetectionSpecified() = true, want omitted field to remain unspecified")
+	}
+}
