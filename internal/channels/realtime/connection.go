@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -18,14 +19,22 @@ import (
 	"github.com/liuscraft/orion-x/internal/audio/resampler"
 	"github.com/liuscraft/orion-x/internal/channels"
 	"github.com/liuscraft/orion-x/internal/config"
+	"github.com/liuscraft/orion-x/internal/logging"
+	"github.com/liuscraft/orion-x/internal/memory"
 	"github.com/liuscraft/orion-x/internal/realtime"
 	"github.com/liuscraft/orion-x/internal/session"
+	"github.com/liuscraft/orion-x/internal/tools"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
 const (
-	realtimeInputRate  = 24000
-	realtimeOutputRate = 24000
+	realtimeInputRate      = 24000
+	realtimeOutputRate     = 24000
+	maxRealtimeMessageSize = 8 << 20
+	maxRealtimeAudioBytes  = 512 << 10
+	realtimeWriteTimeout   = 10 * time.Second
+	realtimeReadTimeout    = 90 * time.Second
+	realtimePingInterval   = 30 * time.Second
 )
 
 func (c *Channel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +48,7 @@ func (c *Channel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	conn.SetReadLimit(maxRealtimeMessageSize)
 	ctx := c.rootCtx
 	if ctx == nil {
 		ctx = context.Background()
@@ -101,13 +111,37 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 	}
 	sess := session.New(session.SessionMeta{UserID: deviceID, Model: connCfg.Provider.LLM.OpenAI.Model})
 	owner.sessions.Add(sess)
+	ctx = memory.WithContext(ctx, memory.Context{UserID: deviceID, SessionID: sess.ID, DeviceID: deviceID})
+
+	memSvc, err := memory.NewService(memory.Config{
+		MemoryCharLimit: connCfg.Memory.MemoryCharLimit,
+		UserCharLimit:   connCfg.Memory.UserCharLimit,
+	}, memory.Options{
+		ManagerURL:   managerURL(owner.deps),
+		DeviceID:     deviceID,
+		ReviewConfig: memory.ReviewConfig{Enabled: true},
+	})
+	if err != nil {
+		logging.Warnf("realtime-channel[%s]: memory init: %v", sess.ID, err)
+		memSvc = nil
+	}
 
 	llmClient, err := owner.providers.GetOrCreateLLM(ctx, connCfg.Provider.LLM.Type, connCfg.Provider.LLM.OpenAI)
 	if err != nil {
+		if memSvc != nil {
+			_ = memSvc.Close()
+		}
 		owner.sessions.CloseSession(sess.ID)
 		return nil, fmt.Errorf("get LLM client: %w", err)
 	}
 	toolMgr := owner.toolsMgr.Clone()
+	if err := registerMCPServers(ctx, toolMgr, connCfg); err != nil {
+		if memSvc != nil {
+			_ = memSvc.Close()
+		}
+		owner.sessions.CloseSession(sess.ID)
+		return nil, fmt.Errorf("register MCP servers: %w", err)
+	}
 	connAgentCfg := agent.Config{
 		Provider:        connCfg.Provider.LLM.Type,
 		APIKey:          connCfg.Provider.LLM.OpenAI.APIKey,
@@ -120,14 +154,20 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 		Thinking:        connCfg.Provider.LLM.OpenAI.Thinking,
 		MaxOutputTokens: connCfg.Provider.LLM.OpenAI.MaxOutputTokens,
 	}
-	connAgent, err := agent.NewWithClient(connAgentCfg, llmClient, toolMgr, owner.memory)
+	connAgent, err := agent.NewWithClient(connAgentCfg, llmClient, toolMgr, memSvc)
 	if err != nil {
+		if memSvc != nil {
+			_ = memSvc.Close()
+		}
 		owner.sessions.CloseSession(sess.ID)
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
 
 	recognizer, err := owner.providers.GetOrCreateASR(connCfg.Provider.ASR.Type, connCfg.Provider.ASR.Aliyun)
 	if err != nil {
+		if memSvc != nil {
+			_ = memSvc.Close()
+		}
 		owner.sessions.CloseSession(sess.ID)
 		return nil, fmt.Errorf("create ASR: %w", err)
 	}
@@ -142,12 +182,18 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 		Recognizer:      recognizer,
 	})
 	if err != nil {
+		if memSvc != nil {
+			_ = memSvc.Close()
+		}
 		owner.sessions.CloseSession(sess.ID)
 		return nil, fmt.Errorf("create ASR processor: %w", err)
 	}
 
 	ttsProvider, err := owner.providers.GetOrCreateTTS(connCfg.Provider.TTS.Type, connCfg.Provider.TTS.Aliyun, realtimeOutputRate)
 	if err != nil {
+		if memSvc != nil {
+			_ = memSvc.Close()
+		}
 		owner.sessions.CloseSession(sess.ID)
 		return nil, fmt.Errorf("create TTS: %w", err)
 	}
@@ -158,10 +204,16 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 	}
 	ttsProc, err := audio.NewTTSProcessor(ttsCfg)
 	if err != nil {
+		if memSvc != nil {
+			_ = memSvc.Close()
+		}
 		owner.sessions.CloseSession(sess.ID)
 		return nil, fmt.Errorf("create TTS processor: %w", err)
 	}
 	if err := ttsProc.Start(ctx); err != nil {
+		if memSvc != nil {
+			_ = memSvc.Close()
+		}
 		owner.sessions.CloseSession(sess.ID)
 		return nil, fmt.Errorf("start TTS processor: %w", err)
 	}
@@ -174,6 +226,7 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 		session:     sess,
 		asr:         asrProc,
 		tts:         ttsProc,
+		memory:      memSvc,
 		deviceID:    deviceID,
 		config:      defaultSessionConfig(),
 		pendingText: "",
@@ -181,6 +234,9 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 	state.config.Model = connCfg.Provider.LLM.OpenAI.Model
 	if err := state.setupPipeline(connAgent); err != nil {
 		_ = ttsProc.Stop()
+		if memSvc != nil {
+			_ = memSvc.Close()
+		}
 		owner.sessions.CloseSession(sess.ID)
 		return nil, err
 	}
@@ -190,6 +246,9 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 		Session: &state.config,
 	}); err != nil {
 		_ = ttsProc.Stop()
+		if memSvc != nil {
+			_ = memSvc.Close()
+		}
 		owner.sessions.CloseSession(sess.ID)
 		return nil, err
 	}
@@ -216,6 +275,7 @@ type connection struct {
 	session  *session.Session
 	asr      audio.ASRProcessor
 	tts      audio.TTSProcessor
+	memory   *memory.Service
 	pipeline pipeline.Pipeline
 	deviceID string
 
@@ -283,6 +343,13 @@ func (c *connection) consumePipeline() {
 
 func (c *connection) serve() {
 	defer c.cancel()
+	_ = c.ws.SetReadDeadline(time.Now().Add(realtimeReadTimeout))
+	c.ws.SetPongHandler(func(string) error {
+		return c.ws.SetReadDeadline(time.Now().Add(realtimeReadTimeout))
+	})
+	pingDone := make(chan struct{})
+	go c.pingLoop(pingDone)
+	defer close(pingDone)
 	for {
 		messageType, data, err := c.ws.ReadMessage()
 		if err != nil {
@@ -299,6 +366,24 @@ func (c *connection) serve() {
 		}
 		if err := c.handleEvent(event); err != nil {
 			c.writeError("invalid_event", err.Error())
+		}
+	}
+}
+
+func (c *connection) pingLoop(done <-chan struct{}) {
+	ticker := time.NewTicker(realtimePingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			c.writeMu.Lock()
+			err := c.ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(realtimeWriteTimeout))
+			c.writeMu.Unlock()
+			if err != nil {
+				return
+			}
 		}
 	}
 }
@@ -340,6 +425,11 @@ func (c *connection) handleSessionUpdate(update *realtime.SessionConfig) error {
 			return fmt.Errorf("output audio sample rate %d is unsupported, use %d", format.SampleRate, realtimeOutputRate)
 		}
 	}
+	if update.Audio != nil && update.Audio.Input != nil && update.Audio.Input.Format != nil {
+		if err := validateInputAudioFormat(update.Audio.Input.Format); err != nil {
+			return err
+		}
+	}
 	c.stateMu.Lock()
 	mergeSessionConfig(&c.config, update)
 	configCopy := c.config
@@ -365,6 +455,9 @@ func (c *connection) handleAudioAppend(encoded string) error {
 	data, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return fmt.Errorf("decode audio: %w", err)
+	}
+	if len(data) > maxRealtimeAudioBytes {
+		return fmt.Errorf("audio chunk exceeds %d bytes", maxRealtimeAudioBytes)
 	}
 	inputRate, err := c.inputAudioRate()
 	if err != nil {
@@ -403,6 +496,9 @@ func (c *connection) inputAudioRate() (int, error) {
 	}
 	if format.Type != "" && format.Type != "audio/pcm" {
 		return 0, fmt.Errorf("input audio format %q is unsupported, use audio/pcm", format.Type)
+	}
+	if err := validateInputAudioFormat(format); err != nil {
+		return 0, err
 	}
 	if format.Rate > 0 {
 		return format.Rate, nil
@@ -490,20 +586,30 @@ func (c *connection) handleASRResult(result audio.ASRResult) {
 
 func (c *connection) startResponse() error {
 	c.stateMu.Lock()
-	defer c.stateMu.Unlock()
 	if c.responseActive {
+		c.stateMu.Unlock()
 		return fmt.Errorf("a response is already in progress")
 	}
 	c.responseID = "resp_" + uuid.NewString()
 	c.outputItemID = "item_" + uuid.NewString()
 	c.outputText = ""
 	c.responseActive = true
-	return c.writeEventLocked(realtime.ServerEvent{
+	responseID := c.responseID
+	c.stateMu.Unlock()
+	if err := c.writeEvent(realtime.ServerEvent{
 		Type:       realtime.ServerResponseCreated,
 		EventID:    eventID(),
-		ResponseID: c.responseID,
-		Response:   map[string]any{"id": c.responseID, "status": "in_progress"},
-	})
+		ResponseID: responseID,
+		Response:   map[string]any{"id": responseID, "status": "in_progress"},
+	}); err != nil {
+		c.stateMu.Lock()
+		if c.responseID == responseID {
+			c.responseActive = false
+		}
+		c.stateMu.Unlock()
+		return err
+	}
+	return nil
 }
 
 func (c *connection) cancelResponse() error {
@@ -581,6 +687,10 @@ func (c *connection) writeEventLocked(event realtime.ServerEvent) error {
 	if err != nil {
 		return err
 	}
+	if err := c.ws.SetWriteDeadline(time.Now().Add(realtimeWriteTimeout)); err != nil {
+		return err
+	}
+	defer func() { _ = c.ws.SetWriteDeadline(time.Time{}) }()
 	return c.ws.WriteMessage(websocket.TextMessage, data)
 }
 
@@ -597,6 +707,9 @@ func (c *connection) close() {
 	}
 	if c.asr != nil {
 		_ = c.asr.Stop()
+	}
+	if c.memory != nil {
+		_ = c.memory.Close()
 	}
 	if c.session != nil {
 		c.owner.sessions.CloseSession(c.session.ID)
@@ -686,6 +799,9 @@ func pcm16Resample(data []byte, inputRate, outputRate int) ([]byte, error) {
 	if len(data)%2 != 0 {
 		return nil, fmt.Errorf("pcm16 audio has odd byte length")
 	}
+	if !isSupportedInputRate(inputRate) {
+		return nil, fmt.Errorf("unsupported input audio rate %d", inputRate)
+	}
 	if inputRate == outputRate {
 		return data, nil
 	}
@@ -702,6 +818,61 @@ func pcm16Resample(data []byte, inputRate, outputRate int) ([]byte, error) {
 		binary.LittleEndian.PutUint16(out[i*2:], uint16(sample))
 	}
 	return out, nil
+}
+
+func validateInputAudioFormat(format *realtime.AudioFormat) error {
+	if format.Type != "" && format.Type != "audio/pcm" {
+		return fmt.Errorf("input audio format %q is unsupported, use audio/pcm", format.Type)
+	}
+	if format.Rate > 0 && format.SampleRate > 0 && format.Rate != format.SampleRate {
+		return fmt.Errorf("input audio rate and sample rate must match")
+	}
+	rate := format.Rate
+	if rate == 0 {
+		rate = format.SampleRate
+	}
+	if rate > 0 && !isSupportedInputRate(rate) {
+		return fmt.Errorf("input audio rate %d is unsupported, use 8000, 16000, 24000, or 48000", rate)
+	}
+	return nil
+}
+
+func isSupportedInputRate(rate int) bool {
+	switch rate {
+	case 8000, 16000, 24000, 48000:
+		return true
+	default:
+		return false
+	}
+}
+
+func managerURL(deps *channels.Dependencies) string {
+	if deps == nil || deps.DeviceCfgLoader == nil {
+		return ""
+	}
+	return deps.DeviceCfgLoader.ManagerURL()
+}
+
+func registerMCPServers(ctx context.Context, manager *tools.Manager, cfg *config.AppConfig) error {
+	if manager == nil || cfg == nil || len(cfg.Tools.MCP) == 0 {
+		return nil
+	}
+	configs := make([]tools.MCPServerConfig, len(cfg.Tools.MCP))
+	for i, item := range cfg.Tools.MCP {
+		configs[i] = tools.MCPServerConfig{
+			ID:           item.ID,
+			Transport:    item.Transport,
+			Command:      item.Command,
+			Args:         item.Args,
+			Env:          item.Env,
+			CWD:          item.CWD,
+			Endpoint:     item.Endpoint,
+			Headers:      item.Headers,
+			ToolNameList: item.ToolNameList,
+			TimeoutMs:    item.TimeoutMs,
+		}
+	}
+	return manager.RegisterMCPServers(ctx, configs)
 }
 
 func eventID() string { return "event_" + uuid.NewString() }

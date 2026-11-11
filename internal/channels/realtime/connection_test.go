@@ -3,6 +3,8 @@ package realtime
 import (
 	"encoding/binary"
 	"testing"
+
+	wire "github.com/liuscraft/orion-x/internal/realtime"
 )
 
 func TestPCM16Resample(t *testing.T) {
@@ -22,6 +24,26 @@ func TestPCM16Resample(t *testing.T) {
 func TestPCM16ResampleRejectsOddBytes(t *testing.T) {
 	if _, err := pcm16Resample([]byte{1}, 24000, 16000); err == nil {
 		t.Fatal("pcm16Resample() error = nil, want odd-byte error")
+	}
+}
+
+func TestPCM16ResampleRejectsUnsupportedRate(t *testing.T) {
+	if _, err := pcm16Resample(make([]byte, 2), 1, 16000); err == nil {
+		t.Fatal("pcm16Resample() error = nil, want unsupported-rate error")
+	}
+}
+
+func TestValidateInputAudioFormat(t *testing.T) {
+	for _, format := range []*wire.AudioFormat{
+		{Type: "audio/pcm", Rate: 8000},
+		{Type: "audio/pcm", SampleRate: 48000},
+	} {
+		if err := validateInputAudioFormat(format); err != nil {
+			t.Errorf("validateInputAudioFormat(%#v) error = %v", format, err)
+		}
+	}
+	if err := validateInputAudioFormat(&wire.AudioFormat{Type: "audio/pcm", Rate: 1}); err == nil {
+		t.Fatal("validateInputAudioFormat() error = nil, want unsupported-rate error")
 	}
 }
 

@@ -10,30 +10,53 @@ import (
 )
 
 const (
-	ClientSessionUpdate          = "session.update"
-	ClientInputAudioAppend       = "input_audio_buffer.append"
-	ClientInputAudioCommit       = "input_audio_buffer.commit"
-	ClientInputAudioClear        = "input_audio_buffer.clear"
+	// ClientSessionUpdate updates the active Realtime session.
+	ClientSessionUpdate = "session.update"
+	// ClientInputAudioAppend appends Base64-encoded PCM audio.
+	ClientInputAudioAppend = "input_audio_buffer.append"
+	// ClientInputAudioCommit commits the current input audio buffer.
+	ClientInputAudioCommit = "input_audio_buffer.commit"
+	// ClientInputAudioClear clears the current input audio buffer.
+	ClientInputAudioClear = "input_audio_buffer.clear"
+	// ClientConversationItemCreate adds an input conversation item.
 	ClientConversationItemCreate = "conversation.item.create"
-	ClientResponseCreate         = "response.create"
-	ClientResponseCancel         = "response.cancel"
+	// ClientResponseCreate starts a response for the pending input.
+	ClientResponseCreate = "response.create"
+	// ClientResponseCancel cancels the active response.
+	ClientResponseCancel = "response.cancel"
 
-	ServerSessionCreated               = "session.created"
-	ServerSessionUpdated               = "session.updated"
-	ServerInputAudioBufferCommitted    = "input_audio_buffer.committed"
-	ServerInputAudioBufferCleared      = "input_audio_buffer.cleared"
-	ServerInputAudioSpeechStarted      = "input_audio_buffer.speech_started"
-	ServerInputAudioSpeechStopped      = "input_audio_buffer.speech_stopped"
-	ServerConversationItemCreated      = "conversation.item.created"
-	ServerResponseCreated              = "response.created"
-	ServerResponseOutputTextDelta      = "response.output_text.delta"
-	ServerResponseOutputTextDone       = "response.output_text.done"
-	ServerResponseOutputAudioDelta     = "response.output_audio.delta"
-	ServerResponseOutputAudioDone      = "response.output_audio.done"
+	// ServerSessionCreated reports the initial session configuration.
+	ServerSessionCreated = "session.created"
+	// ServerSessionUpdated reports an updated session configuration.
+	ServerSessionUpdated = "session.updated"
+	// ServerInputAudioBufferCommitted reports a committed input buffer.
+	ServerInputAudioBufferCommitted = "input_audio_buffer.committed"
+	// ServerInputAudioBufferCleared reports a cleared input buffer.
+	ServerInputAudioBufferCleared = "input_audio_buffer.cleared"
+	// ServerInputAudioSpeechStarted reports detected speech.
+	ServerInputAudioSpeechStarted = "input_audio_buffer.speech_started"
+	// ServerInputAudioSpeechStopped reports the end of detected speech.
+	ServerInputAudioSpeechStopped = "input_audio_buffer.speech_stopped"
+	// ServerConversationItemCreated reports a created conversation item.
+	ServerConversationItemCreated = "conversation.item.created"
+	// ServerResponseCreated reports the start of a response.
+	ServerResponseCreated = "response.created"
+	// ServerResponseOutputTextDelta reports an output text fragment.
+	ServerResponseOutputTextDelta = "response.output_text.delta"
+	// ServerResponseOutputTextDone reports completed output text.
+	ServerResponseOutputTextDone = "response.output_text.done"
+	// ServerResponseOutputAudioDelta reports a Base64-encoded audio fragment.
+	ServerResponseOutputAudioDelta = "response.output_audio.delta"
+	// ServerResponseOutputAudioDone reports completed output audio.
+	ServerResponseOutputAudioDone = "response.output_audio.done"
+	// ServerResponseAudioTranscriptDelta reports an audio transcript fragment.
 	ServerResponseAudioTranscriptDelta = "response.output_audio_transcript.delta"
-	ServerResponseAudioTranscriptDone  = "response.output_audio_transcript.done"
-	ServerResponseDone                 = "response.done"
-	ServerError                        = "error"
+	// ServerResponseAudioTranscriptDone reports a completed audio transcript.
+	ServerResponseAudioTranscriptDone = "response.output_audio_transcript.done"
+	// ServerResponseDone reports the final response status.
+	ServerResponseDone = "response.done"
+	// ServerError reports a protocol or processing error.
+	ServerError = "error"
 )
 
 // ClientEvent is the common envelope for client-to-server events.
