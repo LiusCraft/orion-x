@@ -1,3 +1,5 @@
+// Package voice builds the shared ASR → Agent → TTS pipeline used by voice
+// transports.
 package voice
 
 import (
@@ -14,7 +16,8 @@ import (
 type PipelineConfig struct {
 	// ASR is the processor used by the default audio input stage.
 	ASR audio.ASRProcessor
-	// ASRStage optionally replaces the default audio input stage.
+	// ASRStage optionally replaces the default audio input stage. When set, it
+	// must use the name "asr" and takes precedence over ASR and AudioSource.
 	ASRStage pipeline.Stage
 	// AudioSource feeds audio to the default ASR stage.
 	AudioSource audio.AudioSource
