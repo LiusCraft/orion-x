@@ -25,6 +25,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/realtime"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
+	"github.com/liuscraft/orion-x/internal/voice"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
@@ -329,7 +330,7 @@ type connection struct {
 
 func (c *connection) setupPipeline(connAgent *agent.Agent) error {
 	asrStage := newRealtimeASRStage(c.asr, c.handleASRResult, c.handleSpeechStart)
-	pl, err := realtime.NewPipeline(realtime.PipelineConfig{
+	pl, err := voice.NewPipeline(voice.PipelineConfig{
 		ASRStage: asrStage,
 		Agent:    connAgent,
 		Session:  c.session,

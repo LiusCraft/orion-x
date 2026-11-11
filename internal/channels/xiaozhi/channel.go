@@ -27,10 +27,10 @@ import (
 	providerpool "github.com/liuscraft/orion-x/internal/provider"
 	"github.com/liuscraft/orion-x/internal/provider/llm"
 	llmprovider "github.com/liuscraft/orion-x/internal/provider/llm/provider"
-	"github.com/liuscraft/orion-x/internal/realtime"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/task"
 	"github.com/liuscraft/orion-x/internal/tools"
+	"github.com/liuscraft/orion-x/internal/voice"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
@@ -723,7 +723,7 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 	}
 
 	outputGateway := NewWSOutputStage(safeConn, sessionID, outputCodec, ttsSampleRate, frameDurationMs, preBufferFrames)
-	pl, err := realtime.NewPipeline(realtime.PipelineConfig{
+	pl, err := voice.NewPipeline(voice.PipelineConfig{
 		ASR:         asrProc,
 		AudioSource: audioSrc,
 		Agent:       connAgent,
