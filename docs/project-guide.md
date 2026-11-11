@@ -611,7 +611,8 @@ npm run dev
 ### 14.2 代码阅读路线
 
 - 控制面：`cmd/manager/main.go → server.go → handler/internal.go → internal/store`。
-- 实时会话：`cmd/wsserver/main.go → channels/manager.go → xiaozhi/channel.go → pkg/pipeline`。
+- Xiaozhi 实时会话：`cmd/wsserver/main.go → channels/manager.go → xiaozhi/channel.go → internal/voice/pipeline.go → pkg/pipeline`。
+- Realtime GA 会话：`cmd/realtime/main.go → realtime/channel.go → internal/voice/pipeline.go → pkg/pipeline`。
 - 智能体：`agent/loop.go → context_builder.go → step.go → tool_executor.go`。
 - 数据与检索：`memory/service.go → Manager 内部路由`；`knowledge/service.go → embedder / retriever`。
 - 计费：`billing/item.go / wire.go → client/session.go → service/authorize.go / usage.go / settle.go`。
