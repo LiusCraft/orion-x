@@ -110,9 +110,6 @@ func (c *Channel) handler() http.Handler {
 
 // Stop gracefully closes the server and active sessions.
 func (c *Channel) Stop(ctx context.Context) error {
-	if c.rootCancel != nil {
-		c.rootCancel()
-	}
 	if c.httpServer != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		_ = c.httpServer.Shutdown(shutdownCtx)
@@ -125,7 +122,17 @@ func (c *Channel) Stop(ctx context.Context) error {
 	}
 	c.connMu.Unlock()
 	for _, conn := range connections {
-		conn.close()
+		conn.requestClose()
+	}
+	for _, conn := range connections {
+		select {
+		case <-conn.serveDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if c.rootCancel != nil {
+		c.rootCancel()
 	}
 	select {
 	case <-ctx.Done():

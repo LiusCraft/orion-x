@@ -141,6 +141,23 @@ func TestApplyTurnDetectionRejectsUnsupportedType(t *testing.T) {
 	}
 }
 
+func TestManualASRFinalsAccumulateUntilCommit(t *testing.T) {
+	conn := &connection{
+		turnOpen:    true,
+		audioItemID: "item_test",
+	}
+
+	conn.handleASRResult(audio.ASRResult{IsFinal: true, Text: "你好"})
+	conn.handleASRResult(audio.ASRResult{IsFinal: true, Text: "世界"})
+
+	if got := conn.audioTranscript; got != "你好世界" {
+		t.Errorf("audioTranscript = %q, want 你好世界", got)
+	}
+	if !conn.turnOpen {
+		t.Fatal("turnOpen = false, want true before manual commit")
+	}
+}
+
 func TestServerAudioDeltaUsesGAFields(t *testing.T) {
 	data, err := json.Marshal(wire.ServerEvent{
 		Type:         wire.ServerResponseOutputAudioDelta,

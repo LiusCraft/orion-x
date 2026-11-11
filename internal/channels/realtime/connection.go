@@ -73,7 +73,6 @@ func (c *Channel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	c.track(connState)
 	go func() {
 		defer c.untrack(connState)
-		defer connState.close()
 		connState.serve()
 	}()
 }
@@ -247,6 +246,7 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 		memory:            memSvc,
 		tools:             toolMgr,
 		deviceID:          deviceID,
+		serveDone:         make(chan struct{}),
 		config:            sessionConfigForVAD(inputCfg.EnableVAD),
 		pendingText:       "",
 		turnDetectionType: turnDetectionType(inputCfg.EnableVAD),
@@ -295,13 +295,14 @@ type connection struct {
 	ws     *websocket.Conn
 	owner  *Channel
 
-	session  *session.Session
-	asr      audio.ASRProcessor
-	tts      audio.TTSProcessor
-	memory   *memory.Service
-	tools    *tools.Manager
-	pipeline pipeline.Pipeline
-	deviceID string
+	session   *session.Session
+	asr       audio.ASRProcessor
+	tts       audio.TTSProcessor
+	memory    *memory.Service
+	tools     *tools.Manager
+	pipeline  pipeline.Pipeline
+	deviceID  string
+	serveDone chan struct{}
 
 	writeMu            sync.Mutex
 	pipeMu             sync.RWMutex
@@ -316,11 +317,13 @@ type connection struct {
 	turnOpen           bool
 	audioCommitPending bool
 	audioItemID        string
+	audioTranscript    string
 	audioTurnStartedAt time.Time
 	turnDetectionType  string
 	createResponse     bool
 	interruptResponse  bool
 	closed             atomic.Bool
+	stopping           atomic.Bool
 	pipelineClosed     bool
 }
 
@@ -392,6 +395,8 @@ func (c *connection) consumePipeline() {
 }
 
 func (c *connection) serve() {
+	defer close(c.serveDone)
+	defer c.close()
 	defer c.cancel()
 	_ = c.ws.SetReadDeadline(time.Now().Add(realtimeReadTimeout))
 	c.ws.SetPongHandler(func(string) error {
@@ -439,7 +444,7 @@ func (c *connection) pingLoop(done <-chan struct{}) {
 }
 
 func (c *connection) handleEvent(event realtime.ClientEvent) error {
-	if c.closed.Load() {
+	if c.closed.Load() || c.stopping.Load() {
 		return errConnectionClosed
 	}
 	switch event.Type {
@@ -505,6 +510,9 @@ func (c *connection) handleAudioClear() error {
 	}
 	c.stateMu.Lock()
 	c.audioCommitPending = false
+	c.audioTranscript = ""
+	c.audioItemID = ""
+	c.audioTurnStartedAt = time.Time{}
 	c.stateMu.Unlock()
 	return c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioBufferCleared, EventID: eventID()})
 }
@@ -573,6 +581,7 @@ func (c *connection) handleAudioAppend(encoded string) error {
 	if beginTurn {
 		c.stateMu.Lock()
 		c.audioItemID = "item_" + uuid.NewString()
+		c.audioTranscript = ""
 		c.audioTurnStartedAt = time.Now()
 		c.stateMu.Unlock()
 		if err := c.asr.BeginTurn(c.ctx); err != nil {
@@ -619,6 +628,7 @@ func (c *connection) handleAudioCommit() error {
 	c.stateMu.Lock()
 	wasOpen := c.turnOpen
 	itemID := c.audioItemID
+	startedAt := c.audioTurnStartedAt
 	c.turnOpen = false
 	if wasOpen {
 		c.audioCommitPending = true
@@ -634,11 +644,22 @@ func (c *connection) handleAudioCommit() error {
 		c.stateMu.Unlock()
 		return fmt.Errorf("commit audio: %w", err)
 	}
-	return c.writeEvent(realtime.ServerEvent{
-		Type:    realtime.ServerInputAudioBufferCommitted,
-		EventID: eventID(),
-		ItemID:  itemID,
-	})
+	c.stateMu.Lock()
+	text := strings.TrimSpace(c.audioTranscript)
+	c.audioTranscript = ""
+	c.audioCommitPending = false
+	c.audioItemID = ""
+	c.audioTurnStartedAt = time.Time{}
+	c.stateMu.Unlock()
+	if text == "" {
+		return c.writeEvent(realtime.ServerEvent{
+			Type:    realtime.ServerInputAudioBufferCommitted,
+			EventID: eventID(),
+			ItemID:  itemID,
+		})
+	}
+	c.emitAudioTurn(text, itemID, startedAt, false)
+	return nil
 }
 
 func (c *connection) serverVADEnabled() bool {
@@ -713,6 +734,16 @@ func (c *connection) handleASRResult(result audio.ASRResult) {
 	if !result.IsFinal || strings.TrimSpace(result.Text) == "" {
 		return
 	}
+	if !c.serverVADEnabled() {
+		c.stateMu.Lock()
+		if !c.turnOpen && c.audioItemID == "" {
+			c.stateMu.Unlock()
+			return
+		}
+		c.audioTranscript += result.Text
+		c.stateMu.Unlock()
+		return
+	}
 	c.stateMu.Lock()
 	itemID := c.audioItemID
 	startedAt := c.audioTurnStartedAt
@@ -721,6 +752,10 @@ func (c *connection) handleASRResult(result audio.ASRResult) {
 	c.audioItemID = ""
 	c.audioTurnStartedAt = time.Time{}
 	c.stateMu.Unlock()
+	c.emitAudioTurn(result.Text, itemID, startedAt, commitPending)
+}
+
+func (c *connection) emitAudioTurn(text, itemID string, startedAt time.Time, commitPending bool) {
 	if itemID == "" {
 		itemID = "item_" + uuid.NewString()
 	}
@@ -729,7 +764,7 @@ func (c *connection) handleASRResult(result audio.ASRResult) {
 		ID:      itemID,
 		Type:    "message",
 		Role:    "user",
-		Content: []realtime.ContentPart{{Type: "input_audio", Transcript: result.Text}},
+		Content: []realtime.ContentPart{{Type: "input_audio", Transcript: text}},
 	}
 	_ = c.writeEvent(realtime.ServerEvent{
 		Type:       realtime.ServerInputAudioSpeechStopped,
@@ -743,7 +778,7 @@ func (c *connection) handleASRResult(result audio.ASRResult) {
 	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerConversationItemCreated, EventID: eventID(), Item: item})
 	c.stateMu.Lock()
 	c.turnOpen = false
-	c.pendingText = result.Text
+	c.pendingText = text
 	createResponse := c.createResponse
 	responseCancelling := c.responseCancelling
 	c.stateMu.Unlock()
@@ -923,6 +958,14 @@ func (c *connection) close() {
 	if c.session != nil {
 		c.owner.sessions.CloseSession(c.session.ID)
 	}
+	_ = c.ws.Close()
+}
+
+func (c *connection) requestClose() {
+	c.stopping.Store(true)
+	c.pipeMu.Lock()
+	c.pipelineClosed = true
+	c.pipeMu.Unlock()
 	_ = c.ws.Close()
 }
 
