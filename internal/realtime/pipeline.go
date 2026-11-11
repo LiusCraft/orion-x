@@ -12,13 +12,20 @@ import (
 // PipelineConfig describes the shared ASR → Agent → TTS graph used by voice
 // transports. The transport owns lifecycle and output handling.
 type PipelineConfig struct {
-	ASR         audio.ASRProcessor
-	ASRStage    pipeline.Stage
+	// ASR is the processor used by the default audio input stage.
+	ASR audio.ASRProcessor
+	// ASRStage optionally replaces the default audio input stage.
+	ASRStage pipeline.Stage
+	// AudioSource feeds audio to the default ASR stage.
 	AudioSource audio.AudioSource
-	Agent       agent.AgentRunner
-	Session     *session.Session
-	TTS         audio.TTSProcessor
-	Observer    pipeline.PipelineObserver
+	// Agent generates responses from ASR or text input.
+	Agent agent.AgentRunner
+	// Session stores conversation messages for the agent.
+	Session *session.Session
+	// TTS synthesizes agent output.
+	TTS audio.TTSProcessor
+	// Observer receives pipeline lifecycle events.
+	Observer pipeline.PipelineObserver
 }
 
 // NewPipeline builds the canonical voice pipeline shared by Realtime and
