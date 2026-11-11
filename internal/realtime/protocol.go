@@ -1,7 +1,6 @@
 // Package realtime contains the wire model for the OpenAI Realtime GA
-// protocol. The package deliberately has no transport or provider
-// dependencies so it can be reused by the realtime server and Xiaozhi
-// adapters.
+// protocol. Runtime pipeline construction lives in internal/voice so this
+// package remains reusable by transports and protocol adapters.
 package realtime
 
 import (
