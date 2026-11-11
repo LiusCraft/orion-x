@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"testing"
 
 	"github.com/liuscraft/orion-x/internal/audio"
@@ -123,6 +124,9 @@ func TestApplyTurnDetectionNullDisablesVAD(t *testing.T) {
 	if conn.turnDetectionType != "" {
 		t.Errorf("turnDetectionType = %q, want empty", conn.turnDetectionType)
 	}
+	if conn.createResponse {
+		t.Fatal("createResponse = true, want false for manual turn detection")
+	}
 }
 
 func TestApplyTurnDetectionRejectsUnsupportedType(t *testing.T) {
@@ -134,5 +138,33 @@ func TestApplyTurnDetectionRejectsUnsupportedType(t *testing.T) {
 	}
 	if len(asr.vadEnabled) != 0 {
 		t.Fatalf("SetVADEnabled calls = %v, want none", asr.vadEnabled)
+	}
+}
+
+func TestServerAudioDeltaUsesGAFields(t *testing.T) {
+	data, err := json.Marshal(wire.ServerEvent{
+		Type:         wire.ServerResponseOutputAudioDelta,
+		OutputIndex:  0,
+		ContentIndex: 0,
+		Delta:        "AQI=",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got["delta"] != "AQI=" {
+		t.Errorf("delta = %v, want AQI=", got["delta"])
+	}
+	if got["output_index"] != float64(0) {
+		t.Errorf("output_index = %v, want 0", got["output_index"])
+	}
+	if got["content_index"] != float64(0) {
+		t.Errorf("content_index = %v, want 0", got["content_index"])
+	}
+	if _, ok := got["audio"]; ok {
+		t.Fatalf("audio field = %v, want absent", got["audio"])
 	}
 }

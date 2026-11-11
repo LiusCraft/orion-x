@@ -138,6 +138,11 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 		return nil, fmt.Errorf("get LLM client: %w", err)
 	}
 	toolMgr := owner.toolsMgr.Clone()
+	defer func() {
+		if toolMgr != nil {
+			_ = toolMgr.Close()
+		}
+	}()
 	if err := registerMCPServers(ctx, toolMgr, connCfg); err != nil {
 		if memSvc != nil {
 			_ = memSvc.Close()
@@ -239,11 +244,12 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 		asr:               asrProc,
 		tts:               ttsProc,
 		memory:            memSvc,
+		tools:             toolMgr,
 		deviceID:          deviceID,
 		config:            sessionConfigForVAD(inputCfg.EnableVAD),
 		pendingText:       "",
 		turnDetectionType: turnDetectionType(inputCfg.EnableVAD),
-		createResponse:    true,
+		createResponse:    inputCfg.EnableVAD,
 		interruptResponse: true,
 	}
 	state.config.Model = connCfg.Provider.LLM.OpenAI.Model
@@ -267,6 +273,7 @@ func newConnection(ctx context.Context, cancel context.CancelFunc, ws *websocket
 		owner.sessions.CloseSession(sess.ID)
 		return nil, err
 	}
+	toolMgr = nil
 	return state, nil
 }
 
@@ -291,6 +298,7 @@ type connection struct {
 	asr      audio.ASRProcessor
 	tts      audio.TTSProcessor
 	memory   *memory.Service
+	tools    *tools.Manager
 	pipeline pipeline.Pipeline
 	deviceID string
 
@@ -305,6 +313,8 @@ type connection struct {
 	responseCancelling bool
 	turnOpen           bool
 	audioCommitPending bool
+	audioItemID        string
+	audioTurnStartedAt time.Time
 	turnDetectionType  string
 	createResponse     bool
 	interruptResponse  bool
@@ -337,7 +347,15 @@ func (c *connection) setupPipeline(connAgent *agent.Agent) error {
 }
 
 func (c *connection) handleSpeechStart() {
-	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioSpeechStarted, EventID: eventID()})
+	c.stateMu.Lock()
+	itemID := c.audioItemID
+	c.stateMu.Unlock()
+	_ = c.writeEvent(realtime.ServerEvent{
+		Type:         realtime.ServerInputAudioSpeechStarted,
+		EventID:      eventID(),
+		ItemID:       itemID,
+		AudioStartMS: 0,
+	})
 	if c.shouldInterruptResponse() {
 		_ = c.cancelResponse()
 	}
@@ -496,7 +514,7 @@ func (c *connection) applyTurnDetection(input *realtime.AudioInputConfig) error 
 	if err := c.asr.SetVADEnabled(enabled); err != nil {
 		return fmt.Errorf("update turn detection: %w", err)
 	}
-	createResponse := true
+	createResponse := enabled
 	interruptResponse := true
 	if detection != nil {
 		if detection.CreateResponse != nil {
@@ -546,9 +564,15 @@ func (c *connection) handleAudioAppend(encoded string) error {
 	}
 	c.stateMu.Unlock()
 	if beginTurn {
+		c.stateMu.Lock()
+		c.audioItemID = "item_" + uuid.NewString()
+		c.audioTurnStartedAt = time.Now()
+		c.stateMu.Unlock()
 		if err := c.asr.BeginTurn(c.ctx); err != nil {
 			c.stateMu.Lock()
 			c.turnOpen = false
+			c.audioItemID = ""
+			c.audioTurnStartedAt = time.Time{}
 			c.stateMu.Unlock()
 			return fmt.Errorf("begin audio turn: %w", err)
 		}
@@ -590,10 +614,15 @@ func (c *connection) handleAudioCommit() error {
 	}
 	c.stateMu.Lock()
 	wasOpen := c.turnOpen
+	itemID := c.audioItemID
 	c.turnOpen = false
 	c.audioCommitPending = wasOpen
 	c.stateMu.Unlock()
-	return c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioBufferCommitted, EventID: eventID()})
+	return c.writeEvent(realtime.ServerEvent{
+		Type:    realtime.ServerInputAudioBufferCommitted,
+		EventID: eventID(),
+		ItemID:  itemID,
+	})
 }
 
 func (c *connection) serverVADEnabled() bool {
@@ -670,17 +699,30 @@ func (c *connection) handleASRResult(result audio.ASRResult) {
 	if !result.IsFinal || strings.TrimSpace(result.Text) == "" {
 		return
 	}
+	c.stateMu.Lock()
+	itemID := c.audioItemID
+	startedAt := c.audioTurnStartedAt
+	commitPending := c.audioCommitPending
+	c.audioCommitPending = false
+	c.audioItemID = ""
+	c.audioTurnStartedAt = time.Time{}
+	c.stateMu.Unlock()
+	if itemID == "" {
+		itemID = "item_" + uuid.NewString()
+	}
+	audioEndMS := elapsedMilliseconds(startedAt)
 	item := &realtime.ConversationItem{
-		ID:      "item_" + uuid.NewString(),
+		ID:      itemID,
 		Type:    "message",
 		Role:    "user",
 		Content: []realtime.ContentPart{{Type: "input_audio", Transcript: result.Text}},
 	}
-	c.stateMu.Lock()
-	commitPending := c.audioCommitPending
-	c.audioCommitPending = false
-	c.stateMu.Unlock()
-	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioSpeechStopped, EventID: eventID()})
+	_ = c.writeEvent(realtime.ServerEvent{
+		Type:       realtime.ServerInputAudioSpeechStopped,
+		EventID:    eventID(),
+		ItemID:     itemID,
+		AudioEndMS: audioEndMS,
+	})
 	if !commitPending {
 		_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerInputAudioBufferCommitted, EventID: eventID(), ItemID: item.ID})
 	}
@@ -691,7 +733,7 @@ func (c *connection) handleASRResult(result audio.ASRResult) {
 	createResponse := c.createResponse
 	responseCancelling := c.responseCancelling
 	c.stateMu.Unlock()
-	if !createResponse || responseCancelling {
+	if !createResponse || !c.serverVADEnabled() || responseCancelling {
 		return
 	}
 	if err := c.startPendingResponse(); err != nil {
@@ -778,7 +820,15 @@ func (c *connection) writeAudioChunk(chunk audio.TTSChunk) {
 	responseID := c.responseID
 	itemID := c.outputItemID
 	c.stateMu.Unlock()
-	_ = c.writeEvent(realtime.ServerEvent{Type: realtime.ServerResponseOutputAudioDelta, EventID: eventID(), ResponseID: responseID, ItemID: itemID, Audio: base64.StdEncoding.EncodeToString(chunk.Audio)})
+	_ = c.writeEvent(realtime.ServerEvent{
+		Type:         realtime.ServerResponseOutputAudioDelta,
+		EventID:      eventID(),
+		ResponseID:   responseID,
+		ItemID:       itemID,
+		OutputIndex:  0,
+		ContentIndex: 0,
+		Delta:        base64.StdEncoding.EncodeToString(chunk.Audio),
+	})
 }
 
 func (c *connection) finishResponse(status string) {
@@ -837,6 +887,9 @@ func (c *connection) close() {
 	if c.asr != nil {
 		_ = c.asr.Stop()
 	}
+	if c.tools != nil {
+		_ = c.tools.Close()
+	}
 	if c.memory != nil {
 		_ = c.memory.Close()
 	}
@@ -846,12 +899,19 @@ func (c *connection) close() {
 	_ = c.ws.Close()
 }
 
+func elapsedMilliseconds(startedAt time.Time) int {
+	if startedAt.IsZero() {
+		return 0
+	}
+	return max(0, int(time.Since(startedAt).Milliseconds()))
+}
+
 func defaultSessionConfig() realtime.SessionConfig {
 	return sessionConfigForVAD(true)
 }
 
 func sessionConfigForVAD(enabled bool) realtime.SessionConfig {
-	createResponse := true
+	createResponse := enabled
 	config := realtime.SessionConfig{
 		ID:     "sess_" + uuid.NewString(),
 		Object: "realtime.session",

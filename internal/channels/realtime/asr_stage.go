@@ -55,14 +55,6 @@ func (s *realtimeASRStage) Process(ctx context.Context, input <-chan pipeline.Me
 		if s.onResult != nil {
 			s.onResult(result)
 		}
-		if !result.IsFinal || result.Text == "" {
-			return
-		}
-		send(pipeline.Message{
-			Type:     pipeline.MessageTypeData,
-			Payload:  result.Text,
-			Metadata: pipeline.Metadata{Timestamp: time.Now()},
-		})
 	})
 	s.proc.OnSpeechStart(func() {
 		if s.onSpeech != nil {

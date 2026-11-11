@@ -200,10 +200,10 @@ type ServerEvent struct {
 	Response       any               `json:"response,omitempty"`
 	ResponseID     string            `json:"response_id,omitempty"`
 	ItemID         string            `json:"item_id,omitempty"`
-	OutputIndex    int               `json:"output_index,omitempty"`
-	ContentIndex   int               `json:"content_index,omitempty"`
-	AudioStartMS   int               `json:"audio_start_ms,omitempty"`
-	AudioEndMS     int               `json:"audio_end_ms,omitempty"`
+	OutputIndex    int               `json:"output_index"`
+	ContentIndex   int               `json:"content_index"`
+	AudioStartMS   int               `json:"audio_start_ms"`
+	AudioEndMS     int               `json:"audio_end_ms"`
 	PreviousItemID string            `json:"previous_item_id,omitempty"`
 	Delta          string            `json:"delta,omitempty"`
 	Text           string            `json:"text,omitempty"`
