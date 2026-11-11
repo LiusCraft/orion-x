@@ -31,9 +31,6 @@ type PipelineConfig struct {
 // NewPipeline builds the canonical voice pipeline shared by Realtime and
 // Xiaozhi transports.
 func NewPipeline(cfg PipelineConfig) (pipeline.Pipeline, error) {
-	if cfg.ASR == nil {
-		return nil, fmt.Errorf("asr processor is required")
-	}
 	if cfg.Agent == nil {
 		return nil, fmt.Errorf("agent is required")
 	}
@@ -46,7 +43,13 @@ func NewPipeline(cfg PipelineConfig) (pipeline.Pipeline, error) {
 
 	asrStage := cfg.ASRStage
 	if asrStage == nil {
+		if cfg.ASR == nil {
+			return nil, fmt.Errorf("asr processor is required when no asr stage is supplied")
+		}
 		asrStage = audio.NewASRStage(cfg.ASR, cfg.AudioSource)
+	}
+	if asrStage.Name() != "asr" {
+		return nil, fmt.Errorf("asr stage name = %q, want %q", asrStage.Name(), "asr")
 	}
 	builder := pipeline.NewDAGBuilder().
 		AddStage(asrStage).

@@ -330,13 +330,10 @@ type connection struct {
 func (c *connection) setupPipeline(connAgent *agent.Agent) error {
 	asrStage := newRealtimeASRStage(c.asr, c.handleASRResult, c.handleSpeechStart)
 	pl, err := realtime.NewPipeline(realtime.PipelineConfig{
-		ASR:         c.asr,
-		ASRStage:    asrStage,
-		Agent:       connAgent,
-		Session:     c.session,
-		TTS:         c.tts,
-		Observer:    nil,
-		AudioSource: nil,
+		ASRStage: asrStage,
+		Agent:    connAgent,
+		Session:  c.session,
+		TTS:      c.tts,
 	})
 	if err != nil {
 		return fmt.Errorf("build realtime pipeline: %w", err)
