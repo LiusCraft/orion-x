@@ -22,14 +22,15 @@ import (
 	"github.com/liuscraft/orion-x/internal/channels/xiaozhi/wsproto"
 	"github.com/liuscraft/orion-x/internal/config"
 	"github.com/liuscraft/orion-x/internal/knowledge"
-	"github.com/liuscraft/orion-x/internal/provider/llm"
-	llmprovider "github.com/liuscraft/orion-x/internal/provider/llm/provider"
 	"github.com/liuscraft/orion-x/internal/logging"
 	"github.com/liuscraft/orion-x/internal/memory"
 	providerpool "github.com/liuscraft/orion-x/internal/provider"
+	"github.com/liuscraft/orion-x/internal/provider/llm"
+	llmprovider "github.com/liuscraft/orion-x/internal/provider/llm/provider"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/task"
 	"github.com/liuscraft/orion-x/internal/tools"
+	"github.com/liuscraft/orion-x/internal/voice"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
@@ -722,18 +723,14 @@ func (s *XiaozhiWSChannel) newConnection(rawConn *websocket.Conn, hello *wsproto
 	}
 
 	outputGateway := NewWSOutputStage(safeConn, sessionID, outputCodec, ttsSampleRate, frameDurationMs, preBufferFrames)
-	pl, err := pipeline.NewDAGBuilder().
-		AddStage(audio.NewASRStage(asrProc, audioSrc)).
-		AddStage(agent.NewAgentStage(connAgent, sess)).
-		AddStage(audio.NewTTSStage(ttsProc)).
-		AddStage(audio.NewOutputStage()).
-		Connect("asr", "agent").
-		Connect("asr", "session_output").
-		Connect("agent", "tts").
-		Connect("agent", "session_output").
-		Connect("tts", "session_output").
-		SetObserver(pipeline.NewLoggingObserver(false)).
-		Build()
+	pl, err := voice.NewPipeline(voice.PipelineConfig{
+		ASR:         asrProc,
+		AudioSource: audioSrc,
+		Agent:       connAgent,
+		Session:     sess,
+		TTS:         ttsProc,
+		Observer:    pipeline.NewLoggingObserver(false),
+	})
 	if err != nil {
 		_ = ttsProc.Stop()
 		cancel()

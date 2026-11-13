@@ -25,6 +25,7 @@ import (
 	"github.com/liuscraft/orion-x/internal/realtime"
 	"github.com/liuscraft/orion-x/internal/session"
 	"github.com/liuscraft/orion-x/internal/tools"
+	"github.com/liuscraft/orion-x/internal/voice"
 	"github.com/liuscraft/orion-x/pkg/pipeline"
 )
 
@@ -329,17 +330,12 @@ type connection struct {
 
 func (c *connection) setupPipeline(connAgent *agent.Agent) error {
 	asrStage := newRealtimeASRStage(c.asr, c.handleASRResult, c.handleSpeechStart)
-	pl, err := pipeline.NewDAGBuilder().
-		AddStage(asrStage).
-		AddStage(agent.NewAgentStage(connAgent, c.session)).
-		AddStage(audio.NewTTSStage(c.tts)).
-		AddStage(audio.NewOutputStage()).
-		Connect("asr", "agent").
-		Connect("asr", "session_output").
-		Connect("agent", "tts").
-		Connect("agent", "session_output").
-		Connect("tts", "session_output").
-		Build()
+	pl, err := voice.NewPipeline(voice.PipelineConfig{
+		ASRStage: asrStage,
+		Agent:    connAgent,
+		Session:  c.session,
+		TTS:      c.tts,
+	})
 	if err != nil {
 		return fmt.Errorf("build realtime pipeline: %w", err)
 	}
