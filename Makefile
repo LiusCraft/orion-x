@@ -16,21 +16,22 @@ GO := GOTOOLCHAIN=$(GO_TOOLCHAIN) $(CGO_FLAGS) go
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build build-voicebot run-voicebot build-wsserver run-wsserver build-manager build-tools run-manager install-frontend dev-frontend build-frontend swagger test test-audio lint clean
+.PHONY: help all build build-voicebot run-voicebot build-wsserver run-wsserver build-realtime run-realtime build-manager build-tools run-manager install-frontend dev-frontend build-frontend swagger test test-audio lint clean
 
 help:
 	@echo "Usage: make <target>"
 	@echo ""
-	@echo "  build             Build voicebot, wsserver, manager, and tools"
+	@echo "  build             Build voicebot, wsserver, realtime, manager, and tools"
 	@echo "  run-voicebot      Run the local voicebot CLI"
 	@echo "  run-wsserver      Run the WebSocket voice server"
+	@echo "  run-realtime      Run the OpenAI Realtime GA server"
 	@echo "  run-manager       Run the web management server"
 	@echo "  frontend          Install/develop/build: install-frontend, dev-frontend, build-frontend"
 	@echo "  quality           Run tests, audio tests, or lint: test, test-audio, lint"
 
 all: build
 
-build: build-voicebot build-wsserver build-manager build-tools
+build: build-voicebot build-wsserver build-realtime build-manager build-tools
 
 build-voicebot:
 	mkdir -p bin
@@ -47,6 +48,13 @@ build-wsserver:
 
 run-wsserver: build-wsserver
 	./bin/wsserver$(BIN_EXT) -config data/wsserver.yaml
+
+build-realtime:
+	mkdir -p bin
+	$(GO) build -o bin/realtime$(BIN_EXT) ./cmd/realtime
+
+run-realtime: build-realtime
+	./bin/realtime$(BIN_EXT) -config data/wsserver.yaml
 
 build-manager:
 	mkdir -p bin
